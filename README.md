@@ -13,7 +13,7 @@ Download the appropriate package for your operating system and install:
 
 [![Download for Windows][1]][2] [![Download for macOS][3]][4]
 
-> [!NOTE]
+> [!NOTE]  
 > Current releases are not code-signed. You may see security warnings on first run:
 >
 > - **macOS**: Right-click the app → "Open" (first time only)
@@ -36,7 +36,8 @@ npm run tauri:dev
 npm run tauri:build
 ```
 
-> [!NOTE] > **Need detailed setup instructions?** See [SETUP.md](SETUP.md) for complete installation guide, prerequisites, and troubleshooting.
+> [!NOTE]  
+> **Need detailed setup instructions?** See [SETUP.md](SETUP.md) for complete installation guide, prerequisites, and troubleshooting.
 
 ## ✨ Features
 
