@@ -1,0 +1,121 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Base colors */
+    --background: 0 0% 4%;           /* #0a0a0a - Main background */
+    --foreground: 0 0% 98%;          /* #fafafa - Main text */
+
+    /* Card colors - using dark navy */
+    --card: 199 74% 10%;             /* #05212D - Card background */
+    --card-foreground: 0 0% 98%;     /* #fafafa - Card text */
+
+    /* Popover colors */
+    --popover: 199 74% 10%;          /* #05212D */
+    --popover-foreground: 0 0% 98%;  /* #fafafa */
+
+    /* Primary colors - using bright blue for highlights */
+    --primary: 198 86% 58%;          /* #35B6F2 - Bright blue highlight */
+    --primary-foreground: 0 0% 4%;   /* #0a0a0a - Dark text on blue */
+
+    /* Secondary colors - using dark navy */
+    --secondary: 199 74% 10%;        /* #05212D - Dark navy */
+    --secondary-foreground: 0 0% 98%; /* #fafafa */
+
+    /* Muted colors */
+    --muted: 199 74% 15%;            /* Slightly lighter navy */
+    --muted-foreground: 0 0% 64%;    /* Gray text */
+
+    /* Accent colors - using bright blue */
+    --accent: 198 86% 58%;           /* #35B6F2 */
+    --accent-foreground: 0 0% 4%;    /* #0a0a0a */
+
+    /* Destructive colors */
+    --destructive: 0 84.2% 60.2%;    /* Red */
+    --destructive-foreground: 0 0% 98%;
+
+    /* Border and input */
+    --border: 199 74% 15%;           /* Slightly lighter navy */
+    --input: 199 74% 12%;            /* Dark navy for inputs */
+    --ring: 198 86% 58%;             /* #35B6F2 - Blue focus ring */
+
+    --radius: 0.5rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "rlig" 1, "calt" 1;
+  }
+}
+
+@layer components {
+  /* Enhanced button hover effects */
+  .group:hover .group-hover\:scale-105 {
+    transform: scale(1.05);
+  }
+
+  /* Progress bar glow effect */
+  [role="progressbar"] > div {
+    box-shadow: 0 0 10px rgba(53, 182, 242, 0.3);
+  }
+
+  /* Card hover effects */
+  .hover\:shadow-lg:hover {
+    box-shadow: 0 10px 30px -5px rgba(53, 182, 242, 0.2);
+  }
+
+  /* Primary badge glow */
+  .bg-primary {
+    box-shadow: 0 0 15px rgba(53, 182, 242, 0.2);
+  }
+
+  /* Focus ring enhancement */
+  *:focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+  }
+
+  /* Smooth transitions for interactive elements */
+  button, a, [role="button"] {
+    transition: all 0.2s ease-in-out;
+  }
+
+  /* Card subtle gradient */
+  [class*="bg-card"] {
+    background: linear-gradient(135deg,
+      hsl(var(--card)) 0%,
+      hsl(199 74% 12%) 100%
+    );
+  }
+
+  /* Step indicator active state enhancement */
+  .ring-primary\/20 {
+    box-shadow: 0 0 20px rgba(53, 182, 242, 0.3);
+  }
+
+  /* Scrollbar styling */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: hsl(var(--background));
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--muted));
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--accent));
+  }
+}
