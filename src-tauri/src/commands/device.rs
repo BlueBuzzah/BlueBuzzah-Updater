@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Device {
@@ -46,7 +46,7 @@ pub async fn detect_devices() -> Result<Vec<Device>, String> {
     #[cfg(target_os = "windows")]
     {
         use std::ffi::OsString;
-        use std::os::windows::ffi::OsStringExt;
+        use std::os::windows::ffi::OsStrExt;
         use winapi::um::fileapi::GetLogicalDrives;
         use winapi::um::fileapi::GetVolumeInformationW;
 
