@@ -151,6 +151,6 @@ Copyright (c) 2025 BlueBuzzah Partners
 - **Questions**: Open a discussion or issue
 
 [1]: assets/download-windows.png
-[2]: https://github.com/BlueBuzzah/BlueBuzzah-Updater/releases/latest/download/BlueBuzzah-Updater.msi "Download for Windows"
+[2]: https://github.com/BlueBuzzah/BlueBuzzah-Updater/releases/latest/download/BlueBuzzah-Updater-x64.msi "Download for Windows"
 [3]: assets/download-macos.png
-[4]: https://github.com/BlueBuzzah/BlueBuzzah-Updater/releases/latest/download/BlueBuzzah-Updater.dmg "Download for macOS"
+[4]: https://github.com/BlueBuzzah/BlueBuzzah-Updater/releases/latest/download/BlueBuzzah-Updater-universal.dmg "Download for macOS"
