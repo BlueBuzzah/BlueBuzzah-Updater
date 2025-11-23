@@ -1,7 +1,7 @@
 # BlueBuzzah Updater
 
-![BlueBuzzah Updater](https://img.shields.io/badge/version-1.0.0-blue.svg)
-![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Windows-lightgrey.svg)
+![BlueBuzzah Updater](https://img.shields.io/github/v/release/BlueBuzzah/BlueBuzzah-Updater?label=version)
+![Downloads](https://img.shields.io/github/downloads/BlueBuzzah/BlueBuzzah-Updater/total)
 
 Device firmware updater for BlueBuzzah devices.
 
@@ -25,7 +25,7 @@ Download the appropriate package for your operating system and install:
 
 ```bash
 # Clone and install
-git clone <repository-url>
+git clone https://github.com/BlueBuzzah/BlueBuzzah-Updater.git
 cd BlueBuzzah-Updater
 npm install
 
@@ -143,12 +143,6 @@ Contributions are welcome! Please:
 MIT License - see [LICENSE](LICENSE) file for details.
 
 Copyright (c) 2025 BlueBuzzah Partners
-
-## 💬 Support
-
-- **Issues**: [GitHub Issue Tracker](../../issues)
-- **Documentation**: See docs above
-- **Questions**: Open a discussion or issue
 
 [1]: assets/download-windows.png
 [2]: https://github.com/BlueBuzzah/BlueBuzzah-Updater/releases/latest/download/BlueBuzzah-Updater-x64.msi "Download for Windows"
