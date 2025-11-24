@@ -233,3 +233,291 @@ impl CacheManager {
         Ok(migrated_versions)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    fn create_test_metadata(version: &str) -> CachedFirmwareMetadata {
+        CachedFirmwareMetadata {
+            version: version.to_string(),
+            tag_name: format!("v{}", version),
+            sha256_hash: "abc123def456".to_string(),
+            zip_path: "/path/to/zip".to_string(),
+            extracted_path: "/path/to/extracted".to_string(),
+            downloaded_at: "2024-01-01T00:00:00Z".to_string(),
+            file_size: 1024,
+            published_at: "2024-01-01T00:00:00Z".to_string(),
+            release_notes: "Test release".to_string(),
+        }
+    }
+
+    #[test]
+    fn test_calculate_sha256_valid_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("test.txt");
+        fs::write(&file_path, "hello world").unwrap();
+
+        let hash = CacheManager::calculate_sha256(&file_path).unwrap();
+        // SHA256 of "hello world"
+        assert_eq!(
+            hash,
+            "b94d27b9934d3e08a52e52d7da7dabfac484efe37a5380ee9088f7ace2efcde9"
+        );
+    }
+
+    #[test]
+    fn test_calculate_sha256_empty_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("empty.txt");
+        fs::write(&file_path, "").unwrap();
+
+        let hash = CacheManager::calculate_sha256(&file_path).unwrap();
+        // SHA256 of empty string
+        assert_eq!(
+            hash,
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+    }
+
+    #[test]
+    fn test_calculate_sha256_missing_file() {
+        let result = CacheManager::calculate_sha256(Path::new("/nonexistent/file.txt"));
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Failed to open file"));
+    }
+
+    #[test]
+    fn test_load_index_missing_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
+
+        let index = cache_manager.load_index().unwrap();
+        assert!(index.is_empty());
+    }
+
+    #[test]
+    fn test_save_and_load_index() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
+
+        let mut index: FirmwareCacheIndex = HashMap::new();
+        index.insert("v1.0.0".to_string(), create_test_metadata("1.0.0"));
+
+        cache_manager.save_index(&index).unwrap();
+        let loaded = cache_manager.load_index().unwrap();
+
+        assert_eq!(loaded.len(), 1);
+        assert!(loaded.contains_key("v1.0.0"));
+        assert_eq!(loaded.get("v1.0.0").unwrap().sha256_hash, "abc123def456");
+    }
+
+    #[test]
+    fn test_update_entry() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
+
+        let metadata = create_test_metadata("2.0.0");
+        cache_manager.update_entry(metadata).unwrap();
+
+        let index = cache_manager.load_index().unwrap();
+        assert!(index.contains_key("2.0.0"));
+        assert_eq!(index.get("2.0.0").unwrap().version, "2.0.0");
+    }
+
+    #[test]
+    fn test_update_entry_overwrites() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
+
+        let metadata1 = CachedFirmwareMetadata {
+            release_notes: "First version".to_string(),
+            ..create_test_metadata("1.0.0")
+        };
+        cache_manager.update_entry(metadata1).unwrap();
+
+        let metadata2 = CachedFirmwareMetadata {
+            release_notes: "Updated version".to_string(),
+            ..create_test_metadata("1.0.0")
+        };
+        cache_manager.update_entry(metadata2).unwrap();
+
+        let index = cache_manager.load_index().unwrap();
+        assert_eq!(index.len(), 1);
+        assert_eq!(
+            index.get("1.0.0").unwrap().release_notes,
+            "Updated version"
+        );
+    }
+
+    #[test]
+    fn test_remove_entry() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
+
+        // Add an entry
+        cache_manager
+            .update_entry(create_test_metadata("1.0.0"))
+            .unwrap();
+
+        // Remove it
+        cache_manager.remove_entry("1.0.0").unwrap();
+
+        let index = cache_manager.load_index().unwrap();
+        assert!(!index.contains_key("1.0.0"));
+    }
+
+    #[test]
+    fn test_remove_nonexistent_entry() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
+
+        // Should not error when removing nonexistent entry
+        let result = cache_manager.remove_entry("nonexistent");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_get_entry_exists() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
+
+        cache_manager
+            .update_entry(create_test_metadata("1.0.0"))
+            .unwrap();
+
+        let entry = cache_manager.get_entry("1.0.0").unwrap();
+        assert!(entry.is_some());
+        assert_eq!(entry.unwrap().version, "1.0.0");
+    }
+
+    #[test]
+    fn test_get_entry_not_exists() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
+
+        let entry = cache_manager.get_entry("nonexistent").unwrap();
+        assert!(entry.is_none());
+    }
+
+    #[test]
+    fn test_clear_index() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
+
+        // Add entries
+        cache_manager
+            .update_entry(create_test_metadata("1.0.0"))
+            .unwrap();
+        cache_manager
+            .update_entry(create_test_metadata("2.0.0"))
+            .unwrap();
+
+        // Clear
+        cache_manager.clear_index().unwrap();
+
+        let index = cache_manager.load_index().unwrap();
+        assert!(index.is_empty());
+    }
+
+    #[test]
+    fn test_verify_cache_integrity_missing_files() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
+
+        // Add entry pointing to non-existent files
+        let metadata = CachedFirmwareMetadata {
+            zip_path: "/nonexistent/path.zip".to_string(),
+            extracted_path: "/nonexistent/extracted".to_string(),
+            ..create_test_metadata("1.0.0")
+        };
+        cache_manager.update_entry(metadata).unwrap();
+
+        let missing = cache_manager.verify_cache_integrity().unwrap();
+        assert_eq!(missing, vec!["1.0.0"]);
+    }
+
+    #[test]
+    fn test_verify_cache_integrity_valid_files() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
+
+        // Create actual files
+        let zip_path = temp_dir.path().join("v1.0.0.zip");
+        let extracted_path = temp_dir.path().join("v1.0.0");
+        fs::write(&zip_path, "test zip content").unwrap();
+        fs::create_dir(&extracted_path).unwrap();
+
+        let metadata = CachedFirmwareMetadata {
+            zip_path: zip_path.to_string_lossy().to_string(),
+            extracted_path: extracted_path.to_string_lossy().to_string(),
+            ..create_test_metadata("1.0.0")
+        };
+        cache_manager.update_entry(metadata).unwrap();
+
+        let missing = cache_manager.verify_cache_integrity().unwrap();
+        assert!(missing.is_empty());
+    }
+
+    #[test]
+    fn test_verify_hash_valid() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
+
+        // Create zip file and calculate its hash
+        let zip_path = temp_dir.path().join("v1.0.0.zip");
+        fs::write(&zip_path, "test content").unwrap();
+        let hash = CacheManager::calculate_sha256(&zip_path).unwrap();
+
+        let metadata = CachedFirmwareMetadata {
+            sha256_hash: hash,
+            zip_path: zip_path.to_string_lossy().to_string(),
+            ..create_test_metadata("1.0.0")
+        };
+        cache_manager.update_entry(metadata).unwrap();
+
+        assert!(cache_manager.verify_hash("1.0.0").unwrap());
+    }
+
+    #[test]
+    fn test_verify_hash_invalid() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
+
+        // Create zip file with different content than hash
+        let zip_path = temp_dir.path().join("v1.0.0.zip");
+        fs::write(&zip_path, "actual content").unwrap();
+
+        let metadata = CachedFirmwareMetadata {
+            sha256_hash: "wrong_hash_value".to_string(),
+            zip_path: zip_path.to_string_lossy().to_string(),
+            ..create_test_metadata("1.0.0")
+        };
+        cache_manager.update_entry(metadata).unwrap();
+
+        assert!(!cache_manager.verify_hash("1.0.0").unwrap());
+    }
+
+    #[test]
+    fn test_verify_hash_missing_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
+
+        let metadata = CachedFirmwareMetadata {
+            zip_path: "/nonexistent/file.zip".to_string(),
+            ..create_test_metadata("1.0.0")
+        };
+        cache_manager.update_entry(metadata).unwrap();
+
+        assert!(!cache_manager.verify_hash("1.0.0").unwrap());
+    }
+
+    #[test]
+    fn test_verify_hash_nonexistent_version() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
+
+        assert!(!cache_manager.verify_hash("nonexistent").unwrap());
+    }
+}

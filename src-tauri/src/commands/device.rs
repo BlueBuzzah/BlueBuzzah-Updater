@@ -446,3 +446,74 @@ pub async fn find_renamed_volume(_old_path: String, expected_name: String) -> Re
         Ok(_old_path)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn test_count_files_empty_dir() {
+        let temp_dir = TempDir::new().unwrap();
+        let count = count_files(temp_dir.path()).unwrap();
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_count_files_single_file() {
+        let temp_dir = TempDir::new().unwrap();
+        fs::write(temp_dir.path().join("file.txt"), "content").unwrap();
+
+        let count = count_files(temp_dir.path()).unwrap();
+        assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_count_files_multiple_files() {
+        let temp_dir = TempDir::new().unwrap();
+        fs::write(temp_dir.path().join("file1.txt"), "content").unwrap();
+        fs::write(temp_dir.path().join("file2.txt"), "content").unwrap();
+        fs::write(temp_dir.path().join("file3.txt"), "content").unwrap();
+
+        let count = count_files(temp_dir.path()).unwrap();
+        assert_eq!(count, 3);
+    }
+
+    #[test]
+    fn test_count_files_nested_directories() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // Create nested structure
+        fs::write(temp_dir.path().join("root.txt"), "content").unwrap();
+        fs::create_dir(temp_dir.path().join("subdir")).unwrap();
+        fs::write(temp_dir.path().join("subdir/nested.txt"), "content").unwrap();
+        fs::create_dir(temp_dir.path().join("subdir/deep")).unwrap();
+        fs::write(temp_dir.path().join("subdir/deep/deep.txt"), "content").unwrap();
+
+        let count = count_files(temp_dir.path()).unwrap();
+        // Should count only files, not directories: root.txt, nested.txt, deep.txt
+        assert_eq!(count, 3);
+    }
+
+    #[test]
+    fn test_count_files_only_directories() {
+        let temp_dir = TempDir::new().unwrap();
+        fs::create_dir(temp_dir.path().join("dir1")).unwrap();
+        fs::create_dir(temp_dir.path().join("dir2")).unwrap();
+
+        let count = count_files(temp_dir.path()).unwrap();
+        // Directories should not be counted
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn test_count_files_single_file_path() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("single.txt");
+        fs::write(&file_path, "content").unwrap();
+
+        // Counting a single file should return 1
+        let count = count_files(&file_path).unwrap();
+        assert_eq!(count, 1);
+    }
+}
