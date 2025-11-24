@@ -406,3 +406,43 @@ pub async fn rename_volume(device_path: String, new_name: String) -> Result<(), 
 
     Ok(())
 }
+
+#[tauri::command]
+pub async fn find_renamed_volume(_old_path: String, expected_name: String) -> Result<String, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let volumes = Path::new("/Volumes");
+
+        // First try the expected name
+        let expected_path = volumes.join(&expected_name);
+        if expected_path.exists() {
+            // Verify it has boot_out.txt to confirm it's our device
+            if expected_path.join("boot_out.txt").exists() {
+                return Ok(expected_path.to_string_lossy().to_string());
+            }
+        }
+
+        // Try variations with numbers (BLUEBUZZAH 1, BLUEBUZZAH 2, etc.)
+        for i in 1..10 {
+            let variant_name = format!("{} {}", expected_name, i);
+            let variant_path = volumes.join(&variant_name);
+            if variant_path.exists() && variant_path.join("boot_out.txt").exists() {
+                return Ok(variant_path.to_string_lossy().to_string());
+            }
+        }
+
+        // Fallback: return the expected path even if not found
+        return Ok(expected_path.to_string_lossy().to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // On Windows, the path doesn't change (drive letter stays same)
+        return Ok(_old_path);
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        Ok(_old_path)
+    }
+}

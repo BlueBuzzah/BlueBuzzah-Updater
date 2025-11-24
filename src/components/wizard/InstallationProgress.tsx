@@ -227,18 +227,24 @@ export function InstallationProgress({
   };
 
   const getOverallProgress = () => {
+    if (stage === 'validating') {
+      return 0; // Validation happens before download
+    }
+
     if (stage === 'downloading') {
-      return downloadProgress * 0.2; // 20% for download
+      return Math.min(downloadProgress * 0.2, 20); // 20% for download, capped
     }
 
     if (stage === 'installing') {
       const deviceProgressSum = Array.from(deviceProgress.values()).reduce(
-        (sum, p) => sum + p.progress,
+        (sum, p) => sum + Math.min(p.progress, 100), // Cap each device at 100%
         0
       );
       const avgDeviceProgress =
         devices.length > 0 ? deviceProgressSum / devices.length : 0;
-      return 20 + avgDeviceProgress * 0.8; // 80% for installation
+      // Overall formula: 20% download + 80% installation
+      // Cap the result at 100% to prevent overflow
+      return Math.min(20 + avgDeviceProgress * 0.8, 100);
     }
 
     return 100;

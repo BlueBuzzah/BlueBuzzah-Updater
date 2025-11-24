@@ -1,13 +1,13 @@
-import { invoke, Channel } from '@tauri-apps/api/core';
-import {
-  Device,
-  FirmwareBundle,
-  UpdateResult,
-  DeviceUpdateResult,
-  UpdateProgress,
-  ValidationResult,
-} from '@/types';
 import { getConfigForRole } from '@/lib/config-templates';
+import {
+	Device,
+	DeviceUpdateResult,
+	FirmwareBundle,
+	UpdateProgress,
+	UpdateResult,
+	ValidationResult,
+} from '@/types';
+import { Channel, invoke } from '@tauri-apps/api/core';
 
 export interface IDeviceRepository {
   detectDevices(): Promise<Device[]>;
@@ -75,12 +75,17 @@ export class DeviceService implements IDeviceRepository {
 
       progressChannel.onmessage = (message) => {
         if (onProgress) {
-          const progress = (message.completed_files / message.total_files) * 100;
+          // Calculate progress as 0-80% of total (leaving 80-100% for configuring)
+          // Cap at 80 to ensure we never exceed this phase
+          const copyProgress = Math.min(
+            (message.completed_files / message.total_files) * 80,
+            80
+          );
           onProgress({
             devicePath: device.path,
             stage: 'copying',
             currentFile: message.current_file,
-            progress,
+            progress: copyProgress,
             message: `Copying ${message.current_file}...`,
           });
         }
@@ -97,7 +102,7 @@ export class DeviceService implements IDeviceRepository {
         onProgress({
           devicePath: device.path,
           stage: 'configuring',
-          progress: 90,
+          progress: 80,
           message: 'Writing configuration...',
         });
       }
@@ -119,7 +124,7 @@ export class DeviceService implements IDeviceRepository {
         onProgress({
           devicePath: device.path,
           stage: 'configuring',
-          progress: 95,
+          progress: 90,
           message: 'Renaming volume...',
         });
       }
@@ -127,25 +132,27 @@ export class DeviceService implements IDeviceRepository {
       try {
         await this.renameVolume(device, 'BLUEBUZZAH');
 
-        // Calculate new device path after rename
-        const newLabel = 'BLUEBUZZAH';
-        let newPath = device.path;
+        // Find the actual path after rename (macOS may append " 1", " 2", etc.)
+        const actualPath = await invoke<string>('find_renamed_volume', {
+          oldPath: device.path,
+          expectedName: 'BLUEBUZZAH',
+        });
 
-        // On macOS, path is /Volumes/{label}
-        if (device.path.startsWith('/Volumes/')) {
-          newPath = `/Volumes/${newLabel}`;
+        // Extract label from the actual path
+        let newLabel = 'BLUEBUZZAH';
+        if (actualPath.startsWith('/Volumes/')) {
+          newLabel = actualPath.split('/').pop() || 'BLUEBUZZAH';
         }
-        // On Windows, path is {drive}:\ - path doesn't change, only label
 
         // Notify progress callback with new device info
         if (onProgress) {
           onProgress({
             devicePath: device.path,
             stage: 'configuring',
-            progress: 98,
+            progress: 95,
             message: 'Volume renamed successfully',
             newDeviceLabel: newLabel,
-            newDevicePath: newPath,
+            newDevicePath: actualPath,
           });
         }
       } catch (error) {
