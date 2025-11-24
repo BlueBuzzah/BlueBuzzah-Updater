@@ -7,9 +7,13 @@ export default defineConfig({
   plugins: [react()],
   test: {
     globals: true,
-    environment: 'node',
+    environment: 'jsdom',
     include: ['src/**/*.{test,spec}.{ts,tsx}'],
     exclude: ['node_modules', 'src-tauri'],
+    setupFiles: ['./src/test/setup.ts'],
+    // Disable vitest's console output capture to keep test output clean
+    // Console calls are mocked and asserted in tests instead
+    silent: true,
   },
   resolve: {
     alias: {
