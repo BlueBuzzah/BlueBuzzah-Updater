@@ -265,3 +265,99 @@ pub async fn write_config(device_path: String, _role: String, config_content: St
 
     Ok(())
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ValidationInfo {
+    pub valid: bool,
+    pub errors: Vec<String>,
+    pub warnings: Vec<String>,
+    pub available_space_mb: Option<f64>,
+    pub required_space_mb: Option<f64>,
+}
+
+#[tauri::command]
+pub async fn validate_device(device_path: String) -> Result<ValidationInfo, String> {
+    let mut validation = ValidationInfo {
+        valid: true,
+        errors: Vec::new(),
+        warnings: Vec::new(),
+        available_space_mb: None,
+        required_space_mb: Some(10.0), // Typical firmware is ~5-10MB
+    };
+
+    let path = Path::new(&device_path);
+
+    // Check 1: Device path exists
+    if !path.exists() {
+        validation.valid = false;
+        validation.errors.push(format!(
+            "Device not found at {}. Please ensure the device is connected and mounted.",
+            device_path
+        ));
+        return Ok(validation);
+    }
+
+    // Check 2: Device path is a directory
+    if !path.is_dir() {
+        validation.valid = false;
+        validation.errors.push(format!(
+            "Device path {} is not a directory.",
+            device_path
+        ));
+        return Ok(validation);
+    }
+
+    // Check 3: Device is writable (test write)
+    let test_file = path.join(".bluebuzzah_test_write");
+    match fs::write(&test_file, "test") {
+        Ok(_) => {
+            // Clean up test file
+            let _ = fs::remove_file(&test_file);
+        }
+        Err(e) => {
+            validation.valid = false;
+            validation.errors.push(format!(
+                "Device is not writable: {}. Check if the device is write-protected or you lack permissions.",
+                e
+            ));
+            return Ok(validation);
+        }
+    }
+
+    // Check 4: Available disk space
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if let Ok(metadata) = fs::metadata(path) {
+            // On macOS, we can get block size and blocks available
+            let block_size = metadata.blksize();
+            let blocks = metadata.blocks();
+            let available_bytes = block_size * blocks;
+            let available_mb = (available_bytes as f64) / (1024.0 * 1024.0);
+            validation.available_space_mb = Some(available_mb);
+
+            if available_mb < 10.0 {
+                validation.valid = false;
+                validation.errors.push(format!(
+                    "Insufficient disk space. Available: {:.1} MB, Required: 10 MB",
+                    available_mb
+                ));
+            } else if available_mb < 20.0 {
+                validation.warnings.push(format!(
+                    "Low disk space. Available: {:.1} MB. Consider freeing up space.",
+                    available_mb
+                ));
+            }
+        }
+    }
+
+    // Check 5: Verify it's likely a CircuitPython device
+    let boot_out = path.join("boot_out.txt");
+    if !boot_out.exists() {
+        validation.warnings.push(
+            "boot_out.txt not found. This may not be a CircuitPython device.".to_string()
+        );
+    }
+
+    Ok(validation)
+}

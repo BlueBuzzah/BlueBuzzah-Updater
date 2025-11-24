@@ -1,24 +1,24 @@
-import { useEffect, useState } from 'react';
-import { HardDrive, RefreshCw, AlertCircle, CheckCircle2 } from 'lucide-react';
-import { deviceService } from '@/services/DeviceService';
-import { Device, DeviceRole } from '@/types';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
+	Card,
+	CardContent,
+	CardDescription,
+	CardHeader,
+	CardTitle,
 } from '@/components/ui/card';
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+	Select,
+	SelectContent,
+	SelectItem,
+	SelectTrigger,
+	SelectValue,
 } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
-import { Badge } from '@/components/ui/badge';
+import { deviceService } from '@/services/DeviceService';
+import { Device, DeviceRole } from '@/types';
+import { AlertCircle, CheckCircle2, HardDrive, RefreshCw } from 'lucide-react';
+import { useEffect, useState } from 'react';
 
 interface DeviceSelectionProps {
   selectedDevices: Device[];
@@ -147,11 +147,11 @@ export function DeviceSelection({
           <CardContent className="pt-6 pb-6 text-center">
             <AlertCircle className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
             <h3 className="text-lg font-semibold mb-2">
-              No CircuitPython Devices Found
+              No BlueBuzzah Devices Found
             </h3>
             <p className="text-sm text-muted-foreground mb-4">
               Make sure your BlueBuzzah device is connected via USB and mounted
-              as CIRCUITPY
+              as BLUEBUZZAH or CIRCUITPY
             </p>
             <div className="text-sm text-left bg-muted p-4 rounded-md space-y-2">
               <p className="font-semibold">Troubleshooting:</p>

@@ -57,12 +57,21 @@ export interface DeviceUpdateResult {
   error?: string;
 }
 
+export interface ValidationResult {
+  valid: boolean;
+  errors: string[];
+  warnings: string[];
+  availableSpaceMB?: number;
+  requiredSpaceMB?: number;
+}
+
 export interface WizardState {
   currentStep: number;
   selectedRelease: FirmwareRelease | null;
   selectedDevices: Device[];
   updateProgress: Map<string, UpdateProgress>;
   updateResult: UpdateResult | null;
+  validationResults: Map<string, ValidationResult>;
 }
 
 // GitHub API Response Types

@@ -8,10 +8,13 @@ import {
   Trash2,
   Copy,
   Settings,
+  ClipboardCopy,
+  RotateCcw,
 } from 'lucide-react';
 import { Device, FirmwareRelease, UpdateProgress } from '@/types';
 import { firmwareService } from '@/services/FirmwareService';
 import { deviceService } from '@/services/DeviceService';
+import { useWizardStore } from '@/stores/wizardStore';
 import { Progress } from '@/components/ui/progress';
 import {
   Card,
@@ -22,6 +25,8 @@ import {
 } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { getErrorGuidance, formatValidationErrors } from '@/lib/error-messages';
+import { useToast } from '@/components/ui/use-toast';
 
 interface InstallationProgressProps {
   release: FirmwareRelease;
@@ -36,8 +41,10 @@ export function InstallationProgress({
   onComplete,
   onProgressUpdate,
 }: InstallationProgressProps) {
-  const [stage, setStage] = useState<'downloading' | 'installing' | 'complete'>(
-    'downloading'
+  const { reset } = useWizardStore();
+  const { toast } = useToast();
+  const [stage, setStage] = useState<'validating' | 'downloading' | 'installing' | 'complete'>(
+    'validating'
   );
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [deviceProgress, setDeviceProgress] = useState<
@@ -55,8 +62,56 @@ export function InstallationProgress({
     setLogs((prev) => [...prev, `[${new Date().toLocaleTimeString()}] ${message}`]);
   };
 
+  const exportLogs = () => {
+    const logsText = logs.join('\n');
+    navigator.clipboard.writeText(logsText);
+    toast({
+      title: 'Logs copied',
+      description: 'Installation logs have been copied to clipboard',
+    });
+  };
+
+  const handleStartOver = () => {
+    reset();
+  };
+
   const startInstallation = async () => {
     try {
+      // Stage 0: Validate devices
+      addLog('Validating devices before installation...');
+      setStage('validating');
+
+      const validationResults = await deviceService.validateDevices(devices);
+      let hasValidationErrors = false;
+      const validationErrors: string[] = [];
+
+      validationResults.forEach((result, devicePath) => {
+        const device = devices.find((d) => d.path === devicePath);
+        const deviceLabel = device?.label || devicePath;
+
+        if (!result.valid) {
+          hasValidationErrors = true;
+          addLog(`✗ Validation failed for ${deviceLabel}`);
+          result.errors.forEach((err) => {
+            addLog(`  - ${err}`);
+            validationErrors.push(`${deviceLabel}: ${err}`);
+          });
+        } else if (result.warnings.length > 0) {
+          addLog(`⚠ Warnings for ${deviceLabel}`);
+          result.warnings.forEach((warn) => addLog(`  - ${warn}`));
+        } else {
+          addLog(`✓ ${deviceLabel} passed validation`);
+        }
+      });
+
+      if (hasValidationErrors) {
+        throw new Error(
+          `Device validation failed:\n${formatValidationErrors(validationErrors)}`
+        );
+      }
+
+      addLog('All devices passed validation');
+
       // Stage 1: Download firmware
       addLog(`Starting firmware download for version ${release.version}...`);
       setStage('downloading');
@@ -106,6 +161,7 @@ export function InstallationProgress({
       const errorMessage =
         err instanceof Error ? err.message : 'Unknown error occurred';
       setError(errorMessage);
+      setShowLogs(true); // Auto-expand logs on error
       addLog(`✗ Error: ${errorMessage}`);
       onComplete(false);
     }
@@ -152,42 +208,86 @@ export function InstallationProgress({
     <div className="space-y-6">
       <div className="text-center">
         <h2 className="text-2xl font-bold mb-2">
-          {stage === 'downloading' && 'Downloading Firmware'}
-          {stage === 'installing' && 'Installing Firmware'}
-          {stage === 'complete' && 'Installation Complete'}
+          {error && 'Installation Failed'}
+          {!error && stage === 'validating' && 'Validating Devices'}
+          {!error && stage === 'downloading' && 'Downloading Firmware'}
+          {!error && stage === 'installing' && 'Installing Firmware'}
+          {!error && stage === 'complete' && 'Installation Complete'}
         </h2>
         <p className="text-muted-foreground">
-          {stage === 'downloading' &&
+          {error &&
+            'The installation process encountered an error. Please review the details below and try again.'}
+          {!error && stage === 'validating' &&
+            'Checking device connectivity, permissions, and available space...'}
+          {!error && stage === 'downloading' &&
             'Downloading firmware package from GitHub...'}
-          {stage === 'installing' &&
+          {!error && stage === 'installing' &&
             'Installing firmware on selected devices...'}
-          {stage === 'complete' && 'All devices have been updated successfully'}
+          {!error && stage === 'complete' && 'All devices have been updated successfully'}
         </p>
       </div>
 
       {/* Overall Progress */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Overall Progress</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <Progress value={getOverallProgress()} className="h-2" />
-          <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">
-              {stage === 'downloading' && 'Downloading...'}
-              {stage === 'installing' &&
-                `Updating ${devices.length} device${devices.length !== 1 ? 's' : ''}...`}
-              {stage === 'complete' && 'Complete'}
-            </span>
-            <span className="font-medium">
-              {Math.round(getOverallProgress())}%
-            </span>
-          </div>
-        </CardContent>
-      </Card>
+      {!error && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Overall Progress</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <Progress value={getOverallProgress()} className="h-2" />
+            <div className="flex justify-between text-sm">
+              <span className="text-muted-foreground">
+                {stage === 'validating' && 'Validating devices...'}
+                {stage === 'downloading' && 'Downloading...'}
+                {stage === 'installing' &&
+                  `Updating ${devices.length} device${devices.length !== 1 ? 's' : ''}...`}
+                {stage === 'complete' && 'Complete'}
+              </span>
+              <span className="font-medium">
+                {Math.round(getOverallProgress())}%
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Error State Card with Actions */}
+      {error && (
+        <Card className="border-destructive">
+          <CardHeader>
+            <div className="flex items-center gap-2">
+              <XCircle className="h-5 w-5 text-destructive" />
+              <CardTitle className="text-base text-destructive">
+                Installation Failed
+              </CardTitle>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">{error}</p>
+
+            {error && getErrorGuidance(error) && (
+              <div className="space-y-2">
+                <p className="font-semibold text-sm">How to fix this:</p>
+                <ul className="list-disc list-inside text-sm space-y-1 text-muted-foreground">
+                  {getErrorGuidance(error)?.resolutionSteps.map((step, idx) => (
+                    <li key={idx}>{step}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            <div className="pt-2">
+              <Button onClick={handleStartOver}>
+                <RotateCcw className="h-4 w-4 mr-2" />
+                Start Over
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Download Progress */}
-      {stage === 'downloading' && (
+      {stage === 'downloading' && !error && (
         <Card>
           <CardHeader>
             <div className="flex items-center gap-2">
@@ -203,7 +303,7 @@ export function InstallationProgress({
       )}
 
       {/* Device Progress */}
-      {(stage === 'installing' || stage === 'complete') && (
+      {(stage === 'installing' || stage === 'complete') && !error && (
         <div className="space-y-3">
           {devices.map((device) => {
             const progress = deviceProgress.get(device.path);
@@ -270,45 +370,47 @@ export function InstallationProgress({
         </div>
       )}
 
-      {/* Error Display */}
-      {error && (
-        <Card className="border-destructive">
-          <CardHeader>
-            <div className="flex items-center gap-2">
-              <XCircle className="h-5 w-5 text-destructive" />
-              <CardTitle className="text-base text-destructive">
-                Installation Failed
-              </CardTitle>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-muted-foreground">{error}</p>
-          </CardContent>
-        </Card>
-      )}
 
       {/* Logs Section */}
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle className="text-base">Installation Log</CardTitle>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowLogs(!showLogs)}
-            >
-              {showLogs ? 'Hide' : 'Show'} Logs
-            </Button>
+            <div className="flex items-center gap-2">
+              {logs.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={exportLogs}
+                >
+                  <ClipboardCopy className="h-4 w-4 mr-2" />
+                  Copy Logs
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowLogs(!showLogs)}
+              >
+                {showLogs ? 'Hide' : 'Show'} Logs
+              </Button>
+            </div>
           </div>
         </CardHeader>
         {showLogs && (
           <CardContent>
             <div className="bg-muted rounded-md p-4 font-mono text-xs space-y-1 max-h-64 overflow-y-auto">
-              {logs.map((log, index) => (
-                <div key={index} className="text-muted-foreground">
-                  {log}
-                </div>
-              ))}
+              {logs.map((log, index) => {
+                const isError = log.includes('✗ Error');
+                return (
+                  <div
+                    key={index}
+                    className={isError ? 'text-destructive font-semibold' : 'text-muted-foreground'}
+                  >
+                    {log}
+                  </div>
+                );
+              })}
             </div>
           </CardContent>
         )}

@@ -5,6 +5,7 @@ import {
   UpdateResult,
   DeviceUpdateResult,
   UpdateProgress,
+  ValidationResult,
 } from '@/types';
 import { getConfigForRole } from '@/lib/config-templates';
 
@@ -16,6 +17,8 @@ export interface IDeviceRepository {
     onProgress?: (progress: UpdateProgress) => void
   ): Promise<void>;
   wipeDevice(device: Device): Promise<void>;
+  validateDevice(device: Device): Promise<ValidationResult>;
+  validateDevices(devices: Device[]): Promise<Map<string, ValidationResult>>;
 }
 
 export class DeviceService implements IDeviceRepository {
@@ -154,6 +157,54 @@ export class DeviceService implements IDeviceRepository {
           : JSON.stringify(error);
       throw new Error(`Failed to wipe device: ${errorMessage}`);
     }
+  }
+
+  async validateDevice(device: Device): Promise<ValidationResult> {
+    try {
+      const result = await invoke<{
+        valid: boolean;
+        errors: string[];
+        warnings: string[];
+        available_space_mb?: number;
+        required_space_mb?: number;
+      }>('validate_device', {
+        devicePath: device.path,
+      });
+
+      return {
+        valid: result.valid,
+        errors: result.errors,
+        warnings: result.warnings,
+        availableSpaceMB: result.available_space_mb,
+        requiredSpaceMB: result.required_space_mb,
+      };
+    } catch (error) {
+      console.error('Failed to validate device:', error);
+      // Return invalid result on error
+      const errorMessage = typeof error === 'string'
+        ? error
+        : error instanceof Error
+          ? error.message
+          : JSON.stringify(error);
+      return {
+        valid: false,
+        errors: [`Validation failed: ${errorMessage}`],
+        warnings: [],
+      };
+    }
+  }
+
+  async validateDevices(devices: Device[]): Promise<Map<string, ValidationResult>> {
+    const results = new Map<string, ValidationResult>();
+
+    // Validate all devices in parallel
+    const validationPromises = devices.map(async (device) => {
+      const result = await this.validateDevice(device);
+      results.set(device.path, result);
+    });
+
+    await Promise.all(validationPromises);
+    return results;
   }
 
   async performBatchUpdate(

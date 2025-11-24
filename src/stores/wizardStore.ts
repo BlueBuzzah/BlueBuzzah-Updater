@@ -5,6 +5,7 @@ import {
   UpdateProgress,
   UpdateResult,
   WizardState,
+  ValidationResult,
 } from '@/types';
 
 interface WizardStore extends WizardState {
@@ -17,6 +18,7 @@ interface WizardStore extends WizardState {
   updateDeviceRole: (devicePath: string, role: 'PRIMARY' | 'SECONDARY') => void;
   setUpdateProgress: (devicePath: string, progress: UpdateProgress) => void;
   setUpdateResult: (result: UpdateResult) => void;
+  setValidationResults: (results: Map<string, ValidationResult>) => void;
   reset: () => void;
 }
 
@@ -26,6 +28,7 @@ const initialState: WizardState = {
   selectedDevices: [],
   updateProgress: new Map(),
   updateResult: null,
+  validationResults: new Map(),
 };
 
 export const useWizardStore = create<WizardStore>((set) => ({
@@ -58,6 +61,8 @@ export const useWizardStore = create<WizardStore>((set) => ({
     }),
 
   setUpdateResult: (result) => set({ updateResult: result }),
+
+  setValidationResults: (results) => set({ validationResults: results }),
 
   reset: () => set(initialState),
 }));

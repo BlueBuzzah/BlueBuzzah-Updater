@@ -3,7 +3,7 @@
 
 mod commands;
 
-use commands::device::{detect_devices, wipe_device, copy_firmware, write_config};
+use commands::device::{detect_devices, wipe_device, copy_firmware, write_config, validate_device};
 use commands::firmware::{download_firmware, get_cached_firmware};
 
 fn main() {
@@ -17,6 +17,7 @@ fn main() {
             wipe_device,
             copy_firmware,
             write_config,
+            validate_device,
             download_firmware,
             get_cached_firmware
         ])
