@@ -128,7 +128,7 @@ export function FirmwareSelection({
             Loading firmware releases...
           </p>
         </div>
-        <div className="grid gap-4 md:grid-cols-2">
+        <div className="flex flex-col gap-4">
           {[1, 2, 3, 4].map((i) => (
             <Card key={i} className="animate-pulse">
               <CardHeader>
@@ -170,7 +170,7 @@ export function FirmwareSelection({
         </p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="flex flex-col gap-4">
         {releases.map((release, index) => {
           const isExpanded = expandedReleases.has(release.tagName);
           const isSelected = selectedRelease?.tagName === release.tagName;
