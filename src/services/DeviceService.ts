@@ -1,5 +1,4 @@
-import { invoke } from '@tauri-apps/api/core';
-import { listen } from '@tauri-apps/api/event';
+import { invoke, Channel } from '@tauri-apps/api/core';
 import {
   Device,
   FirmwareBundle,
@@ -26,9 +25,13 @@ export class DeviceService implements IDeviceRepository {
       return devices;
     } catch (error) {
       console.error('Failed to detect devices:', error);
-      throw new Error(
-        `Failed to detect devices: ${error instanceof Error ? error.message : 'Unknown error'}`
-      );
+      // Tauri errors are often plain strings, not Error objects
+      const errorMessage = typeof error === 'string'
+        ? error
+        : error instanceof Error
+          ? error.message
+          : JSON.stringify(error);
+      throw new Error(`Failed to detect devices: ${errorMessage}`);
     }
   }
 
@@ -60,31 +63,31 @@ export class DeviceService implements IDeviceRepository {
         });
       }
 
-      // Set up progress listener
-      const unlisten = await listen<{
+      // Create a channel to receive progress updates
+      const progressChannel = new Channel<{
         current_file: string;
         total_files: number;
         completed_files: number;
-      }>('copy-progress', (event) => {
+      }>();
+
+      progressChannel.onmessage = (message) => {
         if (onProgress) {
-          const progress =
-            (event.payload.completed_files / event.payload.total_files) * 100;
+          const progress = (message.completed_files / message.total_files) * 100;
           onProgress({
             devicePath: device.path,
             stage: 'copying',
-            currentFile: event.payload.current_file,
+            currentFile: message.current_file,
             progress,
-            message: `Copying ${event.payload.current_file}...`,
+            message: `Copying ${message.current_file}...`,
           });
         }
-      });
+      };
 
       await invoke('copy_firmware', {
         firmwarePath: firmware.localPath,
         devicePath: device.path,
+        progressCallback: progressChannel,
       });
-
-      unlisten();
 
       // Step 3: Write config
       if (onProgress) {
@@ -119,12 +122,17 @@ export class DeviceService implements IDeviceRepository {
       }
     } catch (error) {
       console.error('Failed to deploy firmware:', error);
+      const errorMessage = typeof error === 'string'
+        ? error
+        : error instanceof Error
+          ? error.message
+          : JSON.stringify(error);
       if (onProgress) {
         onProgress({
           devicePath: device.path,
           stage: 'error',
           progress: 0,
-          message: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+          message: `Error: ${errorMessage}`,
         });
       }
       throw error;
@@ -138,9 +146,13 @@ export class DeviceService implements IDeviceRepository {
       });
     } catch (error) {
       console.error('Failed to wipe device:', error);
-      throw new Error(
-        `Failed to wipe device: ${error instanceof Error ? error.message : 'Unknown error'}`
-      );
+      // Tauri errors are often plain strings, not Error objects
+      const errorMessage = typeof error === 'string'
+        ? error
+        : error instanceof Error
+          ? error.message
+          : JSON.stringify(error);
+      throw new Error(`Failed to wipe device: ${errorMessage}`);
     }
   }
 

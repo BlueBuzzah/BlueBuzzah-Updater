@@ -2,6 +2,9 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 
+#[cfg(target_os = "windows")]
+use std::path::PathBuf;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Device {
     pub path: String,
@@ -109,25 +112,36 @@ pub async fn wipe_device(device_path: String) -> Result<(), String> {
     }
 
     // Read directory and remove all files/folders except the volume root
-    if let Ok(entries) = fs::read_dir(path) {
-        for entry in entries.flatten() {
-            let entry_path = entry.path();
-            let file_name = entry_path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("");
+    let entries = fs::read_dir(path)
+        .map_err(|e| format!("Failed to read device directory {:?}: {}. Check permissions and ensure the device is mounted.", device_path, e))?;
 
-            // Skip system files on macOS
-            if file_name.starts_with('.') {
-                continue;
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
+        let entry_path = entry.path();
+        let file_name = entry_path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("");
+
+        // Skip system files on macOS and hidden files
+        if file_name.starts_with('.') {
+            continue;
+        }
+
+        // Attempt to remove, but gracefully handle files that no longer exist
+        if entry_path.is_dir() {
+            if let Err(e) = fs::remove_dir_all(&entry_path) {
+                // Ignore "not found" errors - if it's already gone, that's fine
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    return Err(format!("Failed to remove directory {:?}: {}. The file may be in use or you may lack permissions.", entry_path, e));
+                }
             }
-
-            if entry_path.is_dir() {
-                fs::remove_dir_all(&entry_path)
-                    .map_err(|e| format!("Failed to remove directory {:?}: {}", entry_path, e))?;
-            } else {
-                fs::remove_file(&entry_path)
-                    .map_err(|e| format!("Failed to remove file {:?}: {}", entry_path, e))?;
+        } else {
+            if let Err(e) = fs::remove_file(&entry_path) {
+                // Ignore "not found" errors - if it's already gone, that's fine
+                if e.kind() != std::io::ErrorKind::NotFound {
+                    return Err(format!("Failed to remove file {:?}: {}. The file may be in use or read-only.", entry_path, e));
+                }
             }
         }
     }
