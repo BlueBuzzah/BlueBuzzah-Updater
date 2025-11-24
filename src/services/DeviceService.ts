@@ -114,7 +114,46 @@ export class DeviceService implements IDeviceRepository {
         configContent,
       });
 
-      // Step 4: Complete
+      // Step 4: Rename volume
+      if (onProgress) {
+        onProgress({
+          devicePath: device.path,
+          stage: 'configuring',
+          progress: 95,
+          message: 'Renaming volume...',
+        });
+      }
+
+      try {
+        await this.renameVolume(device, 'BLUEBUZZAH');
+
+        // Calculate new device path after rename
+        const newLabel = 'BLUEBUZZAH';
+        let newPath = device.path;
+
+        // On macOS, path is /Volumes/{label}
+        if (device.path.startsWith('/Volumes/')) {
+          newPath = `/Volumes/${newLabel}`;
+        }
+        // On Windows, path is {drive}:\ - path doesn't change, only label
+
+        // Notify progress callback with new device info
+        if (onProgress) {
+          onProgress({
+            devicePath: device.path,
+            stage: 'configuring',
+            progress: 98,
+            message: 'Volume renamed successfully',
+            newDeviceLabel: newLabel,
+            newDevicePath: newPath,
+          });
+        }
+      } catch (error) {
+        // Non-critical error - log but continue
+        console.warn('Volume rename failed (non-critical):', error);
+      }
+
+      // Step 5: Complete
       if (onProgress) {
         onProgress({
           devicePath: device.path,
@@ -205,6 +244,22 @@ export class DeviceService implements IDeviceRepository {
 
     await Promise.all(validationPromises);
     return results;
+  }
+
+  async renameVolume(device: Device, newName: string): Promise<void> {
+    try {
+      await invoke('rename_volume', {
+        devicePath: device.path,
+        newName,
+      });
+    } catch (error) {
+      const errorMessage = typeof error === 'string'
+        ? error
+        : error instanceof Error
+          ? error.message
+          : JSON.stringify(error);
+      throw new Error(`Failed to rename volume: ${errorMessage}`);
+    }
   }
 
   async performBatchUpdate(

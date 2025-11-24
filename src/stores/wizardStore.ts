@@ -16,6 +16,7 @@ interface WizardStore extends WizardState {
   selectRelease: (release: FirmwareRelease) => void;
   setDevices: (devices: Device[]) => void;
   updateDeviceRole: (devicePath: string, role: 'PRIMARY' | 'SECONDARY') => void;
+  updateDeviceInfo: (oldPath: string, newLabel: string, newPath: string) => void;
   setUpdateProgress: (devicePath: string, progress: UpdateProgress) => void;
   setUpdateResult: (result: UpdateResult) => void;
   setValidationResults: (results: Map<string, ValidationResult>) => void;
@@ -52,6 +53,24 @@ export const useWizardStore = create<WizardStore>((set) => ({
         device.path === devicePath ? { ...device, role } : device
       ),
     })),
+
+  updateDeviceInfo: (oldPath, newLabel, newPath) =>
+    set((state) => {
+      // Update devices in selectedDevices
+      const updatedDevices = state.selectedDevices.map((device) =>
+        device.path === oldPath ? { ...device, label: newLabel, path: newPath } : device
+      );
+
+      // Update progress map with new path as key
+      const newProgress = new Map(state.updateProgress);
+      const oldProgress = newProgress.get(oldPath);
+      if (oldProgress) {
+        newProgress.delete(oldPath);
+        newProgress.set(newPath, { ...oldProgress, devicePath: newPath });
+      }
+
+      return { selectedDevices: updatedDevices, updateProgress: newProgress };
+    }),
 
   setUpdateProgress: (devicePath, progress) =>
     set((state) => {

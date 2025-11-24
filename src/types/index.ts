@@ -34,6 +34,8 @@ export interface UpdateProgress {
   currentFile?: string;
   progress: number;
   message: string;
+  newDeviceLabel?: string;
+  newDevicePath?: string;
 }
 
 export type UpdateStage =

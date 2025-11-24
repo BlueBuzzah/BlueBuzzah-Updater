@@ -41,7 +41,7 @@ export function InstallationProgress({
   onComplete,
   onProgressUpdate,
 }: InstallationProgressProps) {
-  const { reset } = useWizardStore();
+  const { reset, updateDeviceInfo } = useWizardStore();
   const { toast } = useToast();
   const [stage, setStage] = useState<'validating' | 'downloading' | 'installing' | 'complete'>(
     'validating'
@@ -53,6 +53,7 @@ export function InstallationProgress({
   const [error, setError] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [showLogs, setShowLogs] = useState(false);
+  const [updatedDevices, setUpdatedDevices] = useState<Device[]>(devices);
 
   useEffect(() => {
     startInstallation();
@@ -125,15 +126,50 @@ export function InstallationProgress({
       setStage('installing');
       addLog(`Installing firmware on ${devices.length} device(s)...`);
 
-      for (const device of devices) {
+      for (const device of updatedDevices) {
         addLog(`Starting update for ${device.label} (${device.role})...`);
 
         await deviceService.deployFirmware(device, firmware, (progress) => {
-          setDeviceProgress((prev) => {
-            const next = new Map(prev);
-            next.set(device.path, progress);
-            return next;
-          });
+          // Check if device info was updated (volume renamed)
+          if (progress.newDeviceLabel && progress.newDevicePath) {
+            // Update wizard store with new device info
+            updateDeviceInfo(device.path, progress.newDeviceLabel, progress.newDevicePath);
+
+            // Update local device references
+            setUpdatedDevices((prev) =>
+              prev.map((d) =>
+                d.path === device.path
+                  ? { ...d, label: progress.newDeviceLabel!, path: progress.newDevicePath! }
+                  : d
+              )
+            );
+
+            // Update deviceProgress map with new path as key
+            setDeviceProgress((prev) => {
+              const next = new Map(prev);
+              const oldProgress = next.get(device.path);
+              if (oldProgress) {
+                next.delete(device.path);
+                next.set(progress.newDevicePath!, progress);
+              } else {
+                next.set(progress.newDevicePath!, progress);
+              }
+              return next;
+            });
+
+            // Update device reference for subsequent callbacks
+            device.path = progress.newDevicePath!;
+            device.label = progress.newDeviceLabel!;
+
+            addLog(`✓ Volume renamed to ${progress.newDeviceLabel}`);
+          } else {
+            setDeviceProgress((prev) => {
+              const next = new Map(prev);
+              next.set(device.path, progress);
+              return next;
+            });
+          }
+
           onProgressUpdate(device.path, progress);
 
           // Add stage-specific logs
@@ -144,7 +180,11 @@ export function InstallationProgress({
               addLog(`Copying ${progress.currentFile} to ${device.label}...`);
             }
           } else if (progress.stage === 'configuring') {
-            addLog(`Writing ${device.role} configuration to ${device.label}...`);
+            if (progress.message === 'Volume renamed successfully') {
+              // Already logged above
+            } else {
+              addLog(`Writing ${device.role} configuration to ${device.label}...`);
+            }
           } else if (progress.stage === 'complete') {
             addLog(`✓ ${device.label} update complete`);
           }
@@ -305,7 +345,7 @@ export function InstallationProgress({
       {/* Device Progress */}
       {(stage === 'installing' || stage === 'complete') && !error && (
         <div className="space-y-3">
-          {devices.map((device) => {
+          {updatedDevices.map((device) => {
             const progress = deviceProgress.get(device.path);
             const isComplete = progress?.stage === 'complete';
             const hasError = progress?.stage === 'error';

@@ -49,7 +49,7 @@ export function DeviceSelection({
         toast({
           title: 'No Devices Found',
           description:
-            'Please connect a CircuitPython device and try again.',
+            'Please connect a BlueBuzzah device and try again.',
         });
       }
     } catch (error) {

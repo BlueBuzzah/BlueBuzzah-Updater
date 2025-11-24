@@ -1,22 +1,22 @@
-import React from 'react';
-import {
-  CheckCircle2,
-  HardDrive,
-  AlertCircle,
-  RotateCcw,
-  X,
-} from 'lucide-react';
-import { Device, FirmwareRelease } from '@/types';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
+	Card,
+	CardContent,
+	CardDescription,
+	CardHeader,
+	CardTitle,
 } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { Device, FirmwareRelease } from '@/types';
+import {
+	AlertCircle,
+	CheckCircle2,
+	HardDrive,
+	RotateCcw,
+	X,
+} from 'lucide-react';
+import React from 'react';
 
 interface SuccessScreenProps {
   release: FirmwareRelease;
@@ -120,7 +120,7 @@ export function SuccessScreen({
               <div>
                 <p className="font-medium">Safely Eject Drives</p>
                 <p className="text-muted-foreground">
-                  Unmount all CIRCUITPY drives before disconnecting
+                  Unmount all BLUEBUZZAH drives before disconnecting
                 </p>
               </div>
             </li>

@@ -34,7 +34,7 @@ pub async fn detect_devices() -> Result<Vec<Device>, String> {
                     let is_circuit_py = boot_out.exists();
 
                     // Only include if it looks like a CircuitPython device
-                    if label.contains("CIRCUITPY") || is_circuit_py {
+                    if label.contains("CIRCUITPY") || label.contains("BLUEBUZZAH") || is_circuit_py {
                         devices.push(Device {
                             path: path.to_string_lossy().to_string(),
                             label,
@@ -83,7 +83,7 @@ pub async fn detect_devices() -> Result<Vec<Device>, String> {
                         let boot_out = PathBuf::from(&drive_path).join("boot_out.txt");
                         let is_circuit_py = boot_out.exists();
 
-                        if label.contains("CIRCUITPY") || is_circuit_py {
+                        if label.contains("CIRCUITPY") || label.contains("BLUEBUZZAH") || is_circuit_py {
                             devices.push(Device {
                                 path: drive_path,
                                 label: if label.is_empty() {
@@ -360,4 +360,49 @@ pub async fn validate_device(device_path: String) -> Result<ValidationInfo, Stri
     }
 
     Ok(validation)
+}
+
+#[tauri::command]
+pub async fn rename_volume(device_path: String, new_name: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::process::Command;
+
+        let output = Command::new("diskutil")
+            .args(&["rename", &device_path, &new_name])
+            .output()
+            .map_err(|e| format!("Failed to execute diskutil: {}", e))?;
+
+        if !output.status.success() {
+            return Err(format!(
+                "Failed to rename volume: {}",
+                String::from_utf8_lossy(&output.stderr)
+            ));
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::ffi::OsString;
+        use std::os::windows::ffi::OsStrExt;
+        use winapi::um::fileapi::SetVolumeLabelW;
+
+        let drive_root: Vec<u16> = OsString::from(&device_path)
+            .encode_wide()
+            .chain(Some(0))
+            .collect();
+
+        let label: Vec<u16> = OsString::from(&new_name)
+            .encode_wide()
+            .chain(Some(0))
+            .collect();
+
+        unsafe {
+            if SetVolumeLabelW(drive_root.as_ptr(), label.as_ptr()) == 0 {
+                return Err("Failed to set volume label. May require administrator privileges.".to_string());
+            }
+        }
+    }
+
+    Ok(())
 }
