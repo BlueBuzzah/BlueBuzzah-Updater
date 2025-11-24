@@ -6,6 +6,9 @@ export interface FirmwareRelease {
   publishedAt: Date;
   downloadUrl: string;
   assets: FirmwareAsset[];
+  sha256Hash?: string;
+  isCached?: boolean;
+  cachedMetadata?: CachedFirmwareMetadata;
 }
 
 export interface FirmwareAsset {
@@ -13,6 +16,20 @@ export interface FirmwareAsset {
   downloadUrl: string;
   size: number;
 }
+
+export interface CachedFirmwareMetadata {
+  version: string;
+  tag_name: string;
+  sha256_hash: string;
+  zip_path: string;
+  extracted_path: string;
+  downloaded_at: string;
+  file_size: number;
+  published_at: string;
+  release_notes: string;
+}
+
+export type FirmwareCacheIndex = Record<string, CachedFirmwareMetadata>;
 
 export interface Device {
   path: string;
