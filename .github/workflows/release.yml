@@ -32,19 +32,6 @@ jobs:
           workspaces: "./src-tauri -> target"
           shared-key: "macos-universal"
 
-      - name: Install frontend dependencies
-        run: npm ci
-
-      - name: Build Tauri app
-        run: npm run tauri build -- --target universal-apple-darwin
-
-      - name: Find DMG file
-        id: find-dmg
-        run: |
-          DMG_PATH=$(find src-tauri/target/universal-apple-darwin/release/bundle/dmg -name "*.dmg" | head -1)
-          echo "dmg_path=$DMG_PATH" >> $GITHUB_OUTPUT
-          echo "Found DMG: $DMG_PATH"
-
       - name: Import signing certificate
         run: |
           echo "${{ secrets.APPLE_CERTIFICATE_P12 }}" | base64 --decode > certificate.p12
@@ -54,9 +41,55 @@ jobs:
           security import certificate.p12 -k build.keychain -P "${{ secrets.APPLE_CERTIFICATE_PASSWORD }}" -T /usr/bin/codesign
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain
 
-      - name: Sign DMG
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build Tauri app
+        run: npm run tauri build -- --target universal-apple-darwin --bundles app
+
+      - name: Find app bundle
+        id: find-app
         run: |
-          codesign --sign "Developer ID Application" --identifier "com.bluebuzzah.updater" --timestamp "${{ steps.find-dmg.outputs.dmg_path }}"
+          APP_PATH=$(find src-tauri/target/universal-apple-darwin/release/bundle/macos -name "*.app" | head -1)
+          echo "app_path=$APP_PATH" >> $GITHUB_OUTPUT
+          echo "Found app: $APP_PATH"
+
+      - name: Sign app bundle
+        run: |
+          # Sign the app bundle with hardened runtime and timestamp
+          codesign --sign "Developer ID Application" \
+            --deep \
+            --force \
+            --options runtime \
+            --timestamp \
+            --identifier "com.bluebuzzah.updater" \
+            "${{ steps.find-app.outputs.app_path }}"
+
+          # Verify signature
+          codesign --verify --deep --strict --verbose=4 "${{ steps.find-app.outputs.app_path }}"
+
+      - name: Create signed DMG
+        run: |
+          # Create DMG from signed app
+          APP_PATH="${{ steps.find-app.outputs.app_path }}"
+          APP_NAME=$(basename "$APP_PATH" .app)
+          DMG_PATH="src-tauri/target/universal-apple-darwin/release/bundle/dmg/${APP_NAME}.dmg"
+          mkdir -p "$(dirname "$DMG_PATH")"
+
+          hdiutil create -volname "$APP_NAME" -srcfolder "$APP_PATH" -ov -format UDZO "$DMG_PATH"
+
+          # Sign the DMG
+          codesign --sign "Developer ID Application" --timestamp "$DMG_PATH"
+          codesign --verify --verbose "$DMG_PATH"
+
+          echo "Created and signed DMG: $DMG_PATH"
+
+      - name: Find DMG file
+        id: find-dmg
+        run: |
+          DMG_PATH=$(find src-tauri/target/universal-apple-darwin/release/bundle/dmg -name "*.dmg" | head -1)
+          echo "dmg_path=$DMG_PATH" >> $GITHUB_OUTPUT
+          echo "Found DMG: $DMG_PATH"
 
       - name: Verify DMG signature
         run: |
