@@ -59,12 +59,16 @@ jobs:
       - name: Setup App Store Connect API Key
         run: |
           mkdir -p ~/private_keys
-          printf '%s' "${{ secrets.APP_STORE_CONNECT_API_KEY }}" | base64 --decode > ~/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}.p8
-          # Verify key file format (shows structure without exposing key)
-          echo "Key file info:"
-          head -1 ~/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}.p8
-          tail -1 ~/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}.p8
-          wc -l ~/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}.p8
+          KEY_FILE=~/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}.p8
+          printf '%s' "${{ secrets.APP_STORE_CONNECT_API_KEY }}" | base64 --decode > "$KEY_FILE"
+          # Verify key file structure
+          echo "=== Key file info ==="
+          head -1 "$KEY_FILE"
+          tail -1 "$KEY_FILE"
+          wc -l "$KEY_FILE"
+          # Validate key with openssl
+          echo "=== Validating key with openssl ==="
+          openssl ec -in "$KEY_FILE" -noout -text 2>&1 | head -5 || echo "Key validation failed"
 
       - name: Notarize DMG
         run: |
