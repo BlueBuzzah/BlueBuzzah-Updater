@@ -18,8 +18,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "20"
+          cache: "npm"
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -36,10 +36,16 @@ jobs:
         run: |
           echo "${{ secrets.APPLE_CERTIFICATE_P12 }}" | base64 --decode > certificate.p12
 
-      - name: Setup App Store Connect API Key
+      - name: Setup App Store Connect API Key JSON
         run: |
-          mkdir -p private_keys
-          echo "${{ secrets.APP_STORE_CONNECT_API_KEY }}" | base64 --decode > private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}.p8
+          # Decode the base64 .p8 key content
+          KEY_CONTENT=$(echo "${{ secrets.APP_STORE_CONNECT_API_KEY }}" | base64 --decode)
+          # Build JSON file using jq for proper escaping
+          jq -n \
+            --arg key_id "${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}" \
+            --arg issuer_id "${{ secrets.APP_STORE_CONNECT_API_ISSUER }}" \
+            --arg key "$KEY_CONTENT" \
+            '{key_id: $key_id, issuer_id: $issuer_id, key: $key}' > api_key.json
 
       - name: Find DMG file
         id: find-dmg
@@ -56,8 +62,7 @@ jobs:
           p12_password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
           notarize: true
           staple: true
-          app_store_connect_api_issuer: ${{ secrets.APP_STORE_CONNECT_API_ISSUER }}
-          app_store_connect_api_key: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+          app_store_connect_api_key_json_file: api_key.json
 
       - name: Upload macOS DMG to release
         uses: softprops/action-gh-release@v2
@@ -70,7 +75,7 @@ jobs:
         if: always()
         run: |
           rm -f certificate.p12
-          rm -rf private_keys
+          rm -f api_key.json
 
   # Windows build (uses tauri-action for automatic upload)
   build-windows:
@@ -85,8 +90,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "20"
+          cache: "npm"
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
@@ -100,7 +105,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: ${{ github.ref_name }}
-          releaseName: 'BlueBuzzah Updater ${{ github.ref_name }}'
-          releaseBody: 'See the CHANGELOG for details.'
+          releaseName: "BlueBuzzah Updater ${{ github.ref_name }}"
+          releaseBody: "See the CHANGELOG for details."
           releaseDraft: false
           prerelease: false
