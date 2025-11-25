@@ -15,12 +15,11 @@ Download the appropriate package for your operating system and install:
 [![Download for Windows][1]][2] [![Download for macOS][3]][4]
 
 > [!NOTE]  
-> Current releases are not code-signed. You may see security warnings on first run:
+> Windows releases are not currently code-signed. You may see security warnings on first run:
 >
-> - **macOS**: Right-click the app → "Open" (first time only)
 > - **Windows**: Click "More info" → "Run anyway"
 >
-> Code signing may be added in future releases.
+> Windows code signing to be added in future releases.
 
 ### For Developers
 
@@ -146,6 +145,6 @@ MIT License - see [LICENSE](LICENSE) file for details.
 Copyright (c) 2025 BlueBuzzah Partners
 
 [1]: assets/download-windows.png
-[2]: https://github.com/BlueBuzzah/BlueBuzzah-Updater/releases/latest/download/BlueBuzzah-Updater-x64.msi "Download for Windows"
+[2]: https://github.com/BlueBuzzah/BlueBuzzah-Updater/releases/latest/download/BlueBuzzah_Updater_x64_en-US.msi "Download for Windows"
 [3]: assets/download-macos.png
-[4]: https://github.com/BlueBuzzah/BlueBuzzah-Updater/releases/latest/download/BlueBuzzah-Updater-universal.dmg "Download for macOS"
+[4]: https://github.com/BlueBuzzah/BlueBuzzah-Updater/releases/latest/download/BlueBuzzah_Updater_universal.dmg "Download for macOS"
