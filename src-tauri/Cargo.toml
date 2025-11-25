@@ -31,3 +31,4 @@ winapi = { version = "0.3", features = ["fileapi", "winbase"] }
 
 [dev-dependencies]
 tempfile = "3"
+mockall = "0.12"

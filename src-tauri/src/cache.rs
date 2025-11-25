@@ -520,4 +520,117 @@ mod tests {
 
         assert!(!cache_manager.verify_hash("nonexistent").unwrap());
     }
+
+    // ==================== Additional cache tests ====================
+
+    #[test]
+    fn test_migrate_existing_cache_valid_pair() {
+        let temp_dir = TempDir::new().unwrap();
+        let firmware_dir = temp_dir.path().join("firmware");
+        fs::create_dir_all(&firmware_dir).unwrap();
+
+        // Create zip file and extracted directory
+        let zip_path = firmware_dir.join("v1.0.0.zip");
+        let extracted_path = firmware_dir.join("v1.0.0");
+        fs::write(&zip_path, "fake zip content").unwrap();
+        fs::create_dir(&extracted_path).unwrap();
+
+        let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
+        let migrated = cache_manager.migrate_existing_cache(&firmware_dir).unwrap();
+
+        assert_eq!(migrated.len(), 1);
+        assert!(migrated.contains(&"v1.0.0".to_string()));
+
+        // Verify it's in the index
+        let entry = cache_manager.get_entry("v1.0.0").unwrap();
+        assert!(entry.is_some());
+    }
+
+    #[test]
+    fn test_migrate_existing_cache_skips_indexed() {
+        let temp_dir = TempDir::new().unwrap();
+        let firmware_dir = temp_dir.path().join("firmware");
+        fs::create_dir_all(&firmware_dir).unwrap();
+
+        // Create zip and extracted dir
+        let zip_path = firmware_dir.join("v1.0.0.zip");
+        let extracted_path = firmware_dir.join("v1.0.0");
+        fs::write(&zip_path, "fake zip content").unwrap();
+        fs::create_dir(&extracted_path).unwrap();
+
+        let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
+
+        // Pre-add to index
+        cache_manager.update_entry(create_test_metadata("v1.0.0")).unwrap();
+
+        // Migrate should skip already indexed
+        let migrated = cache_manager.migrate_existing_cache(&firmware_dir).unwrap();
+        assert!(migrated.is_empty());
+    }
+
+    #[test]
+    fn test_migrate_existing_cache_requires_both_files() {
+        let temp_dir = TempDir::new().unwrap();
+        let firmware_dir = temp_dir.path().join("firmware");
+        fs::create_dir_all(&firmware_dir).unwrap();
+
+        // Create only zip file (no extracted dir)
+        let zip_path = firmware_dir.join("v1.0.0.zip");
+        fs::write(&zip_path, "fake zip content").unwrap();
+
+        let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
+        let migrated = cache_manager.migrate_existing_cache(&firmware_dir).unwrap();
+
+        // Should not migrate without both files
+        assert!(migrated.is_empty());
+    }
+
+    #[test]
+    fn test_load_index_invalid_json() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_file = temp_dir.path().join("firmware_cache.json");
+
+        // Write invalid JSON
+        fs::write(&cache_file, "{ this is not valid json }").unwrap();
+
+        let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
+        let result = cache_manager.load_index();
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Failed to parse cache index"));
+    }
+
+    #[test]
+    fn test_save_index_creates_parent_dirs() {
+        let temp_dir = TempDir::new().unwrap();
+        let nested_path = temp_dir.path().join("nested/deep/path");
+
+        let cache_manager = CacheManager::new(&nested_path).unwrap();
+
+        let mut index = std::collections::HashMap::new();
+        index.insert("v1.0.0".to_string(), create_test_metadata("1.0.0"));
+
+        let result = cache_manager.save_index(&index);
+
+        assert!(result.is_ok());
+        assert!(nested_path.join("firmware_cache.json").exists());
+    }
+
+    #[test]
+    fn test_calculate_sha256_large_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("large.bin");
+
+        // Create a file larger than the 8192 byte buffer
+        let large_content: Vec<u8> = (0..16384).map(|i| (i % 256) as u8).collect();
+        fs::write(&file_path, &large_content).unwrap();
+
+        let result = CacheManager::calculate_sha256(&file_path);
+
+        assert!(result.is_ok());
+        // Just verify we get a valid 64-char hex hash
+        let hash = result.unwrap();
+        assert_eq!(hash.len(), 64);
+        assert!(hash.chars().all(|c| c.is_ascii_hexdigit()));
+    }
 }

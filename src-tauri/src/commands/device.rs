@@ -452,6 +452,250 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    // ==================== write_config tests ====================
+
+    #[tokio::test]
+    async fn test_write_config_creates_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let device_path = temp_dir.path().to_string_lossy().to_string();
+        let config_content = "ROLE = 'primary'\nDEVICE_ID = 1";
+
+        let result = write_config(device_path.clone(), "primary".to_string(), config_content.to_string()).await;
+
+        assert!(result.is_ok());
+        let config_path = temp_dir.path().join("config.py");
+        assert!(config_path.exists());
+        let contents = fs::read_to_string(&config_path).unwrap();
+        assert_eq!(contents, config_content);
+    }
+
+    #[tokio::test]
+    async fn test_write_config_overwrites_existing() {
+        let temp_dir = TempDir::new().unwrap();
+        let device_path = temp_dir.path().to_string_lossy().to_string();
+        let config_path = temp_dir.path().join("config.py");
+
+        // Create existing config
+        fs::write(&config_path, "OLD CONTENT").unwrap();
+
+        let new_content = "ROLE = 'secondary'";
+        let result = write_config(device_path, "secondary".to_string(), new_content.to_string()).await;
+
+        assert!(result.is_ok());
+        let contents = fs::read_to_string(&config_path).unwrap();
+        assert_eq!(contents, new_content);
+    }
+
+    #[tokio::test]
+    async fn test_write_config_primary_role() {
+        let temp_dir = TempDir::new().unwrap();
+        let device_path = temp_dir.path().to_string_lossy().to_string();
+        let config_content = "ROLE = 'primary'\nCHANNEL = 1";
+
+        let result = write_config(device_path, "primary".to_string(), config_content.to_string()).await;
+
+        assert!(result.is_ok());
+        let config_path = temp_dir.path().join("config.py");
+        let contents = fs::read_to_string(&config_path).unwrap();
+        assert!(contents.contains("ROLE = 'primary'"));
+    }
+
+    #[tokio::test]
+    async fn test_write_config_secondary_role() {
+        let temp_dir = TempDir::new().unwrap();
+        let device_path = temp_dir.path().to_string_lossy().to_string();
+        let config_content = "ROLE = 'secondary'\nCHANNEL = 1";
+
+        let result = write_config(device_path, "secondary".to_string(), config_content.to_string()).await;
+
+        assert!(result.is_ok());
+        let config_path = temp_dir.path().join("config.py");
+        let contents = fs::read_to_string(&config_path).unwrap();
+        assert!(contents.contains("ROLE = 'secondary'"));
+    }
+
+    // ==================== wipe_device tests ====================
+
+    #[tokio::test]
+    async fn test_wipe_device_success() {
+        let temp_dir = TempDir::new().unwrap();
+        let device_path = temp_dir.path().to_string_lossy().to_string();
+
+        // Create files and directories
+        fs::write(temp_dir.path().join("code.py"), "print('hello')").unwrap();
+        fs::write(temp_dir.path().join("main.py"), "main code").unwrap();
+        fs::create_dir(temp_dir.path().join("lib")).unwrap();
+        fs::write(temp_dir.path().join("lib/helper.py"), "helper").unwrap();
+
+        let result = wipe_device(device_path).await;
+
+        assert!(result.is_ok());
+        assert!(!temp_dir.path().join("code.py").exists());
+        assert!(!temp_dir.path().join("main.py").exists());
+        assert!(!temp_dir.path().join("lib").exists());
+    }
+
+    #[tokio::test]
+    async fn test_wipe_device_nonexistent_path() {
+        let result = wipe_device("/nonexistent/path/CIRCUITPY".to_string()).await;
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("does not exist"));
+    }
+
+    #[tokio::test]
+    async fn test_wipe_device_skips_dotfiles() {
+        let temp_dir = TempDir::new().unwrap();
+        let device_path = temp_dir.path().to_string_lossy().to_string();
+
+        // Create hidden file and regular file
+        fs::write(temp_dir.path().join(".hidden"), "should remain").unwrap();
+        fs::write(temp_dir.path().join(".Trashes"), "system file").unwrap();
+        fs::write(temp_dir.path().join("code.py"), "should be removed").unwrap();
+
+        let result = wipe_device(device_path).await;
+
+        assert!(result.is_ok());
+        // Hidden files should remain
+        assert!(temp_dir.path().join(".hidden").exists());
+        assert!(temp_dir.path().join(".Trashes").exists());
+        // Regular files should be removed
+        assert!(!temp_dir.path().join("code.py").exists());
+    }
+
+    #[tokio::test]
+    async fn test_wipe_device_handles_nested_dirs() {
+        let temp_dir = TempDir::new().unwrap();
+        let device_path = temp_dir.path().to_string_lossy().to_string();
+
+        // Create deeply nested structure
+        fs::create_dir_all(temp_dir.path().join("a/b/c/d")).unwrap();
+        fs::write(temp_dir.path().join("a/b/c/d/deep.txt"), "deep file").unwrap();
+        fs::write(temp_dir.path().join("a/b/file.txt"), "mid level").unwrap();
+
+        let result = wipe_device(device_path).await;
+
+        assert!(result.is_ok());
+        assert!(!temp_dir.path().join("a").exists());
+    }
+
+    #[tokio::test]
+    async fn test_wipe_device_empty_directory() {
+        let temp_dir = TempDir::new().unwrap();
+        let device_path = temp_dir.path().to_string_lossy().to_string();
+
+        // Don't create any files - directory is already empty
+        let result = wipe_device(device_path).await;
+
+        assert!(result.is_ok());
+        // Directory should still exist (we're wiping contents, not the volume itself)
+        assert!(temp_dir.path().exists());
+    }
+
+    #[tokio::test]
+    async fn test_wipe_device_preserves_volume_root() {
+        let temp_dir = TempDir::new().unwrap();
+        let device_path = temp_dir.path().to_string_lossy().to_string();
+
+        fs::write(temp_dir.path().join("file.txt"), "content").unwrap();
+
+        let result = wipe_device(device_path).await;
+
+        assert!(result.is_ok());
+        // Volume root should still exist
+        assert!(temp_dir.path().exists());
+        assert!(temp_dir.path().is_dir());
+    }
+
+    // ==================== validate_device tests ====================
+
+    #[tokio::test]
+    async fn test_validate_device_returns_result() {
+        let temp_dir = TempDir::new().unwrap();
+        let device_path = temp_dir.path().to_string_lossy().to_string();
+
+        // Create boot_out.txt to simulate CircuitPython device
+        fs::write(
+            temp_dir.path().join("boot_out.txt"),
+            "Adafruit CircuitPython 8.0.0"
+        ).unwrap();
+
+        let result = validate_device(device_path).await;
+
+        // Should return Ok (not error out)
+        assert!(result.is_ok());
+        let validation = result.unwrap();
+        // Should not have "not found" or "not a directory" errors
+        assert!(!validation.errors.iter().any(|e| e.contains("not found")));
+        assert!(!validation.errors.iter().any(|e| e.contains("not a directory")));
+    }
+
+    #[tokio::test]
+    async fn test_validate_device_not_found() {
+        let result = validate_device("/nonexistent/device".to_string()).await;
+
+        assert!(result.is_ok());
+        let validation = result.unwrap();
+        assert!(!validation.valid);
+        assert!(validation.errors.iter().any(|e| e.contains("not found")));
+    }
+
+    #[tokio::test]
+    async fn test_validate_device_not_directory() {
+        let temp_dir = TempDir::new().unwrap();
+        let file_path = temp_dir.path().join("not_a_directory.txt");
+        fs::write(&file_path, "I'm a file").unwrap();
+
+        let result = validate_device(file_path.to_string_lossy().to_string()).await;
+
+        assert!(result.is_ok());
+        let validation = result.unwrap();
+        assert!(!validation.valid);
+        assert!(validation.errors.iter().any(|e| e.contains("not a directory")));
+    }
+
+    #[tokio::test]
+    async fn test_validate_device_warns_missing_boot_out() {
+        let temp_dir = TempDir::new().unwrap();
+        let device_path = temp_dir.path().to_string_lossy().to_string();
+
+        // Don't create boot_out.txt
+
+        let result = validate_device(device_path).await;
+
+        assert!(result.is_ok());
+        let validation = result.unwrap();
+        // Should have a warning about missing boot_out.txt
+        assert!(validation.warnings.iter().any(|w| w.contains("boot_out.txt")));
+    }
+
+    #[tokio::test]
+    async fn test_validate_device_cleans_up_test_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let device_path = temp_dir.path().to_string_lossy().to_string();
+
+        let result = validate_device(device_path).await;
+
+        assert!(result.is_ok());
+        // Verify the test file was cleaned up
+        assert!(!temp_dir.path().join(".bluebuzzah_test_write").exists());
+    }
+
+    #[tokio::test]
+    async fn test_validate_device_no_write_error_on_writable_dir() {
+        let temp_dir = TempDir::new().unwrap();
+        let device_path = temp_dir.path().to_string_lossy().to_string();
+
+        let result = validate_device(device_path).await;
+
+        assert!(result.is_ok());
+        let validation = result.unwrap();
+        // Temp dir should be writable - no "not writable" error
+        assert!(!validation.errors.iter().any(|e| e.contains("not writable")));
+    }
+
+    // ==================== count_files tests ====================
+
     #[test]
     fn test_count_files_empty_dir() {
         let temp_dir = TempDir::new().unwrap();
@@ -515,5 +759,35 @@ mod tests {
         // Counting a single file should return 1
         let count = count_files(&file_path).unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn test_count_files_deeply_nested() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // Create 5+ levels of nesting
+        fs::create_dir_all(temp_dir.path().join("a/b/c/d/e/f")).unwrap();
+        fs::write(temp_dir.path().join("a/b/c/d/e/f/deep.txt"), "deep").unwrap();
+        fs::write(temp_dir.path().join("a/b/mid.txt"), "mid").unwrap();
+        fs::write(temp_dir.path().join("root.txt"), "root").unwrap();
+
+        let count = count_files(temp_dir.path()).unwrap();
+        assert_eq!(count, 3);
+    }
+
+    #[test]
+    fn test_count_files_with_empty_subdirectories() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // Mix of files and empty directories
+        fs::create_dir(temp_dir.path().join("empty1")).unwrap();
+        fs::create_dir(temp_dir.path().join("empty2")).unwrap();
+        fs::create_dir(temp_dir.path().join("with_files")).unwrap();
+        fs::write(temp_dir.path().join("with_files/file.txt"), "content").unwrap();
+        fs::write(temp_dir.path().join("root.txt"), "root").unwrap();
+
+        let count = count_files(temp_dir.path()).unwrap();
+        // Only count actual files: file.txt and root.txt
+        assert_eq!(count, 2);
     }
 }

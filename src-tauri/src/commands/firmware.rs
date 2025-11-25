@@ -275,3 +275,155 @@ pub async fn verify_and_clean_cache(
 
     Ok(missing_versions)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use tempfile::TempDir;
+    use zip::write::FileOptions;
+
+    /// Helper function to create a test zip file with specified files
+    fn create_test_zip(path: &Path, files: &[(&str, &str)]) {
+        let file = fs::File::create(path).expect("Failed to create zip file");
+        let mut zip = zip::ZipWriter::new(file);
+        let options = FileOptions::default();
+
+        for (name, content) in files {
+            zip.start_file(*name, options).expect("Failed to start file in zip");
+            zip.write_all(content.as_bytes()).expect("Failed to write to zip");
+        }
+
+        zip.finish().expect("Failed to finish zip");
+    }
+
+    // ==================== extract_zip tests ====================
+
+    #[test]
+    fn test_extract_zip_valid_archive() {
+        let temp_dir = TempDir::new().unwrap();
+        let zip_path = temp_dir.path().join("test.zip");
+        let extract_to = temp_dir.path().join("extracted");
+
+        create_test_zip(&zip_path, &[
+            ("code.py", "print('hello')"),
+            ("config.py", "ROLE = 'primary'"),
+        ]);
+
+        let result = extract_zip(&zip_path, &extract_to);
+
+        assert!(result.is_ok());
+        assert!(extract_to.join("code.py").exists());
+        assert!(extract_to.join("config.py").exists());
+
+        // Verify content
+        let code_content = fs::read_to_string(extract_to.join("code.py")).unwrap();
+        assert_eq!(code_content, "print('hello')");
+    }
+
+    #[test]
+    fn test_extract_zip_nested_directories() {
+        let temp_dir = TempDir::new().unwrap();
+        let zip_path = temp_dir.path().join("test.zip");
+        let extract_to = temp_dir.path().join("extracted");
+
+        create_test_zip(&zip_path, &[
+            ("code.py", "main code"),
+            ("lib/helpers.py", "helper code"),
+            ("lib/utils/deep.py", "deep nested"),
+        ]);
+
+        let result = extract_zip(&zip_path, &extract_to);
+
+        assert!(result.is_ok());
+        assert!(extract_to.join("code.py").exists());
+        assert!(extract_to.join("lib/helpers.py").exists());
+        assert!(extract_to.join("lib/utils/deep.py").exists());
+
+        // Verify nested content
+        let deep_content = fs::read_to_string(extract_to.join("lib/utils/deep.py")).unwrap();
+        assert_eq!(deep_content, "deep nested");
+    }
+
+    #[test]
+    fn test_extract_zip_missing_file() {
+        let temp_dir = TempDir::new().unwrap();
+        let zip_path = temp_dir.path().join("nonexistent.zip");
+        let extract_to = temp_dir.path().join("extracted");
+
+        let result = extract_zip(&zip_path, &extract_to);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Failed to open zip file"));
+    }
+
+    #[test]
+    fn test_extract_zip_invalid_archive() {
+        let temp_dir = TempDir::new().unwrap();
+        let zip_path = temp_dir.path().join("invalid.zip");
+        let extract_to = temp_dir.path().join("extracted");
+
+        // Write garbage bytes to simulate corrupted zip
+        fs::write(&zip_path, b"this is not a valid zip file").unwrap();
+
+        let result = extract_zip(&zip_path, &extract_to);
+
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Failed to read zip archive"));
+    }
+
+    #[test]
+    fn test_extract_zip_creates_parent_dirs() {
+        let temp_dir = TempDir::new().unwrap();
+        let zip_path = temp_dir.path().join("test.zip");
+        let extract_to = temp_dir.path().join("nested/path/to/extracted");
+
+        create_test_zip(&zip_path, &[("file.txt", "content")]);
+
+        let result = extract_zip(&zip_path, &extract_to);
+
+        assert!(result.is_ok());
+        assert!(extract_to.exists());
+        assert!(extract_to.join("file.txt").exists());
+    }
+
+    #[test]
+    fn test_extract_zip_empty_archive() {
+        let temp_dir = TempDir::new().unwrap();
+        let zip_path = temp_dir.path().join("empty.zip");
+        let extract_to = temp_dir.path().join("extracted");
+
+        // Create empty zip
+        let file = fs::File::create(&zip_path).unwrap();
+        let mut zip = zip::ZipWriter::new(file);
+        zip.finish().unwrap();
+
+        let result = extract_zip(&zip_path, &extract_to);
+
+        assert!(result.is_ok());
+        assert!(extract_to.exists());
+        // Directory should be created but empty (no files)
+        let entries: Vec<_> = fs::read_dir(&extract_to).unwrap().collect();
+        assert_eq!(entries.len(), 0);
+    }
+
+    #[test]
+    fn test_extract_zip_overwrites_existing() {
+        let temp_dir = TempDir::new().unwrap();
+        let zip_path = temp_dir.path().join("test.zip");
+        let extract_to = temp_dir.path().join("extracted");
+
+        // Create existing file with old content
+        fs::create_dir_all(&extract_to).unwrap();
+        fs::write(extract_to.join("code.py"), "OLD CONTENT").unwrap();
+
+        // Create zip with new content
+        create_test_zip(&zip_path, &[("code.py", "NEW CONTENT")]);
+
+        let result = extract_zip(&zip_path, &extract_to);
+
+        assert!(result.is_ok());
+        let content = fs::read_to_string(extract_to.join("code.py")).unwrap();
+        assert_eq!(content, "NEW CONTENT");
+    }
+}

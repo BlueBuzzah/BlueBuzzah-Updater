@@ -8,7 +8,7 @@ on:
 
 jobs:
   frontend-tests:
-    name: Frontend Tests
+    name: React Tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -17,8 +17,8 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: "20"
+          cache: "npm"
 
       - name: Install dependencies
         run: npm ci
@@ -27,7 +27,7 @@ jobs:
         run: npm run test:run
 
   rust-tests:
-    name: Rust Tests
+    name: Tauri Tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
