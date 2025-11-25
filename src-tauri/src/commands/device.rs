@@ -385,7 +385,7 @@ pub async fn rename_volume(device_path: String, new_name: String) -> Result<(), 
     {
         use std::ffi::OsString;
         use std::os::windows::ffi::OsStrExt;
-        use winapi::um::fileapi::SetVolumeLabelW;
+        use winapi::um::winbase::SetVolumeLabelW;
 
         let drive_root: Vec<u16> = OsString::from(&device_path)
             .encode_wide()
@@ -408,6 +408,7 @@ pub async fn rename_volume(device_path: String, new_name: String) -> Result<(), 
 }
 
 #[tauri::command]
+#[allow(unused_variables)]
 pub async fn find_renamed_volume(_old_path: String, expected_name: String) -> Result<String, String> {
     #[cfg(target_os = "macos")]
     {
