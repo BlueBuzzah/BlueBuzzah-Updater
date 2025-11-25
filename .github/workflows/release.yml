@@ -61,21 +61,17 @@ jobs:
           mkdir -p ~/private_keys
           KEY_FILE=~/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}.p8
           printf '%s' "${{ secrets.APP_STORE_CONNECT_API_KEY }}" | base64 --decode > "$KEY_FILE"
-          # Verify key file structure
-          echo "=== Key file info ==="
-          head -1 "$KEY_FILE"
-          tail -1 "$KEY_FILE"
-          wc -l "$KEY_FILE"
-          # Validate key with openssl
-          echo "=== Validating key with openssl ==="
-          openssl ec -in "$KEY_FILE" -noout -text 2>&1 | head -5 || echo "Key validation failed"
+
+          # Store credentials in keychain (avoids direct key file access crash)
+          xcrun notarytool store-credentials "notary-profile" \
+            --key "$KEY_FILE" \
+            --key-id "${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}" \
+            --issuer "${{ secrets.APP_STORE_CONNECT_API_ISSUER }}"
 
       - name: Notarize DMG
         run: |
           xcrun notarytool submit "${{ steps.find-dmg.outputs.dmg_path }}" \
-            --key ~/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}.p8 \
-            --key-id "${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}" \
-            --issuer "${{ secrets.APP_STORE_CONNECT_API_ISSUER }}" \
+            --keychain-profile "notary-profile" \
             --wait \
             --verbose
 
