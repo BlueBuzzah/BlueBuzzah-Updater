@@ -5,19 +5,11 @@ on:
     types: [published]
 
 jobs:
-  build-and-upload:
+  # macOS build with code signing and notarization
+  build-macos:
     permissions:
       contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: 'macos-latest'
-            args: '--target universal-apple-darwin'
-          - platform: 'windows-latest'
-            args: ''
-
-    runs-on: ${{ matrix.platform }}
+    runs-on: macos-latest
 
     steps:
       - name: Checkout repository
@@ -32,13 +24,72 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.platform == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
 
-      - name: Install dependencies (Ubuntu only)
-        if: matrix.platform == 'ubuntu-latest'
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build Tauri app
+        run: npm run tauri build -- --target universal-apple-darwin
+
+      - name: Decode signing certificate
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+          echo "${{ secrets.APPLE_CERTIFICATE_P12 }}" | base64 --decode > certificate.p12
+
+      - name: Setup App Store Connect API Key
+        run: |
+          mkdir -p private_keys
+          echo "${{ secrets.APP_STORE_CONNECT_API_KEY }}" | base64 --decode > private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}.p8
+
+      - name: Find DMG file
+        id: find-dmg
+        run: |
+          DMG_PATH=$(find src-tauri/target/universal-apple-darwin/release/bundle/dmg -name "*.dmg" | head -1)
+          echo "dmg_path=$DMG_PATH" >> $GITHUB_OUTPUT
+          echo "Found DMG: $DMG_PATH"
+
+      - name: Sign and notarize macOS DMG
+        uses: indygreg/apple-code-sign-action@v1
+        with:
+          input_path: ${{ steps.find-dmg.outputs.dmg_path }}
+          p12_file: certificate.p12
+          p12_password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          notarize: true
+          staple: true
+          app_store_connect_api_issuer: ${{ secrets.APP_STORE_CONNECT_API_ISSUER }}
+          app_store_connect_api_key: ${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}
+
+      - name: Upload macOS DMG to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cleanup sensitive files
+        if: always()
+        run: |
+          rm -f certificate.p12
+          rm -rf private_keys
+
+  # Windows build (uses tauri-action for automatic upload)
+  build-windows:
+    permissions:
+      contents: write
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Install frontend dependencies
         run: npm ci
@@ -53,5 +104,3 @@ jobs:
           releaseBody: 'See the CHANGELOG for details.'
           releaseDraft: false
           prerelease: false
-          args: ${{ matrix.args }}
-          assetNamePattern: 'BlueBuzzah-Updater-[arch].[ext]'
