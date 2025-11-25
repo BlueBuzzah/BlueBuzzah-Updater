@@ -3,7 +3,6 @@ import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-libra
 import { DeviceSelection } from './DeviceSelection';
 import { deviceService } from '@/services/DeviceService';
 import { createMockDevice, createMockDevices } from '@/test/factories';
-import type { DeviceRole } from '@/types';
 
 // Mock the device service
 vi.mock('@/services/DeviceService', () => ({
@@ -291,7 +290,7 @@ describe('DeviceSelection', () => {
       vi.mocked(deviceService.detectDevices).mockResolvedValue(mockDevices);
 
       // Start with one device selected
-      const { rerender } = render(
+      render(
         <DeviceSelection
           selectedDevices={[mockDevices[0]]}
           onDevicesChange={mockOnDevicesChange}

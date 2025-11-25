@@ -4,7 +4,6 @@ import { InstallationProgress } from './InstallationProgress';
 import { firmwareService } from '@/services/FirmwareService';
 import { deviceService } from '@/services/DeviceService';
 import { createMockRelease, createMockDevice, createMockBundle } from '@/test/factories';
-import type { UpdateProgress } from '@/types';
 
 // Mock services
 vi.mock('@/services/FirmwareService', () => ({

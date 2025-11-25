@@ -1,5 +1,5 @@
 import '@testing-library/jest-dom';
-import { vi } from 'vitest';
+import { vi, beforeEach } from 'vitest';
 
 // Mock Channel class for Tauri
 class MockChannel<T = unknown> {

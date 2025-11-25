@@ -4,7 +4,6 @@ import { DeviceService } from './DeviceService';
 import {
   createMockDevice,
   createMockBundle,
-  createMockValidation,
 } from '@/test/factories';
 import { mockConsole } from '@/test/setup';
 
