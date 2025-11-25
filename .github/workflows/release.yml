@@ -51,7 +51,10 @@ jobs:
       - name: Sign DMG
         run: |
           codesign --sign "Developer ID Application" --identifier "com.bluebuzzah.updater" --timestamp "${{ steps.find-dmg.outputs.dmg_path }}"
-          codesign --verify --verbose "${{ steps.find-dmg.outputs.dmg_path }}"
+
+      - name: Verify DMG signature
+        run: |
+          codesign --verify --deep --strict --verbose=4 "${{ steps.find-dmg.outputs.dmg_path }}"
 
       - name: Setup App Store Connect API Key
         run: |
@@ -64,7 +67,8 @@ jobs:
             --key ~/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}.p8 \
             --key-id "${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}" \
             --issuer "${{ secrets.APP_STORE_CONNECT_API_ISSUER }}" \
-            --wait
+            --wait \
+            --verbose
 
       - name: Staple DMG
         run: |
