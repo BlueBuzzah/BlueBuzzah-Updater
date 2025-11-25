@@ -64,7 +64,7 @@ jobs:
 
       - name: Setup App Store Connect API Key
         run: |
-          mkdir -p ~/private_keys
+          mkdir -p ./private_keys
           KEY_FILE=./private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}.p8
           printf '%s' "${{ secrets.APP_STORE_CONNECT_API_KEY }}" | base64 --decode > "$KEY_FILE"
 
