@@ -2,6 +2,7 @@
 
 ![BlueBuzzah Updater](https://img.shields.io/github/v/release/BlueBuzzah/BlueBuzzah-Updater?label=version)
 ![Downloads](https://img.shields.io/github/downloads/BlueBuzzah/BlueBuzzah-Updater/total)
+![Test Suite Status](https://img.shields.io/github/actions/workflow/status/BlueBuzzah/BlueBuzzah-Updater/test.yml?branch=main&label=tests)
 
 Device firmware updater for BlueBuzzah devices.
 
