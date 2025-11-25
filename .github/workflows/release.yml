@@ -32,37 +32,43 @@ jobs:
       - name: Build Tauri app
         run: npm run tauri build -- --target universal-apple-darwin
 
-      - name: Decode signing certificate
-        run: |
-          echo "${{ secrets.APPLE_CERTIFICATE_P12 }}" | base64 --decode > certificate.p12
-
-      - name: Create App Store Connect API Key JSON File
-        run: |
-          # Decode the base64 .p8 key content
-          KEY_CONTENT=$(echo "${{ secrets.APP_STORE_CONNECT_API_KEY }}")
-          # Build JSON file using jq for proper escaping
-          jq -n \
-            --arg key_id "${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}" \
-            --arg issuer_id "${{ secrets.APP_STORE_CONNECT_API_ISSUER }}" \
-            --arg key "$KEY_CONTENT" \
-            '{key_id: $key_id, issuer_id: $issuer_id, private_key: $key}' > api_key.json
-
-      - name: Find DMG File
+      - name: Find DMG file
         id: find-dmg
         run: |
           DMG_PATH=$(find src-tauri/target/universal-apple-darwin/release/bundle/dmg -name "*.dmg" | head -1)
           echo "dmg_path=$DMG_PATH" >> $GITHUB_OUTPUT
           echo "Found DMG: $DMG_PATH"
 
-      - name: Sign and notarize macOS DMG
-        uses: indygreg/apple-code-sign-action@v1
-        with:
-          input_path: ${{ steps.find-dmg.outputs.dmg_path }}
-          p12_file: certificate.p12
-          p12_password: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          notarize: true
-          staple: true
-          app_store_connect_api_key_json_file: api_key.json
+      - name: Import signing certificate
+        run: |
+          echo "${{ secrets.APPLE_CERTIFICATE_P12 }}" | base64 --decode > certificate.p12
+          security create-keychain -p "" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "" build.keychain
+          security import certificate.p12 -k build.keychain -P "${{ secrets.APPLE_CERTIFICATE_PASSWORD }}" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain
+
+      - name: Sign DMG
+        run: |
+          codesign --sign "Developer ID Application" --identifier "com.bluebuzzah.updater" --timestamp "${{ steps.find-dmg.outputs.dmg_path }}"
+          codesign --verify --verbose "${{ steps.find-dmg.outputs.dmg_path }}"
+
+      - name: Setup App Store Connect API Key
+        run: |
+          mkdir -p ~/private_keys
+          echo "${{ secrets.APP_STORE_CONNECT_API_KEY }}" | base64 --decode > ~/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}.p8
+
+      - name: Notarize DMG
+        run: |
+          xcrun notarytool submit "${{ steps.find-dmg.outputs.dmg_path }}" \
+            --key ~/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}.p8 \
+            --key-id "${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}" \
+            --issuer "${{ secrets.APP_STORE_CONNECT_API_ISSUER }}" \
+            --wait
+
+      - name: Staple DMG
+        run: |
+          xcrun stapler staple "${{ steps.find-dmg.outputs.dmg_path }}"
 
       - name: Upload macOS DMG to release
         uses: softprops/action-gh-release@v2
@@ -74,8 +80,9 @@ jobs:
       - name: Cleanup sensitive files
         if: always()
         run: |
+          security delete-keychain build.keychain || true
           rm -f certificate.p12
-          rm -f api_key.json
+          rm -rf ~/private_keys
 
   # Windows build (uses tauri-action for automatic upload)
   build-windows:
