@@ -1,8 +1,8 @@
 # BlueBuzzah Updater
 
-![BlueBuzzah Updater](https://img.shields.io/github/v/release/BlueBuzzah/BlueBuzzah-Updater?label=version)
-![Downloads](https://img.shields.io/github/downloads/BlueBuzzah/BlueBuzzah-Updater/total)
-![Test Suite Status](https://img.shields.io/github/actions/workflow/status/BlueBuzzah/BlueBuzzah-Updater/test.yml?branch=main&label=tests)
+[![BlueBuzzah Updater](https://img.shields.io/github/v/release/BlueBuzzah/BlueBuzzah-Updater?label=version)](#)
+[![Downloads](https://img.shields.io/github/downloads/BlueBuzzah/BlueBuzzah-Updater/total)](#)
+[![Test Suite Status](https://img.shields.io/github/actions/workflow/status/BlueBuzzah/BlueBuzzah-Updater/test.yml?branch=main&label=tests)](#)
 
 Device firmware updater for BlueBuzzah devices.
 
@@ -114,20 +114,10 @@ npm run dev            # Frontend only (no Tauri)
 
 ### Device Configuration
 
-The updater automatically generates role-specific `config.py` files:
+The updater automatically generates role-specific `settings.json` files:
 
 - **PRIMARY**: Coordinator device, broadcasts to secondary
 - **SECONDARY**: Listener device, receives from primary
-
-## 🐛 Troubleshooting
-
-For common issues and solutions, see [SETUP.md](SETUP.md#troubleshooting).
-
-Quick fixes:
-
-- **No devices detected?** Ensure device is mounted as `CIRCUITPY` with `boot_out.txt`
-- **Build errors?** Run `cd src-tauri && cargo clean && cd .. && npm run tauri:build`
-- **Permission issues (macOS)?** Grant Full Disk Access in System Settings
 
 ## 🤝 Contributing
 
