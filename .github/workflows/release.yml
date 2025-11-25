@@ -59,7 +59,7 @@ jobs:
       - name: Setup App Store Connect API Key
         run: |
           mkdir -p ~/private_keys
-          KEY_FILE=~/private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}.p8
+          KEY_FILE=./private_keys/AuthKey_${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}.p8
           printf '%s' "${{ secrets.APP_STORE_CONNECT_API_KEY }}" | base64 --decode > "$KEY_FILE"
 
           # Store credentials in keychain (avoids direct key file access crash)
@@ -91,7 +91,7 @@ jobs:
         run: |
           security delete-keychain build.keychain || true
           rm -f certificate.p12
-          rm -rf ~/private_keys
+          rm -rf ./private_keys
 
   # Windows build (uses tauri-action for automatic upload)
   build-windows:
