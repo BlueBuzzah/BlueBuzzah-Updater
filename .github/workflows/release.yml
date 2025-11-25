@@ -36,10 +36,10 @@ jobs:
         run: |
           echo "${{ secrets.APPLE_CERTIFICATE_P12 }}" | base64 --decode > certificate.p12
 
-      - name: Setup App Store Connect API Key JSON
+      - name: Create App Store Connect API Key JSON File
         run: |
           # Decode the base64 .p8 key content
-          KEY_CONTENT=$(echo "${{ secrets.APP_STORE_CONNECT_API_KEY }}" | base64 --decode)
+          KEY_CONTENT=$(echo "${{ secrets.APP_STORE_CONNECT_API_KEY }}")
           # Build JSON file using jq for proper escaping
           jq -n \
             --arg key_id "${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}" \
@@ -47,7 +47,7 @@ jobs:
             --arg key "$KEY_CONTENT" \
             '{key_id: $key_id, issuer_id: $issuer_id, private_key: $key}' > api_key.json
 
-      - name: Find DMG file
+      - name: Find DMG File
         id: find-dmg
         run: |
           DMG_PATH=$(find src-tauri/target/universal-apple-darwin/release/bundle/dmg -name "*.dmg" | head -1)
