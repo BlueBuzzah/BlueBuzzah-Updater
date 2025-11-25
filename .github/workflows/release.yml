@@ -45,7 +45,7 @@ jobs:
             --arg key_id "${{ secrets.APP_STORE_CONNECT_API_KEY_ID }}" \
             --arg issuer_id "${{ secrets.APP_STORE_CONNECT_API_ISSUER }}" \
             --arg key "$KEY_CONTENT" \
-            '{key_id: $key_id, issuer_id: $issuer_id, key: $key}' > api_key.json
+            '{key_id: $key_id, issuer_id: $issuer_id, private_key: $key}' > api_key.json
 
       - name: Find DMG file
         id: find-dmg
