@@ -69,11 +69,27 @@ jobs:
             --issuer "${{ secrets.APP_STORE_CONNECT_API_ISSUER }}"
 
       - name: Notarize DMG
+        id: notarize
         run: |
-          xcrun notarytool submit "${{ steps.find-dmg.outputs.dmg_path }}" \
+          # Submit and capture output
+          OUTPUT=$(xcrun notarytool submit "${{ steps.find-dmg.outputs.dmg_path }}" \
             --keychain-profile "notary-profile" \
             --wait \
-            --verbose
+            --verbose 2>&1) || true
+          echo "$OUTPUT"
+
+          # Extract submission ID
+          SUBMISSION_ID=$(echo "$OUTPUT" | grep -o 'id: [a-f0-9-]*' | head -1 | cut -d' ' -f2)
+          echo "submission_id=$SUBMISSION_ID" >> $GITHUB_OUTPUT
+
+          # Check if successful
+          if echo "$OUTPUT" | grep -q "status: Accepted"; then
+            echo "Notarization successful!"
+          else
+            echo "Notarization failed. Fetching log..."
+            xcrun notarytool log "$SUBMISSION_ID" --keychain-profile "notary-profile" || true
+            exit 1
+          fi
 
       - name: Staple DMG
         run: |
