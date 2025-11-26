@@ -24,7 +24,7 @@ jobs:
         run: npm ci
 
       - name: Run tests
-        run: npm run test:run
+        run: npm run test
 
   rust-tests:
     name: Tauri Tests
@@ -55,5 +55,4 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
 
       - name: Run Rust tests
-        working-directory: src-tauri
-        run: cargo test
+        run: npm run tauri:test

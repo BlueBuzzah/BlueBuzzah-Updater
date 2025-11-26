@@ -7,11 +7,11 @@
 		"dev": "vite",
 		"build": "tsc && vite build",
 		"preview": "vite preview",
+		"test": "vitest run",
 		"tauri": "tauri",
 		"tauri:dev": "tauri dev",
 		"tauri:build": "tauri build",
-		"test": "vitest",
-		"test:run": "vitest run"
+		"tauri:test": "cargo test --manifest-path src-tauri/Cargo.toml"
 	},
 	"dependencies": {
 		"@radix-ui/react-alert-dialog": "^1.1.15",
