@@ -1,10 +1,10 @@
-import { invoke } from '@tauri-apps/api/core';
 import {
-  FirmwareRelease,
-  FirmwareBundle,
-  GitHubRelease,
-  FirmwareCacheIndex,
+    FirmwareBundle,
+    FirmwareCacheIndex,
+    FirmwareRelease,
+    GitHubRelease,
 } from '@/types';
+import { invoke } from '@tauri-apps/api/core';
 
 export interface IFirmwareRepository {
   fetchReleases(): Promise<FirmwareRelease[]>;
@@ -19,7 +19,7 @@ export interface IFirmwareRepository {
 
 export class FirmwareService implements IFirmwareRepository {
   private readonly GITHUB_API_URL =
-    'https://api.github.com/repos/BlueBuzzah/BlueBuzzah2-Firmware/releases';
+    'https://api.github.com/repos/BlueBuzzah/BlueBuzzah-Firmware/releases';
 
   async fetchReleases(): Promise<FirmwareRelease[]> {
     try {
