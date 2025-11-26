@@ -19,18 +19,44 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
+
+      - name: Cache npm dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: npm-${{ runner.os }}-
+
+      - name: Cache frontend build
+        id: frontend-cache
+        uses: actions/cache@v4
+        with:
+          path: dist
+          key: frontend-${{ runner.os }}-${{ hashFiles('src/**', 'package-lock.json', 'vite.config.ts') }}
+          restore-keys: frontend-${{ runner.os }}-
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
 
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.4
+
+      - name: Configure sccache
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> $GITHUB_ENV
+          echo "SCCACHE_GHA_ENABLED=true" >> $GITHUB_ENV
+
       - name: Cache Rust dependencies
         uses: swatinem/rust-cache@v2
         with:
           workspaces: "./src-tauri -> target"
-          shared-key: "macos-universal"
+          shared-key: "macos-universal-v1"
+          save-if: true
+          cache-all-crates: true
 
       - name: Import signing certificate
         run: |
@@ -43,7 +69,12 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "" build.keychain
 
       - name: Install frontend dependencies
+        if: steps.frontend-cache.outputs.cache-hit != 'true'
         run: npm ci
+
+      - name: Build frontend
+        if: steps.frontend-cache.outputs.cache-hit != 'true'
+        run: npm run build
 
       - name: Build Tauri app
         run: npm run tauri build -- --target universal-apple-darwin --bundles app
@@ -130,6 +161,10 @@ jobs:
         run: |
           xcrun stapler staple "${{ steps.find-dmg.outputs.dmg_path }}"
 
+      - name: Report sccache stats
+        if: always()
+        run: sccache --show-stats
+
       - name: Upload macOS DMG to release
         uses: softprops/action-gh-release@v2
         with:
@@ -158,18 +193,51 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
+
+      - name: Cache npm dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            node_modules
+            ~\.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: npm-${{ runner.os }}-
+
+      - name: Cache frontend build
+        id: frontend-cache-win
+        uses: actions/cache@v4
+        with:
+          path: dist
+          key: frontend-${{ runner.os }}-${{ hashFiles('src/**', 'package-lock.json', 'vite.config.ts') }}
+          restore-keys: frontend-${{ runner.os }}-
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install sccache
+        uses: mozilla-actions/sccache-action@v0.0.4
+
+      - name: Configure sccache
+        run: |
+          echo "RUSTC_WRAPPER=sccache" >> $env:GITHUB_ENV
+          echo "SCCACHE_GHA_ENABLED=true" >> $env:GITHUB_ENV
+        shell: pwsh
 
       - name: Cache Rust dependencies
         uses: swatinem/rust-cache@v2
         with:
           workspaces: "./src-tauri -> target"
+          shared-key: "windows-v1"
+          save-if: true
+          cache-all-crates: true
 
       - name: Install frontend dependencies
+        if: steps.frontend-cache-win.outputs.cache-hit != 'true'
         run: npm ci
+
+      - name: Build frontend
+        if: steps.frontend-cache-win.outputs.cache-hit != 'true'
+        run: npm run build
 
       - name: Build Tauri app
         run: npm run tauri build
@@ -185,6 +253,10 @@ jobs:
             }
           }
         shell: pwsh
+
+      - name: Report sccache stats
+        if: always()
+        run: sccache --show-stats
 
       - name: Upload Windows MSI to release
         uses: softprops/action-gh-release@v2
