@@ -1,0 +1,18 @@
+# CI-optimized Cargo configuration
+
+[build]
+incremental = true
+jobs = 4  # Conservative for GHA (2 vCPU runners)
+
+[net]
+git-fetch-with-cli = true  # More reliable in CI
+retry = 3
+
+[http]
+timeout = 30
+multiplexing = true  # Parallel downloads
+
+[registries.crates-io]
+protocol = "sparse"  # Faster index updates (Rust 1.70+)
+
+# Note: [profile.release] already optimized in Cargo.toml

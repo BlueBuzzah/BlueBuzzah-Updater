@@ -10,6 +10,10 @@ jobs:
     permissions:
       contents: write
     runs-on: macos-latest
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_TERM_COLOR: always
+      CARGO_PROFILE_RELEASE_DEBUG: 0
 
     steps:
       - name: Checkout repository
@@ -184,6 +188,10 @@ jobs:
     permissions:
       contents: write
     runs-on: windows-latest
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_TERM_COLOR: always
+      CARGO_PROFILE_RELEASE_DEBUG: 0
 
     steps:
       - name: Checkout repository
