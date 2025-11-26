@@ -36,13 +36,18 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache Rust dependencies
-        uses: swatinem/rust-cache@v2
+      - name: Cache Cargo
+        uses: actions/cache@v4
         with:
-          workspaces: "./src-tauri -> target"
-          shared-key: "test-v1"
-          save-if: true
-          cache-all-crates: true
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            src-tauri/target/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
       - name: Install Tauri dependencies (Linux)
         uses: awalsh128/cache-apt-pkgs-action@latest
