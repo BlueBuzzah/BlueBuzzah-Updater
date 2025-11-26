@@ -4,6 +4,7 @@ use std::path::Path;
 use tauri::Manager;
 use crate::cache::{CacheManager, CachedFirmwareMetadata, FirmwareCacheIndex};
 use chrono;
+use tauri_plugin_http::reqwest;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FirmwareInfo {
