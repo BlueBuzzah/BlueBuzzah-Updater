@@ -1,11 +1,12 @@
-import { getConfigForRole } from '@/lib/config-templates';
 import {
-	Device,
-	DeviceUpdateResult,
-	FirmwareBundle,
-	UpdateProgress,
-	UpdateResult,
-	ValidationResult,
+  Device,
+  DeviceUpdateResult,
+  DfuProgress,
+  FirmwareBundle,
+  UpdateProgress,
+  UpdateResult,
+  UpdateStage,
+  ValidationResult,
 } from '@/types';
 import { Channel, invoke } from '@tauri-apps/api/core';
 
@@ -16,24 +17,69 @@ export interface IDeviceRepository {
     firmware: FirmwareBundle,
     onProgress?: (progress: UpdateProgress) => void
   ): Promise<void>;
-  wipeDevice(device: Device): Promise<void>;
   validateDevice(device: Device): Promise<ValidationResult>;
   validateDevices(devices: Device[]): Promise<Map<string, ValidationResult>>;
+}
+
+// Map DFU stages to UpdateStage enum (returns null for log events)
+function mapDfuStageToUpdateStage(dfuStage: string): UpdateStage | null {
+  switch (dfuStage) {
+    case 'reading':
+    case 'detected':
+    case 'bootloader':
+    case 'waiting':
+    case 'connecting':
+    case 'init':
+    case 'starting':
+      return 'preparing'; // Pre-transfer phases (bootloader entry)
+    case 'uploading':
+      return 'copying'; // Main transfer phase
+    case 'validating':
+      return 'validating';
+    case 'activating':
+    case 'rebooting':
+    case 'configuring':
+      return 'configuring'; // Post-transfer phases
+    case 'complete':
+      return 'complete';
+    case 'log':
+      return null; // Log events don't change the stage
+    default:
+      return 'copying';
+  }
 }
 
 export class DeviceService implements IDeviceRepository {
   async detectDevices(): Promise<Device[]> {
     try {
-      const devices = await invoke<Device[]>('detect_devices');
-      return devices;
+      // Call the new DFU device detection command
+      const dfuDevices = await invoke<{
+        port: string;
+        label: string;
+        vid: number;
+        pid: number;
+        in_bootloader: boolean;
+        serial_number: string | null;
+      }[]>('detect_dfu_devices');
+
+      // Map to Device interface
+      return dfuDevices.map((d) => ({
+        path: d.port,
+        label: d.label,
+        isCircuitPy: false, // DFU devices are not CircuitPython
+        vid: d.vid,
+        pid: d.pid,
+        inBootloader: d.in_bootloader,
+        serialNumber: d.serial_number ?? undefined,
+      }));
     } catch (error) {
       console.error('Failed to detect devices:', error);
-      // Tauri errors are often plain strings, not Error objects
-      const errorMessage = typeof error === 'string'
-        ? error
-        : error instanceof Error
-          ? error.message
-          : JSON.stringify(error);
+      const errorMessage =
+        typeof error === 'string'
+          ? error
+          : error instanceof Error
+            ? error.message
+            : JSON.stringify(error);
       throw new Error(`Failed to detect devices: ${errorMessage}`);
     }
   }
@@ -44,123 +90,68 @@ export class DeviceService implements IDeviceRepository {
     onProgress?: (progress: UpdateProgress) => void
   ): Promise<void> {
     try {
-      // Step 1: Wipe device
-      if (onProgress) {
-        onProgress({
-          devicePath: device.path,
-          stage: 'wiping',
-          progress: 0,
-          message: 'Wiping device...',
-        });
-      }
-
-      await this.wipeDevice(device);
-
-      // Step 2: Copy firmware
-      if (onProgress) {
-        onProgress({
-          devicePath: device.path,
-          stage: 'copying',
-          progress: 0,
-          message: 'Copying firmware files...',
-        });
-      }
-
-      // Create a channel to receive progress updates
-      const progressChannel = new Channel<{
-        current_file: string;
-        total_files: number;
-        completed_files: number;
-      }>();
-
-      progressChannel.onmessage = (message) => {
-        if (onProgress) {
-          // Calculate progress as 0-80% of total (leaving 80-100% for configuring)
-          // Cap at 80 to ensure we never exceed this phase
-          const copyProgress = Math.min(
-            (message.completed_files / message.total_files) * 80,
-            80
-          );
-          onProgress({
-            devicePath: device.path,
-            stage: 'copying',
-            currentFile: message.current_file,
-            progress: copyProgress,
-            message: `Copying ${message.current_file}...`,
-          });
-        }
-      };
-
-      await invoke('copy_firmware', {
-        firmwarePath: firmware.localPath,
-        devicePath: device.path,
-        progressCallback: progressChannel,
-      });
-
-      // Step 3: Write config
-      if (onProgress) {
-        onProgress({
-          devicePath: device.path,
-          stage: 'configuring',
-          progress: 80,
-          message: 'Writing configuration...',
-        });
-      }
-
+      // Validate device role
       if (!device.role) {
         throw new Error('Device role not set');
       }
 
-      const configContent = getConfigForRole(device.role);
-
-      await invoke('write_config', {
-        devicePath: device.path,
-        role: device.role,
-        configContent,
-      });
-
-      // Step 4: Rename volume
+      // Initial progress
       if (onProgress) {
         onProgress({
           devicePath: device.path,
-          stage: 'configuring',
-          progress: 90,
-          message: 'Renaming volume...',
+          stage: 'preparing',
+          progress: 0,
+          message: 'Preparing device for update...',
         });
       }
 
-      try {
-        await this.renameVolume(device, 'BLUEBUZZAH');
+      // Create a channel to receive DFU progress updates
+      const progressChannel = new Channel<DfuProgress>();
 
-        // Find the actual path after rename (macOS may append " 1", " 2", etc.)
-        const actualPath = await invoke<string>('find_renamed_volume', {
-          oldPath: device.path,
-          expectedName: 'BLUEBUZZAH',
-        });
+      // Track last known progress values for log events
+      let lastStage: UpdateStage = 'preparing';
+      let lastProgress = 0;
 
-        // Extract label from the actual path
-        let newLabel = 'BLUEBUZZAH';
-        if (actualPath.startsWith('/Volumes/')) {
-          newLabel = actualPath.split('/').pop() || 'BLUEBUZZAH';
-        }
-
-        // Notify progress callback with new device info
+      progressChannel.onmessage = (dfuProgress) => {
         if (onProgress) {
-          onProgress({
-            devicePath: device.path,
-            stage: 'configuring',
-            progress: 95,
-            message: 'Volume renamed successfully',
-            newDeviceLabel: newLabel,
-            newDevicePath: actualPath,
-          });
-        }
-      } catch (error) {
-        // Non-critical error - log but continue
-        console.warn('Volume rename failed (non-critical):', error);
-      }
+          const mappedStage = mapDfuStageToUpdateStage(dfuProgress.stage);
 
-      // Step 5: Complete
+          // Log events only update the message, not the stage or progress
+          if (mappedStage === null) {
+            onProgress({
+              devicePath: device.path,
+              stage: lastStage,
+              progress: lastProgress,
+              message: dfuProgress.message,
+            });
+          } else {
+            // Update tracking for non-log events
+            lastStage = mappedStage;
+            lastProgress = dfuProgress.percent;
+
+            onProgress({
+              devicePath: device.path,
+              stage: mappedStage,
+              progress: dfuProgress.percent,
+              message: dfuProgress.message,
+              currentFile:
+                dfuProgress.sent !== undefined && dfuProgress.total !== undefined
+                  ? `${Math.round((dfuProgress.sent / 1024))}KB / ${Math.round((dfuProgress.total / 1024))}KB`
+                  : undefined,
+            });
+          }
+        }
+      };
+
+      // Call the DFU flash command
+      await invoke('flash_dfu_firmware', {
+        serialPort: device.path,
+        firmwarePath: firmware.localPath,
+        deviceRole: device.role,
+        progress: progressChannel,
+      });
+
+      // Final complete progress
       if (onProgress) {
         onProgress({
           devicePath: device.path,
@@ -171,11 +162,13 @@ export class DeviceService implements IDeviceRepository {
       }
     } catch (error) {
       console.error('Failed to deploy firmware:', error);
-      const errorMessage = typeof error === 'string'
-        ? error
-        : error instanceof Error
-          ? error.message
-          : JSON.stringify(error);
+      const errorMessage =
+        typeof error === 'string'
+          ? error
+          : error instanceof Error
+            ? error.message
+            : JSON.stringify(error);
+
       if (onProgress) {
         onProgress({
           devicePath: device.path,
@@ -188,50 +181,32 @@ export class DeviceService implements IDeviceRepository {
     }
   }
 
-  async wipeDevice(device: Device): Promise<void> {
-    try {
-      await invoke('wipe_device', {
-        devicePath: device.path,
-      });
-    } catch (error) {
-      console.error('Failed to wipe device:', error);
-      // Tauri errors are often plain strings, not Error objects
-      const errorMessage = typeof error === 'string'
-        ? error
-        : error instanceof Error
-          ? error.message
-          : JSON.stringify(error);
-      throw new Error(`Failed to wipe device: ${errorMessage}`);
-    }
-  }
-
   async validateDevice(device: Device): Promise<ValidationResult> {
+    // For DFU devices, validation is simpler - just check if the device is accessible
+    // Note: Bootloader mode devices are now supported - the protocol auto-detects and handles them
     try {
-      const result = await invoke<{
-        valid: boolean;
-        errors: string[];
-        warnings: string[];
-        available_space_mb?: number;
-        required_space_mb?: number;
-      }>('validate_device', {
-        devicePath: device.path,
-      });
+      // Basic validation - device exists and has required fields
+      if (!device.path) {
+        return {
+          valid: false,
+          errors: ['Device path is missing'],
+          warnings: [],
+        };
+      }
 
       return {
-        valid: result.valid,
-        errors: result.errors,
-        warnings: result.warnings,
-        availableSpaceMB: result.available_space_mb,
-        requiredSpaceMB: result.required_space_mb,
+        valid: true,
+        errors: [],
+        warnings: [],
       };
     } catch (error) {
       console.error('Failed to validate device:', error);
-      // Return invalid result on error
-      const errorMessage = typeof error === 'string'
-        ? error
-        : error instanceof Error
-          ? error.message
-          : JSON.stringify(error);
+      const errorMessage =
+        typeof error === 'string'
+          ? error
+          : error instanceof Error
+            ? error.message
+            : JSON.stringify(error);
       return {
         valid: false,
         errors: [`Validation failed: ${errorMessage}`],
@@ -240,7 +215,9 @@ export class DeviceService implements IDeviceRepository {
     }
   }
 
-  async validateDevices(devices: Device[]): Promise<Map<string, ValidationResult>> {
+  async validateDevices(
+    devices: Device[]
+  ): Promise<Map<string, ValidationResult>> {
     const results = new Map<string, ValidationResult>();
 
     // Validate all devices in parallel
@@ -251,22 +228,6 @@ export class DeviceService implements IDeviceRepository {
 
     await Promise.all(validationPromises);
     return results;
-  }
-
-  async renameVolume(device: Device, newName: string): Promise<void> {
-    try {
-      await invoke('rename_volume', {
-        devicePath: device.path,
-        newName,
-      });
-    } catch (error) {
-      const errorMessage = typeof error === 'string'
-        ? error
-        : error instanceof Error
-          ? error.message
-          : JSON.stringify(error);
-      throw new Error(`Failed to rename volume: ${errorMessage}`);
-    }
   }
 
   async performBatchUpdate(

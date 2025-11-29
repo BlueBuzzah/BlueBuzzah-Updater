@@ -1,15 +1,15 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Loader2,
   CheckCircle2,
   XCircle,
-  HardDrive,
+  CircuitBoard,
   Download,
-  Trash2,
   Copy,
   Settings,
   ClipboardCopy,
   RotateCcw,
+  Usb,
 } from 'lucide-react';
 import { Device, FirmwareRelease, UpdateProgress } from '@/types';
 import { firmwareService } from '@/services/FirmwareService';
@@ -54,8 +54,12 @@ export function InstallationProgress({
   const [logs, setLogs] = useState<string[]>([]);
   const [showLogs, setShowLogs] = useState(false);
   const [updatedDevices, setUpdatedDevices] = useState<Device[]>(devices);
+  const hasStartedRef = useRef(false);
 
   useEffect(() => {
+    // Prevent double-execution in React StrictMode (development only)
+    if (hasStartedRef.current) return;
+    hasStartedRef.current = true;
     startInstallation();
   }, []);
 
@@ -128,6 +132,7 @@ export function InstallationProgress({
 
       for (const device of updatedDevices) {
         addLog(`Starting update for ${device.label} (${device.role})...`);
+        let lastLoggedMessage: string | null = null;
 
         await deviceService.deployFirmware(device, firmware, (progress) => {
           // Check if device info was updated (volume renamed)
@@ -172,21 +177,17 @@ export function InstallationProgress({
 
           onProgressUpdate(device.path, progress);
 
-          // Add stage-specific logs
-          if (progress.stage === 'wiping') {
-            addLog(`Wiping ${device.label}...`);
-          } else if (progress.stage === 'copying') {
-            if (progress.currentFile) {
-              addLog(`Copying ${progress.currentFile} to ${device.label}...`);
+          // Log unique messages from DFU backend (prevents duplicate logs)
+          if (progress.message && progress.message !== lastLoggedMessage) {
+            // Skip noisy upload percentage messages (progress bar shows this)
+            if (!progress.message.startsWith('Uploading firmware...')) {
+              if (progress.stage === 'complete') {
+                addLog(`✓ ${device.label}: ${progress.message}`);
+              } else {
+                addLog(`${device.label}: ${progress.message}`);
+              }
             }
-          } else if (progress.stage === 'configuring') {
-            if (progress.message === 'Volume renamed successfully') {
-              // Already logged above
-            } else {
-              addLog(`Writing ${device.role} configuration to ${device.label}...`);
-            }
-          } else if (progress.stage === 'complete') {
-            addLog(`✓ ${device.label} update complete`);
+            lastLoggedMessage = progress.message;
           }
         });
 
@@ -199,7 +200,11 @@ export function InstallationProgress({
       onComplete(true);
     } catch (err) {
       const errorMessage =
-        err instanceof Error ? err.message : 'Unknown error occurred';
+        typeof err === 'string'
+          ? err
+          : err instanceof Error
+            ? err.message
+            : JSON.stringify(err) || 'Unknown error occurred';
       setError(errorMessage);
       setShowLogs(true); // Auto-expand logs on error
       addLog(`✗ Error: ${errorMessage}`);
@@ -211,8 +216,8 @@ export function InstallationProgress({
     switch (stageName) {
       case 'downloading':
         return <Download className="h-4 w-4" />;
-      case 'wiping':
-        return <Trash2 className="h-4 w-4" />;
+      case 'preparing':
+        return <Usb className="h-4 w-4" />;
       case 'copying':
         return <Copy className="h-4 w-4" />;
       case 'configuring':
@@ -361,7 +366,7 @@ export function InstallationProgress({
                 <CardHeader>
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-3">
-                      <HardDrive className="h-5 w-5" />
+                      <CircuitBoard className="h-5 w-5" />
                       <div>
                         <CardTitle className="text-base flex items-center gap-2">
                           {device.label}

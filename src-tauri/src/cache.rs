@@ -11,7 +11,6 @@ pub struct CachedFirmwareMetadata {
     pub tag_name: String,
     pub sha256_hash: String,
     pub zip_path: String,
-    pub extracted_path: String,
     pub downloaded_at: String,
     pub file_size: u64,
     pub published_at: String,
@@ -122,9 +121,8 @@ impl CacheManager {
 
         for (version, metadata) in index.iter() {
             let zip_exists = Path::new(&metadata.zip_path).exists();
-            let extracted_exists = Path::new(&metadata.extracted_path).exists();
 
-            if !zip_exists || !extracted_exists {
+            if !zip_exists {
                 missing_versions.push(version.clone());
             }
         }
@@ -151,7 +149,7 @@ impl CacheManager {
     }
 
     /// Migrate existing cached firmware to the index
-    /// Scans firmware directory for existing files and adds them to cache index
+    /// Scans firmware directory for existing zip files and adds them to cache index
     pub fn migrate_existing_cache(&self, firmware_dir: &Path) -> Result<Vec<String>, String> {
         if !firmware_dir.exists() {
             return Ok(Vec::new());
@@ -173,12 +171,6 @@ impl CacheManager {
                 if let Some(version) = path.file_stem().and_then(|s| s.to_str()) {
                     // Skip if already in index
                     if index.contains_key(version) {
-                        continue;
-                    }
-
-                    // Check if corresponding extracted directory exists
-                    let extracted_dir = firmware_dir.join(version);
-                    if !extracted_dir.exists() {
                         continue;
                     }
 
@@ -212,7 +204,6 @@ impl CacheManager {
                         tag_name: version.to_string(),
                         sha256_hash,
                         zip_path: path.to_string_lossy().to_string(),
-                        extracted_path: extracted_dir.to_string_lossy().to_string(),
                         downloaded_at,
                         file_size,
                         published_at: "".to_string(), // Unknown for migrated cache
@@ -245,7 +236,6 @@ mod tests {
             tag_name: format!("v{}", version),
             sha256_hash: "abc123def456".to_string(),
             zip_path: "/path/to/zip".to_string(),
-            extracted_path: "/path/to/extracted".to_string(),
             downloaded_at: "2024-01-01T00:00:00Z".to_string(),
             file_size: 1024,
             published_at: "2024-01-01T00:00:00Z".to_string(),
@@ -426,10 +416,9 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
 
-        // Add entry pointing to non-existent files
+        // Add entry pointing to non-existent file
         let metadata = CachedFirmwareMetadata {
             zip_path: "/nonexistent/path.zip".to_string(),
-            extracted_path: "/nonexistent/extracted".to_string(),
             ..create_test_metadata("1.0.0")
         };
         cache_manager.update_entry(metadata).unwrap();
@@ -443,15 +432,12 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
 
-        // Create actual files
+        // Create actual zip file
         let zip_path = temp_dir.path().join("v1.0.0.zip");
-        let extracted_path = temp_dir.path().join("v1.0.0");
         fs::write(&zip_path, "test zip content").unwrap();
-        fs::create_dir(&extracted_path).unwrap();
 
         let metadata = CachedFirmwareMetadata {
             zip_path: zip_path.to_string_lossy().to_string(),
-            extracted_path: extracted_path.to_string_lossy().to_string(),
             ..create_test_metadata("1.0.0")
         };
         cache_manager.update_entry(metadata).unwrap();
@@ -524,16 +510,14 @@ mod tests {
     // ==================== Additional cache tests ====================
 
     #[test]
-    fn test_migrate_existing_cache_valid_pair() {
+    fn test_migrate_existing_cache_valid_zip() {
         let temp_dir = TempDir::new().unwrap();
         let firmware_dir = temp_dir.path().join("firmware");
         fs::create_dir_all(&firmware_dir).unwrap();
 
-        // Create zip file and extracted directory
+        // Create zip file
         let zip_path = firmware_dir.join("v1.0.0.zip");
-        let extracted_path = firmware_dir.join("v1.0.0");
         fs::write(&zip_path, "fake zip content").unwrap();
-        fs::create_dir(&extracted_path).unwrap();
 
         let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
         let migrated = cache_manager.migrate_existing_cache(&firmware_dir).unwrap();
@@ -552,11 +536,9 @@ mod tests {
         let firmware_dir = temp_dir.path().join("firmware");
         fs::create_dir_all(&firmware_dir).unwrap();
 
-        // Create zip and extracted dir
+        // Create zip file
         let zip_path = firmware_dir.join("v1.0.0.zip");
-        let extracted_path = firmware_dir.join("v1.0.0");
         fs::write(&zip_path, "fake zip content").unwrap();
-        fs::create_dir(&extracted_path).unwrap();
 
         let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
 
@@ -565,23 +547,6 @@ mod tests {
 
         // Migrate should skip already indexed
         let migrated = cache_manager.migrate_existing_cache(&firmware_dir).unwrap();
-        assert!(migrated.is_empty());
-    }
-
-    #[test]
-    fn test_migrate_existing_cache_requires_both_files() {
-        let temp_dir = TempDir::new().unwrap();
-        let firmware_dir = temp_dir.path().join("firmware");
-        fs::create_dir_all(&firmware_dir).unwrap();
-
-        // Create only zip file (no extracted dir)
-        let zip_path = firmware_dir.join("v1.0.0.zip");
-        fs::write(&zip_path, "fake zip content").unwrap();
-
-        let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
-        let migrated = cache_manager.migrate_existing_cache(&firmware_dir).unwrap();
-
-        // Should not migrate without both files
         assert!(migrated.is_empty());
     }
 

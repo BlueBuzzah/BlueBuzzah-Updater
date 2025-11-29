@@ -44,7 +44,6 @@ export const createMockCachedMetadata = (
   tag_name: 'v1.0.0',
   sha256_hash: 'abc123def456',
   zip_path: '/cache/firmware/v1.0.0.zip',
-  extracted_path: '/cache/firmware/v1.0.0',
   downloaded_at: '2024-01-15T12:00:00Z',
   file_size: 1024000,
   published_at: '2024-01-15T00:00:00Z',
@@ -73,9 +72,13 @@ export const createMockGitHubRelease = (overrides?: Partial<GitHubRelease>): Git
 // === Device Factories ===
 
 export const createMockDevice = (overrides?: Partial<Device>): Device => ({
-  path: '/Volumes/CIRCUITPY',
-  label: 'CIRCUITPY',
-  isCircuitPy: true,
+  path: '/dev/cu.usbmodem1234',
+  label: 'Feather nRF52840',
+  isCircuitPy: false,
+  vid: 0x239a,
+  pid: 0x8029,
+  inBootloader: false,
+  serialNumber: 'ABC123',
   ...overrides,
 });
 
@@ -91,10 +94,10 @@ export const createMockValidation = (overrides?: Partial<ValidationResult>): Val
 // === Progress Factories ===
 
 export const createMockProgress = (overrides?: Partial<UpdateProgress>): UpdateProgress => ({
-  devicePath: '/Volumes/CIRCUITPY',
+  devicePath: '/dev/cu.usbmodem1234',
   stage: 'copying',
   progress: 50,
-  message: 'Copying files...',
+  message: 'Uploading firmware...',
   ...overrides,
 });
 
@@ -144,8 +147,9 @@ export const createMockDevices = (count: number): Device[] => {
   return Array.from({ length: count }, (_, i) => {
     const num = i + 1;
     return createMockDevice({
-      path: `/Volumes/CIRCUITPY${num > 1 ? num : ''}`,
-      label: `CIRCUITPY${num > 1 ? num : ''}`,
+      path: `/dev/cu.usbmodem${1234 + i}`,
+      label: `Feather nRF52840 #${num}`,
+      serialNumber: `ABC${100 + i}`,
     });
   });
 };

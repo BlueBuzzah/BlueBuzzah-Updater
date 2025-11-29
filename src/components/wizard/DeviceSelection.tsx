@@ -17,7 +17,7 @@ import {
 import { useToast } from '@/components/ui/use-toast';
 import { deviceService } from '@/services/DeviceService';
 import { Device, DeviceRole } from '@/types';
-import { AlertCircle, CheckCircle2, HardDrive, RefreshCw } from 'lucide-react';
+import { AlertCircle, CheckCircle2, CircuitBoard, RefreshCw } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 interface DeviceSelectionProps {
@@ -150,15 +150,16 @@ export function DeviceSelection({
               No BlueBuzzah Devices Found
             </h3>
             <p className="text-sm text-muted-foreground mb-4">
-              Make sure your BlueBuzzah device is connected via USB and mounted
-              as BLUEBUZZAH or CIRCUITPY
+              Make sure your BlueBuzzah device is connected via USB.
+              The device should appear as a serial port.
             </p>
             <div className="text-sm text-left bg-muted p-4 rounded-md space-y-2">
               <p className="font-semibold">Troubleshooting:</p>
               <ul className="list-disc list-inside space-y-1 text-muted-foreground">
-                <li>Check USB cable connection</li>
-                <li>Ensure device is in CircuitPython mode</li>
+                <li>Check USB cable connection (use a data cable, not charge-only)</li>
+                <li>Ensure device drivers are installed</li>
                 <li>Try a different USB port</li>
+                <li>Press reset button twice quickly for DFU mode</li>
                 <li>Restart your device</li>
               </ul>
             </div>
@@ -185,7 +186,7 @@ export function DeviceSelection({
                 <CardHeader>
                   <div className="flex items-start justify-between">
                     <div className="flex items-center gap-3">
-                      <HardDrive className="h-5 w-5" />
+                      <CircuitBoard className="h-[1.875rem] w-[1.875rem]" />
                       <div>
                         <CardTitle className="text-base">
                           {device.label}
@@ -193,6 +194,11 @@ export function DeviceSelection({
                         <CardDescription className="text-xs mt-1">
                           {device.path}
                         </CardDescription>
+                        {device.serialNumber && (
+                          <p className="text-xs text-muted-foreground mt-1">
+                            S/N: {device.serialNumber}
+                          </p>
+                        )}
                       </div>
                     </div>
                     {selected && (

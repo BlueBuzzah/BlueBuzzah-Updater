@@ -54,18 +54,13 @@ pub async fn download_firmware(
         .map_err(|e| format!("Failed to get file metadata: {}", e))?
         .len();
 
-    // Extract the zip file
-    let extract_dir = firmware_dir.join(&version);
-    extract_zip(&firmware_file, &extract_dir)?;
-
-    // Update cache index
+    // Update cache index (no extraction needed - DFU reads directly from zip)
     let cache_manager = CacheManager::new(&app_data_dir)?;
     let metadata = CachedFirmwareMetadata {
         version: version.clone(),
         tag_name,
         sha256_hash,
         zip_path: firmware_file.to_string_lossy().to_string(),
-        extracted_path: extract_dir.to_string_lossy().to_string(),
         downloaded_at: chrono::Utc::now().to_rfc3339(),
         file_size,
         published_at,
@@ -73,7 +68,8 @@ pub async fn download_firmware(
     };
     cache_manager.update_entry(metadata)?;
 
-    Ok(extract_dir.to_string_lossy().to_string())
+    // Return the zip path for DFU flashing
+    Ok(firmware_file.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -92,12 +88,12 @@ pub async fn get_cached_firmware(
 
     match entry {
         Some(metadata) => {
-            // Verify files still exist
+            // Verify zip file still exists (DFU needs the zip, not extracted)
             let zip_path = Path::new(&metadata.zip_path);
-            let extracted_path = Path::new(&metadata.extracted_path);
 
-            if zip_path.exists() && extracted_path.exists() {
-                Ok(Some(metadata.extracted_path))
+            if zip_path.exists() {
+                // Return zip path for DFU flashing
+                Ok(Some(metadata.zip_path))
             } else {
                 // Files missing, remove from cache index
                 cache_manager.remove_entry(&version)?;
@@ -105,55 +101,15 @@ pub async fn get_cached_firmware(
             }
         }
         None => {
-            // Fallback: check if directory exists (for backwards compatibility)
-            let firmware_dir = app_data_dir.join("firmware").join(&version);
-            if firmware_dir.exists() {
-                Ok(Some(firmware_dir.to_string_lossy().to_string()))
+            // Fallback: check if zip file exists (for backwards compatibility)
+            let firmware_zip = app_data_dir.join("firmware").join(format!("{}.zip", version));
+            if firmware_zip.exists() {
+                Ok(Some(firmware_zip.to_string_lossy().to_string()))
             } else {
                 Ok(None)
             }
         }
     }
-}
-
-fn extract_zip(zip_path: &Path, extract_to: &Path) -> Result<(), String> {
-    let file = fs::File::open(zip_path)
-        .map_err(|e| format!("Failed to open zip file: {}", e))?;
-
-    let mut archive = zip::ZipArchive::new(file)
-        .map_err(|e| format!("Failed to read zip archive: {}", e))?;
-
-    fs::create_dir_all(extract_to)
-        .map_err(|e| format!("Failed to create extract directory: {}", e))?;
-
-    for i in 0..archive.len() {
-        let mut file = archive
-            .by_index(i)
-            .map_err(|e| format!("Failed to read file from archive: {}", e))?;
-
-        let outpath = match file.enclosed_name() {
-            Some(path) => extract_to.join(path),
-            None => continue,
-        };
-
-        if file.name().ends_with('/') {
-            fs::create_dir_all(&outpath)
-                .map_err(|e| format!("Failed to create directory: {}", e))?;
-        } else {
-            if let Some(p) = outpath.parent() {
-                if !p.exists() {
-                    fs::create_dir_all(p)
-                        .map_err(|e| format!("Failed to create parent directory: {}", e))?;
-                }
-            }
-            let mut outfile = fs::File::create(&outpath)
-                .map_err(|e| format!("Failed to create output file: {}", e))?;
-            std::io::copy(&mut file, &mut outfile)
-                .map_err(|e| format!("Failed to extract file: {}", e))?;
-        }
-    }
-
-    Ok(())
 }
 
 #[tauri::command]
@@ -194,13 +150,6 @@ pub async fn delete_cached_firmware(
     if zip_file.exists() {
         fs::remove_file(&zip_file)
             .map_err(|e| format!("Failed to delete zip file: {}", e))?;
-    }
-
-    // Delete extracted directory
-    let extracted_dir = firmware_dir.join(&version);
-    if extracted_dir.exists() {
-        fs::remove_dir_all(&extracted_dir)
-            .map_err(|e| format!("Failed to delete extracted directory: {}", e))?;
     }
 
     // Remove from cache index
@@ -277,154 +226,4 @@ pub async fn verify_and_clean_cache(
     Ok(missing_versions)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::Write;
-    use tempfile::TempDir;
-    use zip::write::FileOptions;
-
-    /// Helper function to create a test zip file with specified files
-    fn create_test_zip(path: &Path, files: &[(&str, &str)]) {
-        let file = fs::File::create(path).expect("Failed to create zip file");
-        let mut zip = zip::ZipWriter::new(file);
-        let options = FileOptions::default();
-
-        for (name, content) in files {
-            zip.start_file(*name, options).expect("Failed to start file in zip");
-            zip.write_all(content.as_bytes()).expect("Failed to write to zip");
-        }
-
-        zip.finish().expect("Failed to finish zip");
-    }
-
-    // ==================== extract_zip tests ====================
-
-    #[test]
-    fn test_extract_zip_valid_archive() {
-        let temp_dir = TempDir::new().unwrap();
-        let zip_path = temp_dir.path().join("test.zip");
-        let extract_to = temp_dir.path().join("extracted");
-
-        create_test_zip(&zip_path, &[
-            ("code.py", "print('hello')"),
-            ("config.py", "ROLE = 'primary'"),
-        ]);
-
-        let result = extract_zip(&zip_path, &extract_to);
-
-        assert!(result.is_ok());
-        assert!(extract_to.join("code.py").exists());
-        assert!(extract_to.join("config.py").exists());
-
-        // Verify content
-        let code_content = fs::read_to_string(extract_to.join("code.py")).unwrap();
-        assert_eq!(code_content, "print('hello')");
-    }
-
-    #[test]
-    fn test_extract_zip_nested_directories() {
-        let temp_dir = TempDir::new().unwrap();
-        let zip_path = temp_dir.path().join("test.zip");
-        let extract_to = temp_dir.path().join("extracted");
-
-        create_test_zip(&zip_path, &[
-            ("code.py", "main code"),
-            ("lib/helpers.py", "helper code"),
-            ("lib/utils/deep.py", "deep nested"),
-        ]);
-
-        let result = extract_zip(&zip_path, &extract_to);
-
-        assert!(result.is_ok());
-        assert!(extract_to.join("code.py").exists());
-        assert!(extract_to.join("lib/helpers.py").exists());
-        assert!(extract_to.join("lib/utils/deep.py").exists());
-
-        // Verify nested content
-        let deep_content = fs::read_to_string(extract_to.join("lib/utils/deep.py")).unwrap();
-        assert_eq!(deep_content, "deep nested");
-    }
-
-    #[test]
-    fn test_extract_zip_missing_file() {
-        let temp_dir = TempDir::new().unwrap();
-        let zip_path = temp_dir.path().join("nonexistent.zip");
-        let extract_to = temp_dir.path().join("extracted");
-
-        let result = extract_zip(&zip_path, &extract_to);
-
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Failed to open zip file"));
-    }
-
-    #[test]
-    fn test_extract_zip_invalid_archive() {
-        let temp_dir = TempDir::new().unwrap();
-        let zip_path = temp_dir.path().join("invalid.zip");
-        let extract_to = temp_dir.path().join("extracted");
-
-        // Write garbage bytes to simulate corrupted zip
-        fs::write(&zip_path, b"this is not a valid zip file").unwrap();
-
-        let result = extract_zip(&zip_path, &extract_to);
-
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Failed to read zip archive"));
-    }
-
-    #[test]
-    fn test_extract_zip_creates_parent_dirs() {
-        let temp_dir = TempDir::new().unwrap();
-        let zip_path = temp_dir.path().join("test.zip");
-        let extract_to = temp_dir.path().join("nested/path/to/extracted");
-
-        create_test_zip(&zip_path, &[("file.txt", "content")]);
-
-        let result = extract_zip(&zip_path, &extract_to);
-
-        assert!(result.is_ok());
-        assert!(extract_to.exists());
-        assert!(extract_to.join("file.txt").exists());
-    }
-
-    #[test]
-    fn test_extract_zip_empty_archive() {
-        let temp_dir = TempDir::new().unwrap();
-        let zip_path = temp_dir.path().join("empty.zip");
-        let extract_to = temp_dir.path().join("extracted");
-
-        // Create empty zip
-        let file = fs::File::create(&zip_path).unwrap();
-        let mut zip = zip::ZipWriter::new(file);
-        zip.finish().unwrap();
-
-        let result = extract_zip(&zip_path, &extract_to);
-
-        assert!(result.is_ok());
-        assert!(extract_to.exists());
-        // Directory should be created but empty (no files)
-        let entries: Vec<_> = fs::read_dir(&extract_to).unwrap().collect();
-        assert_eq!(entries.len(), 0);
-    }
-
-    #[test]
-    fn test_extract_zip_overwrites_existing() {
-        let temp_dir = TempDir::new().unwrap();
-        let zip_path = temp_dir.path().join("test.zip");
-        let extract_to = temp_dir.path().join("extracted");
-
-        // Create existing file with old content
-        fs::create_dir_all(&extract_to).unwrap();
-        fs::write(extract_to.join("code.py"), "OLD CONTENT").unwrap();
-
-        // Create zip with new content
-        create_test_zip(&zip_path, &[("code.py", "NEW CONTENT")]);
-
-        let result = extract_zip(&zip_path, &extract_to);
-
-        assert!(result.is_ok());
-        let content = fs::read_to_string(extract_to.join("code.py")).unwrap();
-        assert_eq!(content, "NEW CONTENT");
-    }
-}
+// Tests moved to src-tauri/src/dfu/firmware_reader.rs for DFU zip reading

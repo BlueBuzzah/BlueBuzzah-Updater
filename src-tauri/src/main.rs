@@ -1,19 +1,25 @@
 // Prevents additional console window on Windows in release
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod commands;
 mod cache;
+mod commands;
+mod dfu;
 
-use commands::device::{detect_devices, wipe_device, copy_firmware, write_config, validate_device, rename_volume, find_renamed_volume};
+use commands::dfu::{
+    detect_dfu_devices,
+    flash_dfu_firmware,
+    is_device_in_bootloader,
+    validate_firmware_package,
+};
 use commands::firmware::{
-    download_firmware,
-    get_cached_firmware,
     calculate_sha256,
-    get_cache_index,
-    delete_cached_firmware,
     clear_all_cache,
+    delete_cached_firmware,
+    download_firmware,
+    get_cache_index,
+    get_cached_firmware,
+    verify_and_clean_cache,
     verify_cached_firmware,
-    verify_and_clean_cache
 };
 
 fn main() {
@@ -24,13 +30,12 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
-            detect_devices,
-            wipe_device,
-            copy_firmware,
-            write_config,
-            validate_device,
-            rename_volume,
-            find_renamed_volume,
+            // DFU commands
+            detect_dfu_devices,
+            flash_dfu_firmware,
+            is_device_in_bootloader,
+            validate_firmware_package,
+            // Firmware cache commands
             download_firmware,
             get_cached_firmware,
             calculate_sha256,

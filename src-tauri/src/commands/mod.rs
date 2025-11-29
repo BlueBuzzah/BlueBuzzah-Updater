@@ -1,2 +1,2 @@
-pub mod device;
+pub mod dfu;
 pub mod firmware;

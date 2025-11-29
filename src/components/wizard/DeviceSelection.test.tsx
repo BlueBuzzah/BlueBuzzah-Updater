@@ -80,8 +80,8 @@ describe('DeviceSelection', () => {
   describe('Rendering Devices', () => {
     it('renders device list on success', async () => {
       const mockDevices = [
-        createMockDevice({ path: '/Volumes/CIRCUITPY', label: 'CIRCUITPY' }),
-        createMockDevice({ path: '/Volumes/BLUEBUZZAH', label: 'BLUEBUZZAH' }),
+        createMockDevice({ path: '/dev/cu.usbmodem1234', label: 'Feather nRF52840' }),
+        createMockDevice({ path: '/dev/cu.usbmodem5678', label: 'Feather nRF52840 #2' }),
       ];
       vi.mocked(deviceService.detectDevices).mockResolvedValue(mockDevices);
 
@@ -94,15 +94,15 @@ describe('DeviceSelection', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText('CIRCUITPY')).toBeInTheDocument();
-        expect(screen.getByText('BLUEBUZZAH')).toBeInTheDocument();
+        expect(screen.getByText('Feather nRF52840')).toBeInTheDocument();
+        expect(screen.getByText('Feather nRF52840 #2')).toBeInTheDocument();
       });
     });
 
     it('shows device label and path', async () => {
       const mockDevice = createMockDevice({
-        path: '/Volumes/CIRCUITPY',
-        label: 'CIRCUITPY',
+        path: '/dev/cu.usbmodem1234',
+        label: 'Feather nRF52840',
       });
       vi.mocked(deviceService.detectDevices).mockResolvedValue([mockDevice]);
 
@@ -115,9 +115,53 @@ describe('DeviceSelection', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText('CIRCUITPY')).toBeInTheDocument();
-        expect(screen.getByText('/Volumes/CIRCUITPY')).toBeInTheDocument();
+        expect(screen.getByText('Feather nRF52840')).toBeInTheDocument();
+        expect(screen.getByText('/dev/cu.usbmodem1234')).toBeInTheDocument();
       });
+    });
+
+    it('shows device serial number when available', async () => {
+      const mockDevice = createMockDevice({
+        path: '/dev/cu.usbmodem1234',
+        label: 'Feather nRF52840',
+        serialNumber: 'SN12345678',
+      });
+      vi.mocked(deviceService.detectDevices).mockResolvedValue([mockDevice]);
+
+      render(
+        <DeviceSelection
+          selectedDevices={[]}
+          onDevicesChange={mockOnDevicesChange}
+          onRoleChange={mockOnRoleChange}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('S/N: SN12345678')).toBeInTheDocument();
+      });
+    });
+
+    it('does not show serial number when not available', async () => {
+      const mockDevice = createMockDevice({
+        path: '/dev/cu.usbmodem1234',
+        label: 'Feather nRF52840',
+        serialNumber: undefined,
+      });
+      vi.mocked(deviceService.detectDevices).mockResolvedValue([mockDevice]);
+
+      render(
+        <DeviceSelection
+          selectedDevices={[]}
+          onDevicesChange={mockOnDevicesChange}
+          onRoleChange={mockOnRoleChange}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('Feather nRF52840')).toBeInTheDocument();
+      });
+
+      expect(screen.queryByText(/S\/N:/)).not.toBeInTheDocument();
     });
 
     it('shows device count badge', async () => {
@@ -168,7 +212,7 @@ describe('DeviceSelection', () => {
 
       await waitFor(() => {
         expect(screen.getByText('Troubleshooting:')).toBeInTheDocument();
-        expect(screen.getByText('Check USB cable connection')).toBeInTheDocument();
+        expect(screen.getByText(/Check USB cable connection/)).toBeInTheDocument();
       });
     });
 
@@ -203,11 +247,11 @@ describe('DeviceSelection', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText('CIRCUITPY')).toBeInTheDocument();
+        expect(screen.getByText('Feather nRF52840')).toBeInTheDocument();
       });
 
       // Click the card to select
-      fireEvent.click(screen.getByText('CIRCUITPY'));
+      fireEvent.click(screen.getByText('Feather nRF52840'));
 
       expect(mockOnDevicesChange).toHaveBeenCalledWith([mockDevice]);
     });
@@ -299,11 +343,11 @@ describe('DeviceSelection', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText('CIRCUITPY')).toBeInTheDocument();
+        expect(screen.getByText('Feather nRF52840 #1')).toBeInTheDocument();
       });
 
       // Click second device
-      fireEvent.click(screen.getByText('CIRCUITPY2'));
+      fireEvent.click(screen.getByText('Feather nRF52840 #2'));
 
       // Should call onDevicesChange with both devices and auto-assigned roles
       expect(mockOnDevicesChange).toHaveBeenCalledWith(
@@ -362,7 +406,7 @@ describe('DeviceSelection', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByText('CIRCUITPY')).toBeInTheDocument();
+        expect(screen.getByText('Feather nRF52840')).toBeInTheDocument();
       });
 
       // Click refresh and wait for re-detection to complete

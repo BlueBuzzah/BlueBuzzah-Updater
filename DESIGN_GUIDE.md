@@ -448,7 +448,7 @@ transition: all 200ms ease-in-out;
 
 - `HardDrive`: Device representation
 - `Download`: Firmware download state
-- `Trash2`: Wiping/cleanup operations
+- `Usb`: Device preparation (bootloader entry)
 - `Copy`: File copying operations
 - `Settings`: Configuration steps
 - `CheckCircle2`: Success states
@@ -539,17 +539,17 @@ transition: all 200ms ease-in-out;
 
 1. **Downloading** (0-20%): Fetch firmware from GitHub
 2. **Installing** (20-100%): Update each device sequentially
-   - **Wiping**: Clear old firmware
-   - **Copying**: Transfer new files (shows current file)
-   - **Configuring**: Write role-specific config.py
+   - **Preparing**: Enter bootloader mode (1200 baud touch)
+   - **Copying**: Transfer firmware via DFU protocol
+   - **Configuring**: Send role configuration command
    - **Complete**: Per-device completion
 
 **Real-time Updates**
 
 - Progress bars update smoothly
-- Current file being copied displays below progress
+- Transfer progress shows bytes sent
 - Logs append with timestamp
-- Stage icons change (Download → Trash → Copy → Settings → Check)
+- Stage icons change (Download → Usb → Copy → Settings → Check)
 
 ### Step 4: Success Screen
 

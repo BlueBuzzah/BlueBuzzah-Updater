@@ -99,20 +99,22 @@ describe('getErrorGuidance', () => {
     });
   });
 
-  describe('WIPE_FAILED pattern', () => {
-    it('matches "wipe" errors', () => {
-      expect(getErrorGuidance('Failed to wipe device')).toBe(ERROR_GUIDANCE.WIPE_FAILED);
-      expect(getErrorGuidance('Wipe operation failed')).toBe(ERROR_GUIDANCE.WIPE_FAILED);
+  describe('INVALID_FIRMWARE_FORMAT pattern', () => {
+    it('matches "missing file" errors', () => {
+      expect(getErrorGuidance('Missing file in firmware.zip: manifest.json')).toBe(ERROR_GUIDANCE.INVALID_FIRMWARE_FORMAT);
+      expect(getErrorGuidance('Missing file: firmware.bin')).toBe(ERROR_GUIDANCE.INVALID_FIRMWARE_FORMAT);
     });
 
-    it('matches "remove" errors', () => {
-      expect(getErrorGuidance('Could not remove files')).toBe(ERROR_GUIDANCE.WIPE_FAILED);
-      expect(getErrorGuidance('Remove operation failed')).toBe(ERROR_GUIDANCE.WIPE_FAILED);
+    it('matches manifest.json errors', () => {
+      expect(getErrorGuidance('Cannot find manifest.json')).toBe(ERROR_GUIDANCE.INVALID_FIRMWARE_FORMAT);
     });
 
-    it('matches "delete" errors', () => {
-      expect(getErrorGuidance('Delete operation failed')).toBe(ERROR_GUIDANCE.WIPE_FAILED);
-      expect(getErrorGuidance('Failed to delete file')).toBe(ERROR_GUIDANCE.WIPE_FAILED);
+    it('matches firmware.bin errors', () => {
+      expect(getErrorGuidance('firmware.bin not found in package')).toBe(ERROR_GUIDANCE.INVALID_FIRMWARE_FORMAT);
+    });
+
+    it('matches firmware.dat errors', () => {
+      expect(getErrorGuidance('Missing firmware.dat')).toBe(ERROR_GUIDANCE.INVALID_FIRMWARE_FORMAT);
     });
   });
 

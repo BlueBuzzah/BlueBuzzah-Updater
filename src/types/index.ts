@@ -22,7 +22,6 @@ export interface CachedFirmwareMetadata {
   tag_name: string;
   sha256_hash: string;
   zip_path: string;
-  extracted_path: string;
   downloaded_at: string;
   file_size: number;
   published_at: string;
@@ -32,10 +31,24 @@ export interface CachedFirmwareMetadata {
 export type FirmwareCacheIndex = Record<string, CachedFirmwareMetadata>;
 
 export interface Device {
-  path: string;
-  label: string;
+  path: string;           // Serial port path (e.g., "/dev/cu.usbmodem1234" or "COM3")
+  label: string;          // Display label for the device
   role?: DeviceRole;
-  isCircuitPy: boolean;
+  isCircuitPy: boolean;   // false for DFU devices
+  // DFU-specific fields
+  vid?: number;           // USB Vendor ID
+  pid?: number;           // USB Product ID
+  inBootloader?: boolean; // Whether device is in bootloader mode
+  serialNumber?: string;  // Device serial number
+}
+
+// DFU progress event from backend
+export interface DfuProgress {
+  stage: string;          // Stage name (reading, bootloader, uploading, etc.)
+  sent?: number;          // Bytes sent (for uploading)
+  total?: number;         // Total bytes (for uploading)
+  percent: number;        // Progress percentage (0-100)
+  message: string;        // Human-readable message
 }
 
 export type DeviceRole = 'PRIMARY' | 'SECONDARY';
@@ -57,7 +70,7 @@ export interface UpdateProgress {
 
 export type UpdateStage =
   | 'downloading'
-  | 'wiping'
+  | 'preparing'
   | 'copying'
   | 'configuring'
   | 'validating'
