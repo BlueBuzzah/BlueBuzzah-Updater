@@ -19,6 +19,7 @@ export interface IDeviceRepository {
   ): Promise<void>;
   validateDevice(device: Device): Promise<ValidationResult>;
   validateDevices(devices: Device[]): Promise<Map<string, ValidationResult>>;
+  cancelFlash(): Promise<void>;
 }
 
 // Map DFU stages to UpdateStage enum (returns null for log events)
@@ -42,6 +43,8 @@ function mapDfuStageToUpdateStage(dfuStage: string): UpdateStage | null {
       return 'configuring'; // Post-transfer phases
     case 'complete':
       return 'complete';
+    case 'cancelled':
+      return 'cancelled';
     case 'log':
       return null; // Log events don't change the stage
     default:
@@ -262,6 +265,19 @@ export class DeviceService implements IDeviceRepository {
         : 'Some devices failed to update',
       deviceUpdates: results,
     };
+  }
+
+  /**
+   * Cancel any in-progress firmware flash operation.
+   * Sets a global cancellation flag that is checked during the DFU process.
+   */
+  async cancelFlash(): Promise<void> {
+    try {
+      await invoke('cancel_dfu_flash');
+    } catch (error) {
+      console.error('Failed to cancel flash:', error);
+      throw error;
+    }
   }
 }
 

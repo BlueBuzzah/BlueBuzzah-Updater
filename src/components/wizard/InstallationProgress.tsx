@@ -1,32 +1,44 @@
-import { useEffect, useRef, useState } from 'react';
 import {
-  Loader2,
-  CheckCircle2,
-  XCircle,
-  CircuitBoard,
-  Download,
-  Copy,
-  Settings,
-  ClipboardCopy,
-  RotateCcw,
-  Usb,
-} from 'lucide-react';
-import { Device, FirmwareRelease, UpdateProgress } from '@/types';
-import { firmwareService } from '@/services/FirmwareService';
-import { deviceService } from '@/services/DeviceService';
-import { useWizardStore } from '@/stores/wizardStore';
-import { Progress } from '@/components/ui/progress';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
+	AlertDialog,
+	AlertDialogAction,
+	AlertDialogCancel,
+	AlertDialogContent,
+	AlertDialogDescription,
+	AlertDialogFooter,
+	AlertDialogHeader,
+	AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { getErrorGuidance, formatValidationErrors } from '@/lib/error-messages';
+import {
+	Card,
+	CardContent,
+	CardDescription,
+	CardHeader,
+	CardTitle,
+} from '@/components/ui/card';
+import { Progress } from '@/components/ui/progress';
 import { useToast } from '@/components/ui/use-toast';
+import { formatValidationErrors, getErrorGuidance } from '@/lib/error-messages';
+import { deviceService } from '@/services/DeviceService';
+import { firmwareService } from '@/services/FirmwareService';
+import { useWizardStore } from '@/stores/wizardStore';
+import { Device, FirmwareRelease, UpdateProgress } from '@/types';
+import {
+	AlertTriangle,
+	Ban,
+	CheckCircle2,
+	CircuitBoard,
+	ClipboardCopy,
+	Copy,
+	Download,
+	Loader2,
+	RotateCcw,
+	Settings,
+	Usb,
+	XCircle
+} from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 
 interface InstallationProgressProps {
   release: FirmwareRelease;
@@ -54,6 +66,8 @@ export function InstallationProgress({
   const [logs, setLogs] = useState<string[]>([]);
   const [showLogs, setShowLogs] = useState(false);
   const [updatedDevices, setUpdatedDevices] = useState<Device[]>(devices);
+  const [showStopConfirm, setShowStopConfirm] = useState(false);
+  const [isCancelling, setIsCancelling] = useState(false);
   const hasStartedRef = useRef(false);
 
   useEffect(() => {
@@ -78,6 +92,21 @@ export function InstallationProgress({
 
   const handleStartOver = () => {
     reset();
+  };
+
+  const handleStopClick = () => {
+    setShowStopConfirm(true);
+  };
+
+  const confirmStop = async () => {
+    setShowStopConfirm(false);
+    setIsCancelling(true);
+    addLog('Cancellation requested - stopping installation...');
+    try {
+      await deviceService.cancelFlash();
+    } catch (err) {
+      console.error('Failed to cancel:', err);
+    }
   };
 
   const startInstallation = async () => {
@@ -226,6 +255,8 @@ export function InstallationProgress({
         return <CheckCircle2 className="h-4 w-4" />;
       case 'error':
         return <XCircle className="h-4 w-4" />;
+      case 'cancelled':
+        return <AlertTriangle className="h-4 w-4" />;
       default:
         return <Loader2 className="h-4 w-4 animate-spin" />;
     }
@@ -282,7 +313,29 @@ export function InstallationProgress({
       {!error && (
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Overall Progress</CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base">Overall Progress</CardTitle>
+              {stage !== 'complete' && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleStopClick}
+                  disabled={isCancelling}
+                >
+                  {isCancelling ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Stopping...
+                    </>
+                  ) : (
+                    <>
+                      <Ban className="h-4 w-4 mr-2" />
+                      Stop
+                    </>
+                  )}
+                </Button>
+              )}
+            </div>
           </CardHeader>
           <CardContent className="space-y-3">
             <Progress value={getOverallProgress()} className="h-2" />
@@ -360,6 +413,7 @@ export function InstallationProgress({
             const progress = deviceProgress.get(device.path);
             const isComplete = progress?.stage === 'complete';
             const hasError = progress?.stage === 'error';
+            const isCancelled = progress?.stage === 'cancelled';
 
             return (
               <Card key={device.path}>
@@ -385,7 +439,10 @@ export function InstallationProgress({
                     {hasError && (
                       <XCircle className="h-5 w-5 text-destructive" />
                     )}
-                    {!isComplete && !hasError && (
+                    {isCancelled && (
+                      <AlertTriangle className="h-5 w-5 text-amber-500" />
+                    )}
+                    {!isComplete && !hasError && !isCancelled && (
                       <Loader2 className="h-5 w-5 animate-spin" />
                     )}
                   </div>
@@ -466,6 +523,28 @@ export function InstallationProgress({
           </CardContent>
         )}
       </Card>
+
+      {/* Stop Confirmation Dialog */}
+      <AlertDialog open={showStopConfirm} onOpenChange={setShowStopConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Stop Installation?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Stopping the installation may leave your device in bootloader mode.
+              You can recover by pressing the reset button twice quickly.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Continue</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={confirmStop}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Stop Anyway
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

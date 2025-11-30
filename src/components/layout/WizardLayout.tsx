@@ -50,6 +50,7 @@ export function WizardLayout({
   onBack,
   children,
 }: WizardLayoutProps) {
+  const isFirmwareSelection = currentStep === 0;
   const isInstalling = currentStep === 2;
   const isComplete = currentStep === 3;
 
@@ -134,7 +135,7 @@ export function WizardLayout({
       </main>
 
       {/* Footer Navigation */}
-      {!isInstalling && !isComplete && (
+      {!isFirmwareSelection && !isInstalling && !isComplete && (
         <footer className="border-t bg-muted/20">
           <div className="container mx-auto px-6 py-4">
             <div className="flex justify-between max-w-4xl mx-auto">

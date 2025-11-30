@@ -3,9 +3,18 @@
 //! These commands expose the DFU functionality to the frontend.
 
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::thread;
 use tauri::ipc::Channel;
+
+/// Global cancellation flag for DFU operations.
+static DFU_CANCELLED: AtomicBool = AtomicBool::new(false);
+
+/// Check if cancellation was requested.
+pub fn is_dfu_cancelled() -> bool {
+    DFU_CANCELLED.load(Ordering::SeqCst)
+}
 
 use crate::dfu::{
     find_nrf52_devices, upload_firmware, DfuStage, Nrf52Device,
@@ -72,6 +81,7 @@ impl From<DfuStage> for DfuProgressEvent {
             DfuStage::ConfiguringRole => ("configuring", None, None),
             DfuStage::Complete => ("complete", None, None),
             DfuStage::Log { .. } => ("log", None, None),
+            DfuStage::Cancelled => ("cancelled", None, None),
         };
 
         Self {
@@ -139,6 +149,9 @@ pub async fn flash_dfu_firmware(
     device_role: String,
     progress: Channel<DfuProgressEvent>,
 ) -> Result<(), String> {
+    // Reset cancellation flag at start of new operation
+    DFU_CANCELLED.store(false, Ordering::SeqCst);
+
     // Create a channel for progress updates from the blocking thread
     let (tx, rx) = mpsc::channel::<DfuStage>();
 
@@ -151,11 +164,17 @@ pub async fn flash_dfu_firmware(
         }
     });
 
-    // Run DFU in a blocking task
+    // Run DFU in a blocking task with cancellation support
     let result = tokio::task::spawn_blocking(move || {
-        upload_firmware(&serial_port, &firmware_path, &device_role, |stage| {
-            let _ = tx.send(stage);
-        })
+        upload_firmware(
+            &serial_port,
+            &firmware_path,
+            &device_role,
+            |stage| {
+                let _ = tx.send(stage);
+            },
+            is_dfu_cancelled,
+        )
     })
     .await
     .map_err(|e| format!("DFU task panicked: {}", e))?;
@@ -198,6 +217,16 @@ pub async fn validate_firmware_package(firmware_path: String) -> Result<Firmware
     })
     .await
     .map_err(|e| format!("Validation failed: {}", e))?
+}
+
+/// Cancel any in-progress DFU flash operation.
+///
+/// Sets a global cancellation flag that is checked during the DFU process.
+/// The operation will stop at the next safe point.
+#[tauri::command]
+pub async fn cancel_dfu_flash() -> Result<(), String> {
+    DFU_CANCELLED.store(true, Ordering::SeqCst);
+    Ok(())
 }
 
 /// Information about a firmware package.

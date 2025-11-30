@@ -75,7 +75,8 @@ export type UpdateStage =
   | 'configuring'
   | 'validating'
   | 'complete'
-  | 'error';
+  | 'error'
+  | 'cancelled';
 
 export interface UpdateResult {
   success: boolean;

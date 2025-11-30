@@ -23,17 +23,15 @@ import { useToast } from '@/components/ui/use-toast';
 import { formatBytes, formatDate, truncateText } from '@/lib/utils';
 import { firmwareService } from '@/services/FirmwareService';
 import { FirmwareRelease } from '@/types';
-import { Calendar, Check, ChevronDown, ChevronUp, Download, FileText, HardDrive, Trash2 } from 'lucide-react';
+import { Calendar, ChevronDown, ChevronUp, Download, FileText, HardDrive, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 interface FirmwareSelectionProps {
   onSelect: (release: FirmwareRelease) => void;
-  selectedRelease: FirmwareRelease | null;
 }
 
 export function FirmwareSelection({
   onSelect,
-  selectedRelease,
 }: FirmwareSelectionProps) {
   const [releases, setReleases] = useState<FirmwareRelease[]>([]);
   const [loading, setLoading] = useState(true);
@@ -173,7 +171,6 @@ export function FirmwareSelection({
       <div className="flex flex-col gap-4">
         {releases.map((release, index) => {
           const isExpanded = expandedReleases.has(release.tagName);
-          const isSelected = selectedRelease?.tagName === release.tagName;
           const truncatedNotes = truncateText(release.releaseNotes, 150);
           const needsExpansion = release.releaseNotes.length > 150;
 
@@ -181,8 +178,6 @@ export function FirmwareSelection({
             <Card
               key={release.tagName}
               className={`transition-all hover:shadow-lg ${
-                isSelected ? 'ring-2 ring-primary' : ''
-              } ${
                 release.isCached
                   ? 'border-primary/50 shadow-[0_0_15px_rgba(53,182,242,0.15)]'
                   : ''
@@ -274,20 +269,10 @@ export function FirmwareSelection({
               <CardFooter>
                 <Button
                   className="w-full"
-                  variant={isSelected ? 'secondary' : 'default'}
                   onClick={() => onSelect(release)}
                 >
-                  {isSelected ? (
-                    <>
-                      <Check className="h-4 w-4 mr-2" />
-                      Selected
-                    </>
-                  ) : (
-                    <>
-                      <Download className="h-4 w-4 mr-2" />
-                      Select Version
-                    </>
-                  )}
+                  <Download className="h-4 w-4 mr-2" />
+                  Install {release.version}
                 </Button>
               </CardFooter>
             </Card>

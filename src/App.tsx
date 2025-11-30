@@ -6,6 +6,7 @@ import { InstallationProgress } from './components/wizard/InstallationProgress';
 import { SuccessScreen } from './components/wizard/SuccessScreen';
 import { Toaster } from './components/ui/toaster';
 import { exit } from '@tauri-apps/plugin-process';
+import type { FirmwareRelease } from './types';
 
 function App() {
   const {
@@ -82,13 +83,17 @@ function App() {
     await exit(0);
   };
 
+  const handleFirmwareSelect = (release: FirmwareRelease) => {
+    selectRelease(release);
+    nextStep();
+  };
+
   const renderStep = () => {
     switch (currentStep) {
       case 0:
         return (
           <FirmwareSelection
-            onSelect={selectRelease}
-            selectedRelease={selectedRelease}
+            onSelect={handleFirmwareSelect}
           />
         );
       case 1:

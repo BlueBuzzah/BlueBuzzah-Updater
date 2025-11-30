@@ -154,6 +154,16 @@ export const ERROR_GUIDANCE: Record<string, ErrorGuidance> = {
       'Contact support if you need a compatible firmware package',
     ],
   },
+  DFU_CANCELLED: {
+    title: 'Installation Cancelled',
+    description: 'The firmware update was cancelled before completion.',
+    resolutionSteps: [
+      'Your device may be in bootloader mode',
+      'Double-tap the reset button to enter DFU mode',
+      'Reconnect and restart the update to complete installation',
+      'If the device is unresponsive, unplug and reconnect it',
+    ],
+  },
 };
 
 export function getErrorGuidance(errorMessage: string): ErrorGuidance | null {
@@ -206,6 +216,9 @@ export function getErrorGuidance(errorMessage: string): ErrorGuidance | null {
   }
   if (lowerError.includes('role') && lowerError.includes('config')) {
     return ERROR_GUIDANCE.ROLE_CONFIG_FAILED;
+  }
+  if (lowerError.includes('cancelled') || lowerError.includes('canceled')) {
+    return ERROR_GUIDANCE.DFU_CANCELLED;
   }
 
   return null;

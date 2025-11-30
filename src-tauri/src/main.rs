@@ -6,6 +6,7 @@ mod commands;
 mod dfu;
 
 use commands::dfu::{
+    cancel_dfu_flash,
     detect_dfu_devices,
     flash_dfu_firmware,
     is_device_in_bootloader,
@@ -33,6 +34,7 @@ fn main() {
             // DFU commands
             detect_dfu_devices,
             flash_dfu_firmware,
+            cancel_dfu_flash,
             is_device_in_bootloader,
             validate_firmware_package,
             // Firmware cache commands

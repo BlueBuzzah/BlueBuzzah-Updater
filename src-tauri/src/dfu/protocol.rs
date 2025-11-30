@@ -61,6 +61,8 @@ pub enum DfuStage {
     Complete,
     /// Debug log message.
     Log { message: String },
+    /// Operation cancelled by user.
+    Cancelled,
 }
 
 impl DfuStage {
@@ -87,6 +89,8 @@ impl DfuStage {
             DfuStage::Complete => 100.0,
             // Log messages don't affect progress percentage
             DfuStage::Log { .. } => -1.0,
+            // Cancelled doesn't affect progress percentage
+            DfuStage::Cancelled => -1.0,
         }
     }
 
@@ -120,6 +124,7 @@ impl DfuStage {
             DfuStage::ConfiguringRole => "Configuring device role...".into(),
             DfuStage::Complete => "Update complete!".into(),
             DfuStage::Log { message } => message.clone(),
+            DfuStage::Cancelled => "Cancelled by user".into(),
         }
     }
 }
@@ -236,15 +241,28 @@ impl<T: DfuTransport, L: Fn(&str)> HciDfuProtocol<T, L> {
     ///
     /// Matches nrfutil behavior: after every 8 frames (4096 bytes = 1 flash page),
     /// wait for the bootloader to finish erasing/writing to flash.
-    pub fn send_firmware<F>(&mut self, firmware: &[u8], on_progress: F) -> DfuResult<()>
+    ///
+    /// Checks for cancellation before each chunk to allow graceful interruption.
+    pub fn send_firmware<F, C>(
+        &mut self,
+        firmware: &[u8],
+        on_progress: F,
+        is_cancelled: C,
+    ) -> DfuResult<()>
     where
         F: Fn(usize, usize),
+        C: Fn() -> bool,
     {
         let total = firmware.len();
         let mut sent = 0;
         let mut frames = 0;
 
         for chunk in firmware.chunks(FIRMWARE_CHUNK_SIZE) {
+            // Check for cancellation before each chunk
+            if is_cancelled() {
+                return Err(DfuError::Cancelled);
+            }
+
             let packet = build_firmware_data_packet(chunk);
             self.send_and_wait_ack(&packet)?;
 
@@ -285,19 +303,28 @@ impl<T: DfuTransport, L: Fn(&str)> HciDfuProtocol<T, L> {
 /// * `firmware_zip_path` - Path to the firmware.zip file
 /// * `device_role` - Role to configure ("PRIMARY" or "SECONDARY")
 /// * `on_progress` - Callback for progress updates
-pub fn upload_firmware<P, F>(
+/// * `is_cancelled` - Closure that returns true if cancellation was requested
+pub fn upload_firmware<P, F, C>(
     port_name: &str,
     firmware_zip_path: P,
     device_role: &str,
     on_progress: F,
+    is_cancelled: C,
 ) -> DfuResult<()>
 where
     P: AsRef<Path>,
     F: Fn(DfuStage),
+    C: Fn() -> bool,
 {
     // Step 1: Read firmware package
     on_progress(DfuStage::ReadingPackage);
     let firmware = read_firmware_zip(firmware_zip_path)?;
+
+    // Check for cancellation after reading package
+    if is_cancelled() {
+        on_progress(DfuStage::Cancelled);
+        return Err(DfuError::Cancelled);
+    }
 
     // Step 2: Get device info and serial number for tracking
     let device = get_device_by_port(port_name).ok_or(DfuError::NoDeviceFound)?;
@@ -314,6 +341,12 @@ where
         pid: device.pid,
         in_bootloader: already_in_bootloader,
     });
+
+    // Check for cancellation before entering bootloader
+    if is_cancelled() {
+        on_progress(DfuStage::Cancelled);
+        return Err(DfuError::Cancelled);
+    }
 
     // Step 3: Enter Serial DFU mode
     on_progress(DfuStage::EnteringBootloader);
@@ -337,6 +370,12 @@ where
         bootloader_device.port
     };
 
+    // Check for cancellation before connecting to bootloader
+    if is_cancelled() {
+        on_progress(DfuStage::Cancelled);
+        return Err(DfuError::Cancelled);
+    }
+
     // Step 4: Connect to bootloader
     on_progress(DfuStage::Connecting);
     let transport = SerialTransport::open(&bootloader_port)?;
@@ -349,6 +388,12 @@ where
     };
 
     let mut protocol = HciDfuProtocol::new(transport, log);
+
+    // Check for cancellation before starting DFU
+    if is_cancelled() {
+        on_progress(DfuStage::Cancelled);
+        return Err(DfuError::Cancelled);
+    }
 
     // Step 5: Start DFU
     on_progress(DfuStage::Starting);
@@ -365,11 +410,11 @@ where
     // Use wait_with_drain to keep the serial port active on macOS
     let erase_wait_ms = calculate_erase_wait_time(firmware_size);
     on_progress(DfuStage::Log {
-        message: format!("Waiting {}ms for flash erase...", erase_wait_ms),
+        message: "Waiting for flash erase...".to_string(),
     });
     protocol.wait_with_drain(erase_wait_ms)?;
     on_progress(DfuStage::Log {
-        message: "Erase wait complete, sending INIT packet...".to_string(),
+        message: "Erase complete, sending INIT...".to_string(),
     });
 
     // Step 6: Send init packet (firmware.dat)
@@ -388,9 +433,19 @@ where
 
     // Step 7: Send firmware data
     let total = firmware.firmware_data.len();
-    protocol.send_firmware(&firmware.firmware_data, |sent, _| {
-        on_progress(DfuStage::Uploading { sent, total });
-    })?;
+    let result = protocol.send_firmware(
+        &firmware.firmware_data,
+        |sent, _| {
+            on_progress(DfuStage::Uploading { sent, total });
+        },
+        &is_cancelled,
+    );
+
+    // Handle cancellation during firmware upload
+    if let Err(DfuError::Cancelled) = &result {
+        on_progress(DfuStage::Cancelled);
+    }
+    result?;
 
     // Step 8: Send stop data packet to finalize
     on_progress(DfuStage::Finalizing);

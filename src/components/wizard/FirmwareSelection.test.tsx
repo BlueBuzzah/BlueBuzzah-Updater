@@ -33,7 +33,7 @@ describe('FirmwareSelection', () => {
       );
 
       render(
-        <FirmwareSelection onSelect={mockOnSelect} selectedRelease={null} />
+        <FirmwareSelection onSelect={mockOnSelect} />
       );
 
       expect(screen.getByText('Loading firmware releases...')).toBeInTheDocument();
@@ -45,7 +45,7 @@ describe('FirmwareSelection', () => {
       );
 
       render(
-        <FirmwareSelection onSelect={mockOnSelect} selectedRelease={null} />
+        <FirmwareSelection onSelect={mockOnSelect} />
       );
 
       // Should show 4 skeleton cards
@@ -60,7 +60,7 @@ describe('FirmwareSelection', () => {
       vi.mocked(firmwareService.fetchReleases).mockResolvedValue(mockReleases);
 
       render(
-        <FirmwareSelection onSelect={mockOnSelect} selectedRelease={null} />
+        <FirmwareSelection onSelect={mockOnSelect} />
       );
 
       await waitFor(() => {
@@ -78,7 +78,7 @@ describe('FirmwareSelection', () => {
       vi.mocked(firmwareService.fetchReleases).mockResolvedValue([mockRelease]);
 
       render(
-        <FirmwareSelection onSelect={mockOnSelect} selectedRelease={null} />
+        <FirmwareSelection onSelect={mockOnSelect} />
       );
 
       await waitFor(() => {
@@ -92,7 +92,7 @@ describe('FirmwareSelection', () => {
       vi.mocked(firmwareService.fetchReleases).mockResolvedValue(mockReleases);
 
       render(
-        <FirmwareSelection onSelect={mockOnSelect} selectedRelease={null} />
+        <FirmwareSelection onSelect={mockOnSelect} />
       );
 
       await waitFor(() => {
@@ -118,7 +118,7 @@ describe('FirmwareSelection', () => {
       vi.mocked(firmwareService.fetchReleases).mockResolvedValue([cachedRelease]);
 
       render(
-        <FirmwareSelection onSelect={mockOnSelect} selectedRelease={null} />
+        <FirmwareSelection onSelect={mockOnSelect} />
       );
 
       await waitFor(() => {
@@ -140,7 +140,7 @@ describe('FirmwareSelection', () => {
       vi.mocked(firmwareService.fetchReleases).mockResolvedValue([mockRelease]);
 
       render(
-        <FirmwareSelection onSelect={mockOnSelect} selectedRelease={null} />
+        <FirmwareSelection onSelect={mockOnSelect} />
       );
 
       await waitFor(() => {
@@ -154,7 +154,7 @@ describe('FirmwareSelection', () => {
       vi.mocked(firmwareService.fetchReleases).mockResolvedValue([]);
 
       render(
-        <FirmwareSelection onSelect={mockOnSelect} selectedRelease={null} />
+        <FirmwareSelection onSelect={mockOnSelect} />
       );
 
       await waitFor(() => {
@@ -166,7 +166,7 @@ describe('FirmwareSelection', () => {
       vi.mocked(firmwareService.fetchReleases).mockResolvedValue([]);
 
       render(
-        <FirmwareSelection onSelect={mockOnSelect} selectedRelease={null} />
+        <FirmwareSelection onSelect={mockOnSelect} />
       );
 
       await waitFor(() => {
@@ -181,47 +181,18 @@ describe('FirmwareSelection', () => {
       vi.mocked(firmwareService.fetchReleases).mockResolvedValue([mockRelease]);
 
       render(
-        <FirmwareSelection onSelect={mockOnSelect} selectedRelease={null} />
+        <FirmwareSelection onSelect={mockOnSelect} />
       );
 
       await waitFor(() => {
         expect(screen.getByText('1.0.0')).toBeInTheDocument();
       });
 
-      fireEvent.click(screen.getByRole('button', { name: /select version/i }));
+      fireEvent.click(screen.getByRole('button', { name: /install 1\.0\.0/i }));
 
       expect(mockOnSelect).toHaveBeenCalledWith(mockRelease);
     });
 
-    it('selected release shows checkmark', async () => {
-      const mockRelease = createMockRelease({ version: '1.0.0' });
-      vi.mocked(firmwareService.fetchReleases).mockResolvedValue([mockRelease]);
-
-      render(
-        <FirmwareSelection onSelect={mockOnSelect} selectedRelease={mockRelease} />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('Selected')).toBeInTheDocument();
-      });
-    });
-
-    it('selected release has ring styling', async () => {
-      const mockRelease = createMockRelease({ version: '1.0.0' });
-      vi.mocked(firmwareService.fetchReleases).mockResolvedValue([mockRelease]);
-
-      render(
-        <FirmwareSelection onSelect={mockOnSelect} selectedRelease={mockRelease} />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('1.0.0')).toBeInTheDocument();
-      });
-
-      // Card should have ring-2 ring-primary class
-      const cards = document.querySelectorAll('.ring-2');
-      expect(cards.length).toBe(1);
-    });
   });
 
   describe('Release Notes Expansion', () => {
@@ -234,7 +205,7 @@ describe('FirmwareSelection', () => {
       vi.mocked(firmwareService.fetchReleases).mockResolvedValue([mockRelease]);
 
       render(
-        <FirmwareSelection onSelect={mockOnSelect} selectedRelease={null} />
+        <FirmwareSelection onSelect={mockOnSelect} />
       );
 
       await waitFor(() => {
@@ -251,7 +222,7 @@ describe('FirmwareSelection', () => {
       vi.mocked(firmwareService.fetchReleases).mockResolvedValue([mockRelease]);
 
       render(
-        <FirmwareSelection onSelect={mockOnSelect} selectedRelease={null} />
+        <FirmwareSelection onSelect={mockOnSelect} />
       );
 
       await waitFor(() => {
@@ -272,7 +243,7 @@ describe('FirmwareSelection', () => {
       vi.mocked(firmwareService.fetchReleases).mockResolvedValue([mockRelease]);
 
       render(
-        <FirmwareSelection onSelect={mockOnSelect} selectedRelease={null} />
+        <FirmwareSelection onSelect={mockOnSelect} />
       );
 
       await waitFor(() => {
@@ -302,7 +273,7 @@ describe('FirmwareSelection', () => {
       vi.mocked(firmwareService.fetchReleases).mockResolvedValue([cachedRelease]);
 
       render(
-        <FirmwareSelection onSelect={mockOnSelect} selectedRelease={null} />
+        <FirmwareSelection onSelect={mockOnSelect} />
       );
 
       await waitFor(() => {
@@ -332,7 +303,7 @@ describe('FirmwareSelection', () => {
       vi.mocked(firmwareService.fetchReleases).mockResolvedValue([cachedRelease]);
 
       render(
-        <FirmwareSelection onSelect={mockOnSelect} selectedRelease={null} />
+        <FirmwareSelection onSelect={mockOnSelect} />
       );
 
       await waitFor(() => {
@@ -341,8 +312,8 @@ describe('FirmwareSelection', () => {
 
       // Find and click the delete button (small button with trash icon)
       const buttons = screen.getAllByRole('button');
-      // The delete button is the small one (not "Select Version")
-      const deleteButton = buttons.find(btn => !btn.textContent?.includes('Select') && !btn.textContent?.includes('Selected'));
+      // The delete button is the small one (not "Install X.X.X")
+      const deleteButton = buttons.find(btn => !btn.textContent?.includes('Install'));
       if (deleteButton) {
         fireEvent.click(deleteButton);
 
@@ -360,7 +331,7 @@ describe('FirmwareSelection', () => {
       );
 
       render(
-        <FirmwareSelection onSelect={mockOnSelect} selectedRelease={null} />
+        <FirmwareSelection onSelect={mockOnSelect} />
       );
 
       // Should not crash - error is handled via toast
@@ -376,7 +347,7 @@ describe('FirmwareSelection', () => {
       vi.mocked(firmwareService.fetchReleases).mockResolvedValue([mockRelease]);
 
       render(
-        <FirmwareSelection onSelect={mockOnSelect} selectedRelease={null} />
+        <FirmwareSelection onSelect={mockOnSelect} />
       );
 
       await waitFor(() => {

@@ -202,7 +202,7 @@ describe('WizardLayout', () => {
       expect(screen.getByRole('button', { name: /back/i })).toBeInTheDocument();
     });
 
-    it('shows next button', () => {
+    it('hides footer on step 0 (firmware selection)', () => {
       render(
         <WizardLayout
           currentStep={0}
@@ -215,7 +215,9 @@ describe('WizardLayout', () => {
         </WizardLayout>
       );
 
-      expect(screen.getByRole('button', { name: /next/i })).toBeInTheDocument();
+      // No navigation buttons on firmware selection step
+      expect(screen.queryByRole('button', { name: /next/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /back/i })).not.toBeInTheDocument();
     });
 
     it('shows start installation button on step 1', () => {
@@ -237,7 +239,7 @@ describe('WizardLayout', () => {
     it('back button disabled when canGoBack is false', () => {
       render(
         <WizardLayout
-          currentStep={0}
+          currentStep={1}
           canGoNext={true}
           canGoBack={false}
           onNext={mockOnNext}
@@ -253,7 +255,7 @@ describe('WizardLayout', () => {
     it('next button disabled when canGoNext is false', () => {
       render(
         <WizardLayout
-          currentStep={0}
+          currentStep={1}
           canGoNext={false}
           canGoBack={false}
           onNext={mockOnNext}
@@ -263,7 +265,7 @@ describe('WizardLayout', () => {
         </WizardLayout>
       );
 
-      expect(screen.getByRole('button', { name: /next/i })).toBeDisabled();
+      expect(screen.getByRole('button', { name: /start installation/i })).toBeDisabled();
     });
   });
 
@@ -304,12 +306,12 @@ describe('WizardLayout', () => {
   });
 
   describe('Button Interactions', () => {
-    it('clicking next calls onNext', () => {
+    it('clicking start installation calls onNext', () => {
       render(
         <WizardLayout
-          currentStep={0}
+          currentStep={1}
           canGoNext={true}
-          canGoBack={false}
+          canGoBack={true}
           onNext={mockOnNext}
           onBack={mockOnBack}
         >
@@ -317,7 +319,7 @@ describe('WizardLayout', () => {
         </WizardLayout>
       );
 
-      fireEvent.click(screen.getByRole('button', { name: /next/i }));
+      fireEvent.click(screen.getByRole('button', { name: /start installation/i }));
 
       expect(mockOnNext).toHaveBeenCalledTimes(1);
     });
@@ -340,23 +342,6 @@ describe('WizardLayout', () => {
       expect(mockOnBack).toHaveBeenCalledTimes(1);
     });
 
-    it('clicking start installation calls onNext', () => {
-      render(
-        <WizardLayout
-          currentStep={1}
-          canGoNext={true}
-          canGoBack={true}
-          onNext={mockOnNext}
-          onBack={mockOnBack}
-        >
-          <div>Content</div>
-        </WizardLayout>
-      );
-
-      fireEvent.click(screen.getByRole('button', { name: /start installation/i }));
-
-      expect(mockOnNext).toHaveBeenCalledTimes(1);
-    });
   });
 
   describe('All Steps', () => {
@@ -374,8 +359,9 @@ describe('WizardLayout', () => {
       );
 
       expect(screen.getByText('Step 0 Content')).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /next/i })).toBeEnabled();
-      expect(screen.getByRole('button', { name: /back/i })).toBeDisabled();
+      // No navigation buttons on step 0 (firmware selection auto-advances)
+      expect(screen.queryByRole('button', { name: /next/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /back/i })).not.toBeInTheDocument();
     });
 
     it('renders correctly at step 1', () => {

@@ -110,25 +110,12 @@ describe('App', () => {
   });
 
   describe('Navigation Logic', () => {
-    it('next button disabled when no release selected', () => {
+    it('hides navigation footer on step 0', () => {
       render(<App />);
 
-      expect(screen.getByRole('button', { name: /next/i })).toBeDisabled();
-    });
-
-    it('next button enabled when release selected', () => {
-      const store = useWizardStore.getState();
-      store.selectRelease(createMockRelease());
-
-      render(<App />);
-
-      expect(screen.getByRole('button', { name: /next/i })).toBeEnabled();
-    });
-
-    it('back button disabled on step 0', () => {
-      render(<App />);
-
-      expect(screen.getByRole('button', { name: /back/i })).toBeDisabled();
+      // No Back/Next buttons on firmware selection step
+      expect(screen.queryByRole('button', { name: /next/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /back/i })).not.toBeInTheDocument();
     });
 
     it('back button enabled on step 1', () => {
@@ -143,13 +130,11 @@ describe('App', () => {
   });
 
   describe('Step Transitions', () => {
-    it('clicking next advances to step 1', async () => {
-      const store = useWizardStore.getState();
-      store.selectRelease(createMockRelease());
-
+    it('selecting firmware auto-advances to step 1', async () => {
       render(<App />);
 
-      fireEvent.click(screen.getByRole('button', { name: /next/i }));
+      // Click the "Select Firmware" button in the mocked component
+      fireEvent.click(screen.getByText('Select Firmware'));
 
       await waitFor(() => {
         expect(screen.getByTestId('device-selection')).toBeInTheDocument();

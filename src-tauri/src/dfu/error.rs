@@ -95,6 +95,10 @@ pub enum DfuError {
     /// Device has no serial number (required for tracking through mode changes).
     #[error("Device has no serial number - cannot track through mode changes")]
     NoSerialNumber,
+
+    /// Operation was cancelled by user.
+    #[error("Operation cancelled by user")]
+    Cancelled,
 }
 
 impl DfuError {
@@ -132,6 +136,7 @@ impl DfuError {
             DfuError::PacketTooLarge { .. } => "DFU-061",
             DfuError::RoleConfigFailed { .. } => "DFU-070",
             DfuError::NoSerialNumber => "DFU-054",
+            DfuError::Cancelled => "DFU-099",
         }
     }
 }
