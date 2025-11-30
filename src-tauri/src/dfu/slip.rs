@@ -3,7 +3,9 @@
 //! Implements RFC 1055 for framing serial data packets.
 //! See: https://datatracker.ietf.org/doc/html/rfc1055
 
+#[cfg(test)]
 use super::config::{SLIP_END, SLIP_ESC, SLIP_ESC_END, SLIP_ESC_ESC};
+#[cfg(test)]
 use super::error::{DfuError, DfuResult};
 
 /// Encode data using SLIP framing.
@@ -15,6 +17,7 @@ use super::error::{DfuError, DfuResult};
 ///
 /// # Returns
 /// SLIP-encoded bytes with frame delimiters
+#[cfg(test)]
 pub fn encode(data: &[u8]) -> Vec<u8> {
     // Pre-allocate with some extra space for escapes and delimiters
     let mut encoded = Vec::with_capacity(data.len() * 2 + 2);
@@ -87,6 +90,7 @@ pub fn decode(data: &[u8]) -> DfuResult<Vec<u8>> {
 /// Streaming SLIP decoder for incremental parsing.
 ///
 /// Useful for reading from a serial port where data arrives in chunks.
+#[cfg(test)]
 #[derive(Debug, Default)]
 pub struct SlipDecoder {
     buffer: Vec<u8>,
@@ -94,6 +98,7 @@ pub struct SlipDecoder {
     in_frame: bool,
 }
 
+#[cfg(test)]
 impl SlipDecoder {
     /// Create a new SLIP decoder.
     pub fn new() -> Self {

@@ -149,12 +149,6 @@ impl<T: DfuTransport, L: Fn(&str)> HciDfuProtocol<T, L> {
         }
     }
 
-    /// Clear any pending input data and reset decoder state.
-    pub fn clear_input(&mut self) -> DfuResult<()> {
-        self.slip_decoder.reset();
-        self.transport.clear_input()
-    }
-
     /// Wait for a specified duration while keeping the serial port active.
     ///
     /// This periodically reads from the port to drain any incoming data
@@ -460,15 +454,25 @@ where
     let app_device = wait_for_application_by_serial(&serial_number, REBOOT_TIMEOUT_MS)?;
 
     // Step 10: Configure device role
+    // Note: This will cause another reboot as the device restarts after role change
     on_progress(DfuStage::ConfiguringRole);
-    configure_device_role(&app_device.port, device_role)?;
+    configure_device_role(&app_device.port, device_role, &serial_number)?;
 
     on_progress(DfuStage::Complete);
     Ok(())
 }
 
 /// Configure the device role via serial command.
-fn configure_device_role(port_name: &str, role: &str) -> DfuResult<()> {
+///
+/// After receiving SET_ROLE, the device responds with:
+/// - Success: "[CONFIG] Role set to PRIMARY - restarting..." (then reboots)
+/// - Success: "[CONFIG] Role set to SECONDARY - restarting..." (then reboots)
+/// - Error: "[ERROR] Invalid role. Use: SET_ROLE:PRIMARY or SET_ROLE:SECONDARY"
+///
+/// Since the device reboots after a successful role change, we need to:
+/// 1. Send the command and wait for the [CONFIG] acknowledgment
+/// 2. Wait for the device to reboot and reappear
+fn configure_device_role(port_name: &str, role: &str, serial_number: &str) -> DfuResult<()> {
     let command = match role.to_uppercase().as_str() {
         "PRIMARY" => ROLE_PRIMARY_COMMAND,
         "SECONDARY" => ROLE_SECONDARY_COMMAND,
@@ -485,17 +489,22 @@ fn configure_device_role(port_name: &str, role: &str) -> DfuResult<()> {
     // Wait for device to finish booting and drain boot log output.
     // The device outputs initialization logs on boot which can contain
     // "ERROR" from hardware init - we need to drain these first.
+    // We wait for a period of silence (no data for 500ms) to indicate boot complete.
     let mut buffer = [0u8; 256];
-    let drain_timeout = Duration::from_millis(3000);
+    let drain_timeout = Duration::from_millis(5000);
     let drain_start = Instant::now();
+    let mut last_data_time = Instant::now();
+    const SILENCE_THRESHOLD_MS: u64 = 500;
 
     while drain_start.elapsed() < drain_timeout {
         let bytes_read = transport.read(&mut buffer, 200)?;
-        if bytes_read == 0 {
-            // No more data - device has finished booting
+        if bytes_read > 0 {
+            last_data_time = Instant::now();
+            // Keep draining boot output
+        } else if last_data_time.elapsed() > Duration::from_millis(SILENCE_THRESHOLD_MS) {
+            // No data for 500ms - device has likely finished booting
             break;
         }
-        // Keep draining boot output
     }
 
     // Clear any remaining input
@@ -506,7 +515,8 @@ fn configure_device_role(port_name: &str, role: &str) -> DfuResult<()> {
     transport.write(command.as_bytes())?;
     transport.flush()?;
 
-    // Wait for acknowledgment (or timeout)
+    // Wait for acknowledgment - device sends [CONFIG] on success, [ERROR] on failure
+    // After [CONFIG], the device will reboot, so we may lose the connection
     let timeout = Duration::from_millis(ROLE_CONFIG_TIMEOUT_MS);
     let start = Instant::now();
     let mut response = Vec::new();
@@ -518,13 +528,23 @@ fn configure_device_role(port_name: &str, role: &str) -> DfuResult<()> {
         if bytes_read > 0 {
             response.extend_from_slice(&buffer[..bytes_read]);
 
-            // Check for role-specific acknowledgment patterns
             let response_str = String::from_utf8_lossy(&response);
-            if response_str.contains("ROLE:") || response_str.contains("OK") {
+
+            // Check for success - device confirmed role change
+            if response_str.contains("[CONFIG]") && response_str.contains("Role set to") {
+                // Success! Device will now reboot.
+                // Close the transport before device disconnects
+                drop(transport);
+
+                // Wait for device to reboot and reappear
+                std::thread::sleep(Duration::from_millis(2000));
+                wait_for_application_by_serial(serial_number, REBOOT_TIMEOUT_MS)?;
+
                 return Ok(());
             }
-            // Only fail on NAK - device boot logs contain ERROR which we should ignore
-            if response_str.contains("NAK") || response_str.contains("INVALID") {
+
+            // Check for explicit error from firmware
+            if response_str.contains("[ERROR]") {
                 return Err(DfuError::RoleConfigFailed {
                     reason: response_str.to_string(),
                 });
@@ -532,9 +552,18 @@ fn configure_device_role(port_name: &str, role: &str) -> DfuResult<()> {
         }
     }
 
-    // If we got here without an explicit error, assume success
-    // (device may not echo back a response)
-    Ok(())
+    // Timeout without receiving [CONFIG] or [ERROR] - this is a failure
+    let response_str = String::from_utf8_lossy(&response);
+    Err(DfuError::RoleConfigFailed {
+        reason: format!(
+            "Timeout waiting for role configuration acknowledgment. Received: {}",
+            if response_str.is_empty() {
+                "(no response)"
+            } else {
+                &response_str
+            }
+        ),
+    })
 }
 
 #[cfg(test)]

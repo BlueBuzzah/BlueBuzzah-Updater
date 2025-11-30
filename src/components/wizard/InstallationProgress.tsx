@@ -161,66 +161,61 @@ export function InstallationProgress({
 
       for (const device of updatedDevices) {
         addLog(`Starting update for ${device.label} (${device.role})...`);
-        let lastLoggedMessage: string | null = null;
 
-        await deviceService.deployFirmware(device, firmware, (progress) => {
-          // Check if device info was updated (volume renamed)
-          if (progress.newDeviceLabel && progress.newDevicePath) {
-            // Update wizard store with new device info
-            updateDeviceInfo(device.path, progress.newDeviceLabel, progress.newDevicePath);
+        await deviceService.deployFirmware(
+          device,
+          firmware,
+          // Progress callback - updates UI state
+          (progress) => {
+            // Check if device info was updated (volume renamed)
+            if (progress.newDeviceLabel && progress.newDevicePath) {
+              // Update wizard store with new device info
+              updateDeviceInfo(device.path, progress.newDeviceLabel, progress.newDevicePath);
 
-            // Update local device references
-            setUpdatedDevices((prev) =>
-              prev.map((d) =>
-                d.path === device.path
-                  ? { ...d, label: progress.newDeviceLabel!, path: progress.newDevicePath! }
-                  : d
-              )
-            );
+              // Update local device references
+              setUpdatedDevices((prev) =>
+                prev.map((d) =>
+                  d.path === device.path
+                    ? { ...d, label: progress.newDeviceLabel!, path: progress.newDevicePath! }
+                    : d
+                )
+              );
 
-            // Update deviceProgress map with new path as key
-            setDeviceProgress((prev) => {
-              const next = new Map(prev);
-              const oldProgress = next.get(device.path);
-              if (oldProgress) {
-                next.delete(device.path);
-                next.set(progress.newDevicePath!, progress);
-              } else {
-                next.set(progress.newDevicePath!, progress);
-              }
-              return next;
-            });
+              // Update deviceProgress map with new path as key
+              setDeviceProgress((prev) => {
+                const next = new Map(prev);
+                const oldProgress = next.get(device.path);
+                if (oldProgress) {
+                  next.delete(device.path);
+                  next.set(progress.newDevicePath!, progress);
+                } else {
+                  next.set(progress.newDevicePath!, progress);
+                }
+                return next;
+              });
 
-            // Update device reference for subsequent callbacks
-            device.path = progress.newDevicePath!;
-            device.label = progress.newDeviceLabel!;
+              // Update device reference for subsequent callbacks
+              device.path = progress.newDevicePath!;
+              device.label = progress.newDeviceLabel!;
 
-            addLog(`✓ Volume renamed to ${progress.newDeviceLabel}`);
-          } else {
-            setDeviceProgress((prev) => {
-              const next = new Map(prev);
-              next.set(device.path, progress);
-              return next;
-            });
-          }
-
-          onProgressUpdate(device.path, progress);
-
-          // Log unique messages from DFU backend (prevents duplicate logs)
-          if (progress.message && progress.message !== lastLoggedMessage) {
-            // Skip noisy upload percentage messages (progress bar shows this)
-            if (!progress.message.startsWith('Uploading firmware...')) {
-              if (progress.stage === 'complete') {
-                addLog(`✓ ${device.label}: ${progress.message}`);
-              } else {
-                addLog(`${device.label}: ${progress.message}`);
-              }
+              addLog(`✓ Volume renamed to ${progress.newDeviceLabel}`);
+            } else {
+              setDeviceProgress((prev) => {
+                const next = new Map(prev);
+                next.set(device.path, progress);
+                return next;
+              });
             }
-            lastLoggedMessage = progress.message;
-          }
-        });
 
-        addLog(`Successfully updated ${device.label}`);
+            onProgressUpdate(device.path, progress);
+          },
+          // Log callback - goes directly to log panel
+          (logMessage) => {
+            addLog(`${device.label}: ${logMessage}`);
+          }
+        );
+
+        addLog(`✓ Successfully updated ${device.label}`);
       }
 
       // Stage 3: Complete

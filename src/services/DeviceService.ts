@@ -9,13 +9,15 @@ import {
   ValidationResult,
 } from '@/types';
 import { Channel, invoke } from '@tauri-apps/api/core';
+import { createProgressThrottle } from '@/lib/throttle';
 
 export interface IDeviceRepository {
   detectDevices(): Promise<Device[]>;
   deployFirmware(
     device: Device,
     firmware: FirmwareBundle,
-    onProgress?: (progress: UpdateProgress) => void
+    onProgress?: (progress: UpdateProgress) => void,
+    onLog?: (message: string) => void
   ): Promise<void>;
   validateDevice(device: Device): Promise<ValidationResult>;
   validateDevices(devices: Device[]): Promise<Map<string, ValidationResult>>;
@@ -49,6 +51,27 @@ function mapDfuStageToUpdateStage(dfuStage: string): UpdateStage | null {
       return null; // Log events don't change the stage
     default:
       return 'copying';
+  }
+}
+
+// Generate stable display messages per stage (not raw backend messages)
+function getStageDisplayMessage(stage: UpdateStage, dfuProgress: DfuProgress): string {
+  switch (stage) {
+    case 'preparing':
+      return 'Preparing device for update...';
+    case 'copying':
+      return 'Uploading firmware...';
+    case 'validating':
+      return 'Validating firmware...';
+    case 'configuring':
+      return 'Configuring device...';
+    case 'complete':
+      return 'Update complete!';
+    case 'error':
+    case 'cancelled':
+      return dfuProgress.message;
+    default:
+      return dfuProgress.message;
   }
 }
 
@@ -90,15 +113,21 @@ export class DeviceService implements IDeviceRepository {
   async deployFirmware(
     device: Device,
     firmware: FirmwareBundle,
-    onProgress?: (progress: UpdateProgress) => void
+    onProgress?: (progress: UpdateProgress) => void,
+    onLog?: (message: string) => void
   ): Promise<void> {
+    // Create throttled progress callback (100ms interval, 1% minimum change)
+    const throttledProgress = onProgress
+      ? createProgressThrottle(onProgress, 100, 1)
+      : null;
+
     try {
       // Validate device role
       if (!device.role) {
         throw new Error('Device role not set');
       }
 
-      // Initial progress
+      // Initial progress (sent immediately, not throttled)
       if (onProgress) {
         onProgress({
           devicePath: device.path,
@@ -111,39 +140,28 @@ export class DeviceService implements IDeviceRepository {
       // Create a channel to receive DFU progress updates
       const progressChannel = new Channel<DfuProgress>();
 
-      // Track last known progress values for log events
-      let lastStage: UpdateStage = 'preparing';
-      let lastProgress = 0;
-
       progressChannel.onmessage = (dfuProgress) => {
-        if (onProgress) {
-          const mappedStage = mapDfuStageToUpdateStage(dfuProgress.stage);
+        const mappedStage = mapDfuStageToUpdateStage(dfuProgress.stage);
 
-          // Log events only update the message, not the stage or progress
-          if (mappedStage === null) {
-            onProgress({
-              devicePath: device.path,
-              stage: lastStage,
-              progress: lastProgress,
-              message: dfuProgress.message,
-            });
-          } else {
-            // Update tracking for non-log events
-            lastStage = mappedStage;
-            lastProgress = dfuProgress.percent;
-
-            onProgress({
-              devicePath: device.path,
-              stage: mappedStage,
-              progress: dfuProgress.percent,
-              message: dfuProgress.message,
-              currentFile:
-                dfuProgress.sent !== undefined && dfuProgress.total !== undefined
-                  ? `${Math.round((dfuProgress.sent / 1024))}KB / ${Math.round((dfuProgress.total / 1024))}KB`
-                  : undefined,
-            });
-          }
+        // Log events go to log callback only, not to progress display
+        if (mappedStage === null) {
+          onLog?.(dfuProgress.message);
+          return;
         }
+
+        // Non-log events: emit throttled progress with stable display message
+        const displayMessage = getStageDisplayMessage(mappedStage, dfuProgress);
+
+        throttledProgress?.({
+          devicePath: device.path,
+          stage: mappedStage,
+          progress: dfuProgress.percent,
+          message: displayMessage,
+          currentFile:
+            dfuProgress.sent !== undefined && dfuProgress.total !== undefined
+              ? `${Math.round(dfuProgress.sent / 1024)}KB / ${Math.round(dfuProgress.total / 1024)}KB`
+              : undefined,
+        });
       };
 
       // Call the DFU flash command
@@ -154,7 +172,10 @@ export class DeviceService implements IDeviceRepository {
         progress: progressChannel,
       });
 
-      // Final complete progress
+      // Flush any pending throttled updates before final complete
+      throttledProgress?.flush();
+
+      // Final complete progress (sent immediately, not throttled)
       if (onProgress) {
         onProgress({
           devicePath: device.path,
