@@ -4,6 +4,9 @@ on:
   release:
     types: [published]
 
+# Default to no permissions - grant only what's needed per job
+permissions: {}
+
 jobs:
   # macOS build with code signing and notarization
   build-macos:

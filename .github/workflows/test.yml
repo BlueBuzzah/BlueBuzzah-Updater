@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+# Minimal permissions for test workflows
+permissions:
+  contents: read
+
 jobs:
   frontend-tests:
     name: React Tests
