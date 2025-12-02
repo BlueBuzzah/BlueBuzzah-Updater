@@ -1,0 +1,93 @@
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import { THERAPY_PROFILES } from '@/lib/therapy-profiles';
+import type { TherapyProfile } from '@/types';
+import { Activity, CheckCircle2, Feather, Settings } from 'lucide-react';
+
+interface ProfileSelectionProps {
+  selectedProfile: TherapyProfile | null;
+  onSelect: (profile: TherapyProfile) => void;
+}
+
+const profileIcons: Record<TherapyProfile, React.ReactNode> = {
+  NOISY: <Activity className="h-8 w-8 text-primary" />,
+  STANDARD: <Settings className="h-8 w-8 text-primary" />,
+  GENTLE: <Feather className="h-8 w-8 text-primary" />,
+};
+
+export function ProfileSelection({
+  selectedProfile,
+  onSelect,
+}: ProfileSelectionProps) {
+  return (
+    <div className="space-y-6">
+      <div className="text-center">
+        <h2 className="text-2xl font-bold mb-2">Select Therapy Profile</h2>
+        <p className="text-muted-foreground">
+          Choose a vibration pattern for your devices
+        </p>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-3">
+        {THERAPY_PROFILES.map((profile) => {
+          const isSelected = selectedProfile === profile.id;
+
+          return (
+            <Card
+              key={profile.id}
+              className={`transition-all cursor-pointer hover:shadow-lg ${
+                isSelected ? 'ring-2 ring-primary' : ''
+              }`}
+              onClick={() => onSelect(profile.id)}
+            >
+              <CardHeader className="text-center pb-2">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex-1" />
+                  {profileIcons[profile.id]}
+                  <div className="flex-1 flex justify-end">
+                    {isSelected && (
+                      <CheckCircle2 className="h-5 w-5 text-primary" />
+                    )}
+                  </div>
+                </div>
+                <CardTitle className="text-lg">{profile.name}</CardTitle>
+              </CardHeader>
+              <CardContent className="text-center">
+                <CardDescription className="text-sm">
+                  {profile.description}
+                </CardDescription>
+              </CardContent>
+            </Card>
+          );
+        })}
+      </div>
+
+      <Card className="bg-muted/50">
+        <CardContent className="pt-6">
+          <div className="text-sm text-muted-foreground">
+            <p className="font-medium text-foreground mb-2">Profile Details:</p>
+            <ul className="space-y-2">
+              <li>
+                <span className="font-medium">Noisy:</span> Best for general
+                therapy with unpredictable patterns that prevent adaptation
+              </li>
+              <li>
+                <span className="font-medium">Standard:</span> Reliable,
+                consistent pulses ideal for structured sessions
+              </li>
+              <li>
+                <span className="font-medium">Gentle:</span> Lower intensity for
+                users who prefer softer stimulation
+              </li>
+            </ul>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

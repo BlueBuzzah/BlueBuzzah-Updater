@@ -17,7 +17,7 @@ pub fn is_dfu_cancelled() -> bool {
 }
 
 use crate::dfu::{
-    find_nrf52_devices, upload_firmware, DfuStage, Nrf52Device,
+    configure_device_profile, find_nrf52_devices, upload_firmware, DfuStage, Nrf52Device,
 };
 
 /// Device information for the frontend.
@@ -227,6 +227,132 @@ pub async fn validate_firmware_package(firmware_path: String) -> Result<Firmware
 pub async fn cancel_dfu_flash() -> Result<(), String> {
     DFU_CANCELLED.store(true, Ordering::SeqCst);
     Ok(())
+}
+
+/// Progress event sent to the frontend during profile configuration.
+#[derive(Debug, Clone, Serialize)]
+pub struct ProfileProgressEvent {
+    /// Current stage name: "connecting", "sending", "rebooting", "complete", "error"
+    pub stage: String,
+    /// Progress percentage (0-100).
+    pub percent: f32,
+    /// Human-readable message.
+    pub message: String,
+}
+
+/// Set the therapy profile for a device.
+///
+/// This command configures a device's therapy profile by sending a serial command.
+/// The device must be in APPLICATION mode (not bootloader mode).
+/// After configuration, the device will automatically reboot.
+///
+/// # Arguments
+/// * `serial_port` - Serial port of the device
+/// * `profile` - Profile to set ("NOISY", "STANDARD", or "GENTLE")
+/// * `progress` - Channel for progress updates
+#[tauri::command]
+pub async fn set_device_profile(
+    serial_port: String,
+    profile: String,
+    progress: Channel<ProfileProgressEvent>,
+) -> Result<(), String> {
+    // Get device info to retrieve serial number
+    let device = tokio::task::spawn_blocking({
+        let port = serial_port.clone();
+        move || {
+            find_nrf52_devices()
+                .into_iter()
+                .find(|d| d.port == port)
+        }
+    })
+    .await
+    .map_err(|e| format!("Failed to find device: {}", e))?
+    .ok_or_else(|| "Device not found".to_string())?;
+
+    let serial_number = device
+        .serial_number
+        .clone()
+        .ok_or_else(|| "Device has no serial number".to_string())?;
+
+    // Verify device is in application mode (not bootloader)
+    if device.in_bootloader {
+        return Err(
+            "Device is in bootloader mode. Please wait for it to boot into application mode."
+                .to_string(),
+        );
+    }
+
+    // Send progress: connecting
+    let _ = progress.send(ProfileProgressEvent {
+        stage: "connecting".to_string(),
+        percent: 10.0,
+        message: "Connecting to device...".to_string(),
+    });
+
+    // Create a channel for status updates from the blocking thread
+    let (tx, rx) = mpsc::channel::<ProfileProgressEvent>();
+
+    // Spawn a task to forward progress updates
+    let progress_channel = progress.clone();
+    let progress_task = thread::spawn(move || {
+        while let Ok(event) = rx.recv() {
+            let _ = progress_channel.send(event);
+        }
+    });
+
+    // Run profile configuration in a blocking task
+    let result = tokio::task::spawn_blocking({
+        let serial_port = serial_port.clone();
+        let profile = profile.clone();
+        let tx = tx.clone();
+
+        move || {
+            // Send progress: sending command
+            let _ = tx.send(ProfileProgressEvent {
+                stage: "sending".to_string(),
+                percent: 30.0,
+                message: format!("Sending {} profile command...", profile),
+            });
+
+            // Configure the profile
+            let config_result = configure_device_profile(&serial_port, &profile, &serial_number);
+
+            match &config_result {
+                Ok(()) => {
+                    // Send progress: rebooting (already handled internally, but we signal it)
+                    let _ = tx.send(ProfileProgressEvent {
+                        stage: "rebooting".to_string(),
+                        percent: 70.0,
+                        message: "Waiting for device to restart...".to_string(),
+                    });
+
+                    // Send progress: complete
+                    let _ = tx.send(ProfileProgressEvent {
+                        stage: "complete".to_string(),
+                        percent: 100.0,
+                        message: format!("Profile set to {}", profile),
+                    });
+                }
+                Err(e) => {
+                    let _ = tx.send(ProfileProgressEvent {
+                        stage: "error".to_string(),
+                        percent: 0.0,
+                        message: format!("{}", e),
+                    });
+                }
+            }
+
+            config_result
+        }
+    })
+    .await
+    .map_err(|e| format!("Profile configuration task panicked: {}", e))?;
+
+    // Wait for progress forwarding to complete
+    drop(tx); // Close the sender to signal completion
+    let _ = progress_task.join();
+
+    result.map_err(|e| format!("{}", e))
 }
 
 /// Information about a firmware package.

@@ -13,8 +13,8 @@ interface WizardStep {
 const steps: WizardStep[] = [
   {
     id: 0,
-    label: 'Firmware',
-    description: 'Select version',
+    label: 'Profile',
+    description: 'Select profile',
   },
   {
     id: 1,
@@ -23,17 +23,12 @@ const steps: WizardStep[] = [
   },
   {
     id: 2,
-    label: 'Install',
-    description: 'Install firmware',
-  },
-  {
-    id: 3,
-    label: 'Complete',
-    description: 'Finish',
+    label: 'Configure',
+    description: 'Apply settings',
   },
 ];
 
-interface WizardLayoutProps {
+interface TherapyWizardLayoutProps {
   currentStep: number;
   canGoNext: boolean;
   canGoBack: boolean;
@@ -43,7 +38,7 @@ interface WizardLayoutProps {
   children: React.ReactNode;
 }
 
-export function WizardLayout({
+export function TherapyWizardLayout({
   currentStep,
   canGoNext,
   canGoBack,
@@ -51,10 +46,9 @@ export function WizardLayout({
   onBack,
   onBackToHome,
   children,
-}: WizardLayoutProps) {
-  const isFirmwareSelection = currentStep === 0;
-  const isInstalling = currentStep === 2;
-  const isComplete = currentStep === 3;
+}: TherapyWizardLayoutProps) {
+  const isProfileSelection = currentStep === 0;
+  const isConfiguring = currentStep === 2;
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
@@ -73,9 +67,9 @@ export function WizardLayout({
             </Button>
             <Separator orientation="vertical" className="h-6" />
             <div>
-              <h1 className="text-2xl font-bold">Firmware Update</h1>
+              <h1 className="text-2xl font-bold">Set Therapy Profile</h1>
               <p className="text-sm text-muted-foreground">
-                Firmware update tool for BlueBuzzah devices
+                Configure device therapy settings
               </p>
             </div>
           </div>
@@ -85,7 +79,7 @@ export function WizardLayout({
       {/* Step Indicator */}
       <div className="border-b bg-muted/20">
         <div className="container mx-auto px-6 py-6">
-          <div className="flex items-center justify-between max-w-3xl mx-auto">
+          <div className="flex items-center justify-between max-w-2xl mx-auto">
             {steps.map((step, index) => {
               const isActive = currentStep === step.id;
               const isCompleted = currentStep > step.id;
@@ -98,8 +92,7 @@ export function WizardLayout({
                         'w-10 h-10 rounded-full flex items-center justify-center font-semibold transition-all',
                         isActive &&
                           'bg-primary text-primary-foreground ring-4 ring-primary/20',
-                        isCompleted &&
-                          'bg-primary text-primary-foreground',
+                        isCompleted && 'bg-primary text-primary-foreground',
                         !isActive &&
                           !isCompleted &&
                           'bg-muted text-muted-foreground'
@@ -151,19 +144,15 @@ export function WizardLayout({
       </main>
 
       {/* Footer Navigation */}
-      {!isFirmwareSelection && !isInstalling && !isComplete && (
+      {!isProfileSelection && !isConfiguring && (
         <footer className="border-t bg-muted/20">
           <div className="container mx-auto px-6 py-4">
             <div className="flex justify-between max-w-4xl mx-auto">
-              <Button
-                variant="outline"
-                onClick={onBack}
-                disabled={!canGoBack}
-              >
+              <Button variant="outline" onClick={onBack} disabled={!canGoBack}>
                 Back
               </Button>
               <Button onClick={onNext} disabled={!canGoNext}>
-                {currentStep === 1 ? 'Start Installation' : 'Next'}
+                Configure Devices
               </Button>
             </div>
           </div>

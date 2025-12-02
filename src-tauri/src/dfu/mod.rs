@@ -49,7 +49,7 @@ mod transport;
 pub use device::{find_nrf52_devices, Nrf52Device};
 
 // Protocol
-pub use protocol::{upload_firmware, DfuStage};
+pub use protocol::{configure_device_profile, upload_firmware, DfuStage};
 
 // Firmware reading
 pub use firmware_reader::read_firmware_zip;

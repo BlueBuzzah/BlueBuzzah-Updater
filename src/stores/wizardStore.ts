@@ -20,6 +20,7 @@ interface WizardStore extends WizardState {
   setUpdateProgress: (devicePath: string, progress: UpdateProgress) => void;
   setUpdateResult: (result: UpdateResult) => void;
   setValidationResults: (results: Map<string, ValidationResult>) => void;
+  addLog: (message: string) => void;
   reset: () => void;
 }
 
@@ -30,6 +31,7 @@ const initialState: WizardState = {
   updateProgress: new Map(),
   updateResult: null,
   validationResults: new Map(),
+  logs: [],
 };
 
 export const useWizardStore = create<WizardStore>((set) => ({
@@ -82,6 +84,9 @@ export const useWizardStore = create<WizardStore>((set) => ({
   setUpdateResult: (result) => set({ updateResult: result }),
 
   setValidationResults: (results) => set({ validationResults: results }),
+
+  addLog: (message) =>
+    set((state) => ({ logs: [...state.logs, message] })),
 
   reset: () => set(initialState),
 }));

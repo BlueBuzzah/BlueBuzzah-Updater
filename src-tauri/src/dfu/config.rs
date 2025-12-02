@@ -230,6 +230,22 @@ pub const ROLE_PRIMARY_COMMAND: &str = "SET_ROLE:PRIMARY\n";
 pub const ROLE_SECONDARY_COMMAND: &str = "SET_ROLE:SECONDARY\n";
 
 // ============================================================================
+// Profile Configuration
+// ============================================================================
+
+/// Profile configuration command for NOISY therapy profile.
+pub const PROFILE_NOISY_COMMAND: &str = "SET_PROFILE:NOISY\n";
+
+/// Profile configuration command for STANDARD therapy profile.
+pub const PROFILE_STANDARD_COMMAND: &str = "SET_PROFILE:STANDARD\n";
+
+/// Profile configuration command for GENTLE therapy profile.
+pub const PROFILE_GENTLE_COMMAND: &str = "SET_PROFILE:GENTLE\n";
+
+/// Timeout for profile configuration command.
+pub const PROFILE_CONFIG_TIMEOUT_MS: u64 = 5000;
+
+// ============================================================================
 // Helper Functions
 // ============================================================================
 

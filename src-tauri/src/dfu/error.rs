@@ -92,6 +92,10 @@ pub enum DfuError {
     #[error("Failed to configure device role: {reason}")]
     RoleConfigFailed { reason: String },
 
+    /// Profile configuration failed.
+    #[error("Failed to configure therapy profile: {reason}")]
+    ProfileConfigFailed { reason: String },
+
     /// Device has no serial number (required for tracking through mode changes).
     #[error("Device has no serial number - cannot track through mode changes")]
     NoSerialNumber,
@@ -135,6 +139,7 @@ impl DfuError {
             DfuError::SequenceMismatch { .. } => "DFU-060",
             DfuError::PacketTooLarge { .. } => "DFU-061",
             DfuError::RoleConfigFailed { .. } => "DFU-070",
+            DfuError::ProfileConfigFailed { .. } => "DFU-071",
             DfuError::NoSerialNumber => "DFU-054",
             DfuError::Cancelled => "DFU-099",
         }

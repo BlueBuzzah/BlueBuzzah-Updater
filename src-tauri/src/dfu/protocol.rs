@@ -14,8 +14,9 @@ use serde::{Deserialize, Serialize};
 
 use super::config::{
     calculate_erase_wait_time, BOOTLOADER_TIMEOUT_MS, FLASH_PAGE_WRITE_TIME_MS,
-    FRAMES_PER_FLASH_PAGE, REBOOT_TIMEOUT_MS, ROLE_CONFIG_TIMEOUT_MS, ROLE_PRIMARY_COMMAND,
-    ROLE_SECONDARY_COMMAND,
+    FRAMES_PER_FLASH_PAGE, PROFILE_CONFIG_TIMEOUT_MS, PROFILE_GENTLE_COMMAND,
+    PROFILE_NOISY_COMMAND, PROFILE_STANDARD_COMMAND, REBOOT_TIMEOUT_MS, ROLE_CONFIG_TIMEOUT_MS,
+    ROLE_PRIMARY_COMMAND, ROLE_SECONDARY_COMMAND,
 };
 use super::device::{
     get_device_by_port, wait_for_application_by_serial, wait_for_bootloader_by_serial,
@@ -557,6 +558,115 @@ fn configure_device_role(port_name: &str, role: &str, serial_number: &str) -> Df
     Err(DfuError::RoleConfigFailed {
         reason: format!(
             "Timeout waiting for role configuration acknowledgment. Received: {}",
+            if response_str.is_empty() {
+                "(no response)"
+            } else {
+                &response_str
+            }
+        ),
+    })
+}
+
+/// Configure the device therapy profile via serial command.
+///
+/// After receiving SET_PROFILE, the device responds with:
+/// - Success: "[CONFIG] Profile set to NOISY - restarting..." (then reboots)
+/// - Success: "[CONFIG] Profile set to STANDARD - restarting..." (then reboots)
+/// - Success: "[CONFIG] Profile set to GENTLE - restarting..." (then reboots)
+/// - Error: "[ERROR] Invalid profile. Use: SET_PROFILE:NOISY, SET_PROFILE:STANDARD, or SET_PROFILE:GENTLE"
+///
+/// Since the device reboots after a successful profile change, we need to:
+/// 1. Send the command and wait for the [CONFIG] acknowledgment
+/// 2. Wait for the device to reboot and reappear
+pub fn configure_device_profile(port_name: &str, profile: &str, serial_number: &str) -> DfuResult<()> {
+    let command = match profile.to_uppercase().as_str() {
+        "NOISY" => PROFILE_NOISY_COMMAND,
+        "STANDARD" => PROFILE_STANDARD_COMMAND,
+        "GENTLE" => PROFILE_GENTLE_COMMAND,
+        _ => {
+            return Err(DfuError::ProfileConfigFailed {
+                reason: format!(
+                    "Invalid profile: {}. Valid profiles: NOISY, STANDARD, GENTLE",
+                    profile
+                ),
+            })
+        }
+    };
+
+    // Open port and send command
+    let mut transport = SerialTransport::open(port_name)?;
+
+    // Wait for device to finish booting and drain boot log output.
+    // The device outputs initialization logs on boot which can contain
+    // "ERROR" from hardware init - we need to drain these first.
+    // We wait for a period of silence (no data for 500ms) to indicate boot complete.
+    let mut buffer = [0u8; 256];
+    let drain_timeout = Duration::from_millis(5000);
+    let drain_start = Instant::now();
+    let mut last_data_time = Instant::now();
+    const SILENCE_THRESHOLD_MS: u64 = 500;
+
+    while drain_start.elapsed() < drain_timeout {
+        let bytes_read = transport.read(&mut buffer, 200)?;
+        if bytes_read > 0 {
+            last_data_time = Instant::now();
+            // Keep draining boot output
+        } else if last_data_time.elapsed() > Duration::from_millis(SILENCE_THRESHOLD_MS) {
+            // No data for 500ms - device has likely finished booting
+            break;
+        }
+    }
+
+    // Clear any remaining input
+    transport.clear_input().ok();
+
+    // Small delay then send command
+    std::thread::sleep(Duration::from_millis(100));
+    transport.write(command.as_bytes())?;
+    transport.flush()?;
+
+    // Wait for acknowledgment - device sends [CONFIG] on success, [ERROR] on failure
+    // After [CONFIG], the device will reboot, so we may lose the connection
+    let timeout = Duration::from_millis(PROFILE_CONFIG_TIMEOUT_MS);
+    let start = Instant::now();
+    let mut response = Vec::new();
+
+    while start.elapsed() < timeout {
+        let remaining = timeout.saturating_sub(start.elapsed());
+        let bytes_read = transport.read(&mut buffer, remaining.as_millis() as u64)?;
+
+        if bytes_read > 0 {
+            response.extend_from_slice(&buffer[..bytes_read]);
+
+            let response_str = String::from_utf8_lossy(&response);
+
+            // Check for success - device confirmed profile change
+            if response_str.contains("[CONFIG]") && response_str.contains("Profile set to") {
+                // Success! Device will now reboot.
+                // Close the transport before device disconnects
+                drop(transport);
+
+                // Wait for device to reboot and reappear
+                std::thread::sleep(Duration::from_millis(2000));
+                wait_for_application_by_serial(serial_number, REBOOT_TIMEOUT_MS)?;
+
+                return Ok(());
+            }
+
+            // Check for explicit error from firmware
+            if response_str.contains("[ERROR]") {
+                return Err(DfuError::ProfileConfigFailed {
+                    reason: response_str.to_string(),
+                });
+            }
+        }
+    }
+
+    // Timeout without receiving [CONFIG] or [ERROR] - this is a failure
+    let response_str = String::from_utf8_lossy(&response);
+    Err(DfuError::ProfileConfigFailed {
+        reason: format!(
+            "Timeout waiting for profile configuration acknowledgment. Received: {}",
             if response_str.is_empty() {
                 "(no response)"
             } else {

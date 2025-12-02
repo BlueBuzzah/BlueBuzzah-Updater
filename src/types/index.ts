@@ -105,6 +105,7 @@ export interface WizardState {
   updateProgress: Map<string, UpdateProgress>;
   updateResult: UpdateResult | null;
   validationResults: Map<string, ValidationResult>;
+  logs: string[];
 }
 
 // GitHub API Response Types
@@ -120,4 +121,52 @@ export interface GitHubAsset {
   name: string;
   browser_download_url: string;
   size: number;
+}
+
+// ============================================================================
+// Therapy Profile Types
+// ============================================================================
+
+export type TherapyProfile = 'NOISY' | 'STANDARD' | 'GENTLE';
+
+export interface TherapyProfileInfo {
+  id: TherapyProfile;
+  name: string;
+  description: string;
+}
+
+export type TherapyConfigStage =
+  | 'connecting'
+  | 'sending'
+  | 'rebooting'
+  | 'complete'
+  | 'error';
+
+export interface TherapyConfigProgress {
+  devicePath: string;
+  stage: TherapyConfigStage;
+  progress: number;
+  message: string;
+}
+
+export interface TherapyConfigResult {
+  success: boolean;
+  message: string;
+  deviceConfigs: DeviceConfigResult[];
+}
+
+export interface DeviceConfigResult {
+  device: Device;
+  success: boolean;
+  profile?: TherapyProfile;
+  error?: string;
+}
+
+export interface TherapyState {
+  step: number;
+  selectedProfile: TherapyProfile | null;
+  selectedDevices: Device[];
+  progress: Map<string, TherapyConfigProgress>;
+  result: TherapyConfigResult | null;
+  logs: string[];
 }

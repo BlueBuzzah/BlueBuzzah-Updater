@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { SuccessScreen } from './SuccessScreen';
+import { useWizardStore } from '@/stores/wizardStore';
 import { createMockRelease, createMockDevice } from '@/test/factories';
 
 describe('SuccessScreen', () => {
@@ -15,6 +16,7 @@ describe('SuccessScreen', () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+    useWizardStore.getState().reset();
   });
 
   describe('Rendering', () => {

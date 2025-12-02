@@ -53,7 +53,7 @@ export function InstallationProgress({
   onComplete,
   onProgressUpdate,
 }: InstallationProgressProps) {
-  const { reset, updateDeviceInfo } = useWizardStore();
+  const { reset, updateDeviceInfo, addLog: storeAddLog, logs } = useWizardStore();
   const { toast } = useToast();
   const [stage, setStage] = useState<'validating' | 'downloading' | 'installing' | 'complete'>(
     'validating'
@@ -63,7 +63,6 @@ export function InstallationProgress({
     Map<string, UpdateProgress>
   >(new Map());
   const [error, setError] = useState<string | null>(null);
-  const [logs, setLogs] = useState<string[]>([]);
   const [showLogs, setShowLogs] = useState(false);
   const [updatedDevices, setUpdatedDevices] = useState<Device[]>(devices);
   const [showStopConfirm, setShowStopConfirm] = useState(false);
@@ -78,7 +77,7 @@ export function InstallationProgress({
   }, []);
 
   const addLog = (message: string) => {
-    setLogs((prev) => [...prev, `[${new Date().toLocaleTimeString()}] ${message}`]);
+    storeAddLog(`[${new Date().toLocaleTimeString()}] ${message}`);
   };
 
   const exportLogs = () => {

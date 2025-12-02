@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import App from './App';
 import { useWizardStore } from './stores/wizardStore';
+import { useTherapyStore } from './stores/therapyStore';
 import { createMockRelease, createMockDevice } from '@/test/factories';
 
 // Mock the Tauri plugin process
@@ -44,6 +45,18 @@ vi.mock('./components/wizard/SuccessScreen', () => ({
   ),
 }));
 
+// Mock therapy components
+vi.mock('./components/therapy', () => ({
+  ProfileSelection: ({ onSelect }: { onSelect: (p: string) => void }) => (
+    <div data-testid="profile-selection">
+      <button onClick={() => onSelect('STANDARD')}>Select Profile</button>
+    </div>
+  ),
+  TherapyDeviceSelection: () => <div data-testid="therapy-device-selection" />,
+  TherapyProgress: () => <div data-testid="therapy-progress" />,
+  TherapySuccess: () => <div data-testid="therapy-success" />,
+}));
+
 // Mock toast components
 vi.mock('./components/ui/toaster', () => ({
   Toaster: () => <div data-testid="toaster" />,
@@ -51,55 +64,49 @@ vi.mock('./components/ui/toaster', () => ({
 
 describe('App', () => {
   beforeEach(() => {
-    // Reset store between tests
+    // Reset stores between tests
     useWizardStore.getState().reset();
+    useTherapyStore.getState().reset();
   });
 
-  describe('Step Rendering', () => {
-    it('renders FirmwareSelection on step 0', () => {
-      render(<App />);
-
-      expect(screen.getByTestId('firmware-selection')).toBeInTheDocument();
-    });
-
-    it('renders DeviceSelection on step 1', () => {
-      const store = useWizardStore.getState();
-      store.selectRelease(createMockRelease());
-      store.setStep(1);
-
-      render(<App />);
-
-      expect(screen.getByTestId('device-selection')).toBeInTheDocument();
-    });
-
-    it('renders InstallationProgress on step 2', () => {
-      const store = useWizardStore.getState();
-      store.selectRelease(createMockRelease());
-      store.setDevices([createMockDevice({ role: 'PRIMARY' })]);
-      store.setStep(2);
-
-      render(<App />);
-
-      expect(screen.getByTestId('installation-progress')).toBeInTheDocument();
-    });
-
-    it('renders SuccessScreen on step 3', () => {
-      const store = useWizardStore.getState();
-      store.selectRelease(createMockRelease());
-      store.setDevices([createMockDevice({ role: 'PRIMARY' })]);
-      store.setStep(3);
-
-      render(<App />);
-
-      expect(screen.getByTestId('success-screen')).toBeInTheDocument();
-    });
-  });
-
-  describe('Layout Integration', () => {
-    it('wraps content in WizardLayout', () => {
+  describe('Home Screen', () => {
+    it('renders home screen by default', () => {
       render(<App />);
 
       expect(screen.getByText('BlueBuzzah Updater')).toBeInTheDocument();
+      expect(screen.getByText('What would you like to do?')).toBeInTheDocument();
+    });
+
+    it('shows Firmware Update option', () => {
+      render(<App />);
+
+      expect(screen.getByText('Firmware Update')).toBeInTheDocument();
+    });
+
+    it('shows Set Therapy Profile option', () => {
+      render(<App />);
+
+      expect(screen.getByText('Set Therapy Profile')).toBeInTheDocument();
+    });
+
+    it('clicking Firmware Update enters firmware mode', async () => {
+      render(<App />);
+
+      fireEvent.click(screen.getByText('Firmware Update'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('firmware-selection')).toBeInTheDocument();
+      });
+    });
+
+    it('clicking Set Therapy Profile enters therapy mode', async () => {
+      render(<App />);
+
+      fireEvent.click(screen.getByText('Set Therapy Profile'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('profile-selection')).toBeInTheDocument();
+      });
     });
 
     it('includes Toaster component', () => {
@@ -109,29 +116,109 @@ describe('App', () => {
     });
   });
 
-  describe('Navigation Logic', () => {
-    it('hides navigation footer on step 0', () => {
+  describe('Firmware Wizard - Step Rendering', () => {
+    const enterFirmwareMode = () => {
       render(<App />);
+      fireEvent.click(screen.getByText('Firmware Update'));
+    };
+
+    it('renders FirmwareSelection on step 0', async () => {
+      enterFirmwareMode();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('firmware-selection')).toBeInTheDocument();
+      });
+    });
+
+    it('renders DeviceSelection on step 1', async () => {
+      const store = useWizardStore.getState();
+      store.selectRelease(createMockRelease());
+      store.setStep(1);
+
+      enterFirmwareMode();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('device-selection')).toBeInTheDocument();
+      });
+    });
+
+    it('renders InstallationProgress on step 2', async () => {
+      const store = useWizardStore.getState();
+      store.selectRelease(createMockRelease());
+      store.setDevices([createMockDevice({ role: 'PRIMARY' })]);
+      store.setStep(2);
+
+      enterFirmwareMode();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('installation-progress')).toBeInTheDocument();
+      });
+    });
+
+    it('renders SuccessScreen on step 3', async () => {
+      const store = useWizardStore.getState();
+      store.selectRelease(createMockRelease());
+      store.setDevices([createMockDevice({ role: 'PRIMARY' })]);
+      store.setStep(3);
+
+      enterFirmwareMode();
+
+      await waitFor(() => {
+        expect(screen.getByTestId('success-screen')).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe('Firmware Wizard - Layout Integration', () => {
+    it('wraps content in WizardLayout', async () => {
+      render(<App />);
+      fireEvent.click(screen.getByText('Firmware Update'));
+
+      await waitFor(() => {
+        // Check for the wizard layout header
+        expect(screen.getByText('Firmware update tool for BlueBuzzah devices')).toBeInTheDocument();
+      });
+    });
+  });
+
+  describe('Firmware Wizard - Navigation Logic', () => {
+    it('hides navigation footer on step 0', async () => {
+      render(<App />);
+      fireEvent.click(screen.getByText('Firmware Update'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('firmware-selection')).toBeInTheDocument();
+      });
 
       // No Back/Next buttons on firmware selection step
       expect(screen.queryByRole('button', { name: /next/i })).not.toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: /back/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^back$/i })).not.toBeInTheDocument();
     });
 
-    it('back button enabled on step 1', () => {
+    it('back button enabled on step 1', async () => {
       const store = useWizardStore.getState();
       store.selectRelease(createMockRelease());
       store.setStep(1);
 
       render(<App />);
+      fireEvent.click(screen.getByText('Firmware Update'));
 
-      expect(screen.getByRole('button', { name: /back/i })).toBeEnabled();
+      await waitFor(() => {
+        expect(screen.getByTestId('device-selection')).toBeInTheDocument();
+      });
+
+      expect(screen.getByRole('button', { name: /^back$/i })).toBeEnabled();
     });
   });
 
-  describe('Step Transitions', () => {
+  describe('Firmware Wizard - Step Transitions', () => {
     it('selecting firmware auto-advances to step 1', async () => {
       render(<App />);
+      fireEvent.click(screen.getByText('Firmware Update'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('firmware-selection')).toBeInTheDocument();
+      });
 
       // Click the "Select Firmware" button in the mocked component
       fireEvent.click(screen.getByText('Select Firmware'));
@@ -147,8 +234,13 @@ describe('App', () => {
       store.setStep(1);
 
       render(<App />);
+      fireEvent.click(screen.getByText('Firmware Update'));
 
-      fireEvent.click(screen.getByRole('button', { name: /back/i }));
+      await waitFor(() => {
+        expect(screen.getByTestId('device-selection')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /^back$/i }));
 
       await waitFor(() => {
         expect(screen.getByTestId('firmware-selection')).toBeInTheDocument();
@@ -156,49 +248,70 @@ describe('App', () => {
     });
   });
 
-  describe('Device Selection Validation', () => {
-    it('start installation disabled when no devices selected', () => {
+  describe('Firmware Wizard - Device Selection Validation', () => {
+    it('start installation disabled when no devices selected', async () => {
       const store = useWizardStore.getState();
       store.selectRelease(createMockRelease());
       store.setStep(1);
 
       render(<App />);
+      fireEvent.click(screen.getByText('Firmware Update'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('device-selection')).toBeInTheDocument();
+      });
 
       expect(screen.getByRole('button', { name: /start installation/i })).toBeDisabled();
     });
 
-    it('start installation disabled when devices have no roles', () => {
+    it('start installation disabled when devices have no roles', async () => {
       const store = useWizardStore.getState();
       store.selectRelease(createMockRelease());
       store.setDevices([createMockDevice({ role: undefined })]);
       store.setStep(1);
 
       render(<App />);
+      fireEvent.click(screen.getByText('Firmware Update'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('device-selection')).toBeInTheDocument();
+      });
 
       expect(screen.getByRole('button', { name: /start installation/i })).toBeDisabled();
     });
 
-    it('start installation enabled when devices have roles', () => {
+    it('start installation enabled when devices have roles', async () => {
       const store = useWizardStore.getState();
       store.selectRelease(createMockRelease());
       store.setDevices([createMockDevice({ role: 'PRIMARY' })]);
       store.setStep(1);
 
       render(<App />);
+      fireEvent.click(screen.getByText('Firmware Update'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('device-selection')).toBeInTheDocument();
+      });
 
       expect(screen.getByRole('button', { name: /start installation/i })).toBeEnabled();
     });
   });
 
-  describe('Reset Functionality', () => {
-    it('reset returns to step 0', async () => {
+  describe('Firmware Wizard - Reset Functionality', () => {
+    it('reset restarts the firmware wizard', async () => {
       const store = useWizardStore.getState();
       store.selectRelease(createMockRelease());
       store.setDevices([createMockDevice({ role: 'PRIMARY' })]);
       store.setStep(3);
 
       render(<App />);
+      fireEvent.click(screen.getByText('Firmware Update'));
 
+      await waitFor(() => {
+        expect(screen.getByTestId('success-screen')).toBeInTheDocument();
+      });
+
+      // Reset keeps you in firmware mode but restarts the wizard
       fireEvent.click(screen.getByText('Reset'));
 
       await waitFor(() => {
@@ -207,20 +320,62 @@ describe('App', () => {
     });
   });
 
-  describe('Step Indicator', () => {
-    it('shows step 1 as active on step 0', () => {
+  describe('Firmware Wizard - Step Indicator', () => {
+    it('shows all step labels', async () => {
       render(<App />);
+      fireEvent.click(screen.getByText('Firmware Update'));
 
-      expect(screen.getByText('Firmware')).toBeInTheDocument();
-    });
+      await waitFor(() => {
+        expect(screen.getByText('Firmware')).toBeInTheDocument();
+      });
 
-    it('shows all step labels', () => {
-      render(<App />);
-
-      expect(screen.getByText('Firmware')).toBeInTheDocument();
       expect(screen.getByText('Devices')).toBeInTheDocument();
       expect(screen.getByText('Install')).toBeInTheDocument();
       expect(screen.getByText('Complete')).toBeInTheDocument();
+    });
+  });
+
+  describe('Therapy Wizard', () => {
+    it('shows profile selection on entry', async () => {
+      render(<App />);
+      fireEvent.click(screen.getByText('Set Therapy Profile'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('profile-selection')).toBeInTheDocument();
+      });
+    });
+
+    it('shows Set Therapy Profile header', async () => {
+      render(<App />);
+      fireEvent.click(screen.getByText('Set Therapy Profile'));
+
+      await waitFor(() => {
+        expect(screen.getByText('Set Therapy Profile')).toBeInTheDocument();
+      });
+    });
+
+    it('has Home button to return', async () => {
+      render(<App />);
+      fireEvent.click(screen.getByText('Set Therapy Profile'));
+
+      await waitFor(() => {
+        expect(screen.getByRole('button', { name: /home/i })).toBeInTheDocument();
+      });
+    });
+
+    it('clicking Home returns to home screen', async () => {
+      render(<App />);
+      fireEvent.click(screen.getByText('Set Therapy Profile'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('profile-selection')).toBeInTheDocument();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: /home/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText('What would you like to do?')).toBeInTheDocument();
+      });
     });
   });
 });

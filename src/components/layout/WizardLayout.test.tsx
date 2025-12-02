@@ -5,6 +5,7 @@ import { WizardLayout } from './WizardLayout';
 describe('WizardLayout', () => {
   const mockOnNext = vi.fn();
   const mockOnBack = vi.fn();
+  const mockOnBackToHome = vi.fn();
 
   beforeEach(() => {
     vi.resetAllMocks();
@@ -19,12 +20,13 @@ describe('WizardLayout', () => {
           canGoBack={false}
           onNext={mockOnNext}
           onBack={mockOnBack}
+          onBackToHome={mockOnBackToHome}
         >
           <div>Content</div>
         </WizardLayout>
       );
 
-      expect(screen.getByText('BlueBuzzah Updater')).toBeInTheDocument();
+      expect(screen.getByText('Firmware Update')).toBeInTheDocument();
     });
 
     it('renders app subtitle', () => {
@@ -35,12 +37,48 @@ describe('WizardLayout', () => {
           canGoBack={false}
           onNext={mockOnNext}
           onBack={mockOnBack}
+          onBackToHome={mockOnBackToHome}
         >
           <div>Content</div>
         </WizardLayout>
       );
 
       expect(screen.getByText('Firmware update tool for BlueBuzzah devices')).toBeInTheDocument();
+    });
+
+    it('renders Home button', () => {
+      render(
+        <WizardLayout
+          currentStep={0}
+          canGoNext={false}
+          canGoBack={false}
+          onNext={mockOnNext}
+          onBack={mockOnBack}
+          onBackToHome={mockOnBackToHome}
+        >
+          <div>Content</div>
+        </WizardLayout>
+      );
+
+      expect(screen.getByRole('button', { name: /home/i })).toBeInTheDocument();
+    });
+
+    it('clicking Home calls onBackToHome', () => {
+      render(
+        <WizardLayout
+          currentStep={0}
+          canGoNext={false}
+          canGoBack={false}
+          onNext={mockOnNext}
+          onBack={mockOnBack}
+          onBackToHome={mockOnBackToHome}
+        >
+          <div>Content</div>
+        </WizardLayout>
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: /home/i }));
+      expect(mockOnBackToHome).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -53,6 +91,7 @@ describe('WizardLayout', () => {
           canGoBack={false}
           onNext={mockOnNext}
           onBack={mockOnBack}
+          onBackToHome={mockOnBackToHome}
         >
           <div>Content</div>
         </WizardLayout>
@@ -72,6 +111,7 @@ describe('WizardLayout', () => {
           canGoBack={false}
           onNext={mockOnNext}
           onBack={mockOnBack}
+          onBackToHome={mockOnBackToHome}
         >
           <div>Content</div>
         </WizardLayout>
@@ -91,6 +131,7 @@ describe('WizardLayout', () => {
           canGoBack={false}
           onNext={mockOnNext}
           onBack={mockOnBack}
+          onBackToHome={mockOnBackToHome}
         >
           <div>Content</div>
         </WizardLayout>
@@ -112,6 +153,7 @@ describe('WizardLayout', () => {
           canGoBack={false}
           onNext={mockOnNext}
           onBack={mockOnBack}
+          onBackToHome={mockOnBackToHome}
         >
           <div>Content</div>
         </WizardLayout>
@@ -130,6 +172,7 @@ describe('WizardLayout', () => {
           canGoBack={false}
           onNext={mockOnNext}
           onBack={mockOnBack}
+          onBackToHome={mockOnBackToHome}
         >
           <div>Content</div>
         </WizardLayout>
@@ -153,6 +196,7 @@ describe('WizardLayout', () => {
           canGoBack={false}
           onNext={mockOnNext}
           onBack={mockOnBack}
+          onBackToHome={mockOnBackToHome}
         >
           <div>Content</div>
         </WizardLayout>
@@ -175,6 +219,7 @@ describe('WizardLayout', () => {
           canGoBack={false}
           onNext={mockOnNext}
           onBack={mockOnBack}
+          onBackToHome={mockOnBackToHome}
         >
           <div data-testid="child-content">Test Content</div>
         </WizardLayout>
@@ -194,6 +239,7 @@ describe('WizardLayout', () => {
           canGoBack={true}
           onNext={mockOnNext}
           onBack={mockOnBack}
+          onBackToHome={mockOnBackToHome}
         >
           <div>Content</div>
         </WizardLayout>
@@ -210,6 +256,7 @@ describe('WizardLayout', () => {
           canGoBack={false}
           onNext={mockOnNext}
           onBack={mockOnBack}
+          onBackToHome={mockOnBackToHome}
         >
           <div>Content</div>
         </WizardLayout>
@@ -228,6 +275,7 @@ describe('WizardLayout', () => {
           canGoBack={true}
           onNext={mockOnNext}
           onBack={mockOnBack}
+          onBackToHome={mockOnBackToHome}
         >
           <div>Content</div>
         </WizardLayout>
@@ -244,6 +292,7 @@ describe('WizardLayout', () => {
           canGoBack={false}
           onNext={mockOnNext}
           onBack={mockOnBack}
+          onBackToHome={mockOnBackToHome}
         >
           <div>Content</div>
         </WizardLayout>
@@ -260,6 +309,7 @@ describe('WizardLayout', () => {
           canGoBack={false}
           onNext={mockOnNext}
           onBack={mockOnBack}
+          onBackToHome={mockOnBackToHome}
         >
           <div>Content</div>
         </WizardLayout>
@@ -278,6 +328,7 @@ describe('WizardLayout', () => {
           canGoBack={false}
           onNext={mockOnNext}
           onBack={mockOnBack}
+          onBackToHome={mockOnBackToHome}
         >
           <div>Content</div>
         </WizardLayout>
@@ -295,6 +346,7 @@ describe('WizardLayout', () => {
           canGoBack={false}
           onNext={mockOnNext}
           onBack={mockOnBack}
+          onBackToHome={mockOnBackToHome}
         >
           <div>Content</div>
         </WizardLayout>
@@ -314,6 +366,7 @@ describe('WizardLayout', () => {
           canGoBack={true}
           onNext={mockOnNext}
           onBack={mockOnBack}
+          onBackToHome={mockOnBackToHome}
         >
           <div>Content</div>
         </WizardLayout>
@@ -332,6 +385,7 @@ describe('WizardLayout', () => {
           canGoBack={true}
           onNext={mockOnNext}
           onBack={mockOnBack}
+          onBackToHome={mockOnBackToHome}
         >
           <div>Content</div>
         </WizardLayout>
@@ -353,6 +407,7 @@ describe('WizardLayout', () => {
           canGoBack={false}
           onNext={mockOnNext}
           onBack={mockOnBack}
+          onBackToHome={mockOnBackToHome}
         >
           <div>Step 0 Content</div>
         </WizardLayout>
@@ -372,6 +427,7 @@ describe('WizardLayout', () => {
           canGoBack={true}
           onNext={mockOnNext}
           onBack={mockOnBack}
+          onBackToHome={mockOnBackToHome}
         >
           <div>Step 1 Content</div>
         </WizardLayout>
@@ -390,6 +446,7 @@ describe('WizardLayout', () => {
           canGoBack={false}
           onNext={mockOnNext}
           onBack={mockOnBack}
+          onBackToHome={mockOnBackToHome}
         >
           <div>Step 2 Content</div>
         </WizardLayout>
@@ -407,6 +464,7 @@ describe('WizardLayout', () => {
           canGoBack={false}
           onNext={mockOnNext}
           onBack={mockOnBack}
+          onBackToHome={mockOnBackToHome}
         >
           <div>Step 3 Content</div>
         </WizardLayout>

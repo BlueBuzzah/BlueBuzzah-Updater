@@ -19,11 +19,14 @@ vi.mock('@/services/DeviceService', () => ({
   },
 }));
 
-// Mock wizard store
+// Mock wizard store with mutable logs array for test control
+const mockLogs: string[] = [];
 vi.mock('@/stores/wizardStore', () => ({
   useWizardStore: () => ({
     reset: vi.fn(),
     updateDeviceInfo: vi.fn(),
+    addLog: vi.fn(),
+    logs: mockLogs,
   }),
 }));
 
@@ -43,6 +46,7 @@ describe('InstallationProgress', () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+    mockLogs.length = 0; // Clear logs between tests
   });
 
   describe('Rendering', () => {
@@ -437,7 +441,10 @@ describe('InstallationProgress', () => {
       expect(screen.getByRole('button', { name: /show logs/i })).toBeInTheDocument();
     });
 
-    it('has copy logs button', async () => {
+    it('has copy logs button when logs exist', async () => {
+      // Add logs before rendering so Copy Logs button appears
+      mockLogs.push('[12:00:00] Starting installation...');
+
       vi.mocked(deviceService.validateDevices).mockResolvedValue(
         new Map([[mockDevice.path, { valid: true, errors: [], warnings: [] }]])
       );

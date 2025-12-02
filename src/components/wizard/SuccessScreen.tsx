@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -8,10 +9,13 @@ import {
 	CardTitle,
 } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
+import { useToast } from '@/components/ui/use-toast';
+import { useWizardStore } from '@/stores/wizardStore';
 import { Device, FirmwareRelease } from '@/types';
 import {
 	AlertCircle,
 	CheckCircle2,
+	ClipboardCopy,
 	HardDrive,
 	RotateCcw,
 	X,
@@ -31,6 +35,19 @@ export function SuccessScreen({
   onReset,
   onClose,
 }: SuccessScreenProps) {
+  const { toast } = useToast();
+  const { logs } = useWizardStore();
+  const [showLogs, setShowLogs] = useState(false);
+
+  const exportLogs = () => {
+    const logsText = logs.join('\n');
+    navigator.clipboard.writeText(logsText);
+    toast({
+      title: 'Logs copied',
+      description: 'Installation logs have been copied to clipboard',
+    });
+  };
+
   return (
     <div className="space-y-6">
       {/* Success Header */}
@@ -148,6 +165,51 @@ export function SuccessScreen({
             </li>
           </ol>
         </CardContent>
+      </Card>
+
+      {/* Logs Section */}
+      <Card>
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-base">Installation Log</CardTitle>
+            <div className="flex items-center gap-2">
+              {logs.length > 0 && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={exportLogs}
+                >
+                  <ClipboardCopy className="h-4 w-4 mr-2" />
+                  Copy Logs
+                </Button>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setShowLogs(!showLogs)}
+              >
+                {showLogs ? 'Hide' : 'Show'} Logs
+              </Button>
+            </div>
+          </div>
+        </CardHeader>
+        {showLogs && (
+          <CardContent>
+            <div className="bg-muted rounded-md p-4 font-mono text-xs space-y-1 max-h-64 overflow-y-auto">
+              {logs.map((log, index) => {
+                const isError = log.includes('✗ Error');
+                return (
+                  <div
+                    key={index}
+                    className={isError ? 'text-destructive font-semibold' : 'text-muted-foreground'}
+                  >
+                    {log}
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        )}
       </Card>
 
       {/* Action Buttons */}
