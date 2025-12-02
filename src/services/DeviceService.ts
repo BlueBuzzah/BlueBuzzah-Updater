@@ -158,7 +158,9 @@ export class DeviceService implements IDeviceRepository {
           progress: dfuProgress.percent,
           message: displayMessage,
           currentFile:
-            dfuProgress.sent !== undefined && dfuProgress.total !== undefined
+            dfuProgress.stage === 'uploading' &&
+            dfuProgress.sent !== undefined &&
+            dfuProgress.total !== undefined
               ? `${Math.round(dfuProgress.sent / 1024)}KB / ${Math.round(dfuProgress.total / 1024)}KB`
               : undefined,
         });
