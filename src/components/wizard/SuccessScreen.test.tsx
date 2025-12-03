@@ -143,19 +143,6 @@ describe('SuccessScreen', () => {
       expect(screen.getByText('Next Steps')).toBeInTheDocument();
     });
 
-    it('shows eject drives instruction', () => {
-      render(
-        <SuccessScreen
-          release={mockRelease}
-          devices={[mockDevice]}
-          onReset={mockOnReset}
-          onClose={mockOnClose}
-        />
-      );
-
-      expect(screen.getByText('Safely Eject Drives')).toBeInTheDocument();
-    });
-
     it('shows power on primary instruction', () => {
       render(
         <SuccessScreen

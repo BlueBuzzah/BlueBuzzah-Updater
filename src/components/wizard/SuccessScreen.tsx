@@ -135,17 +135,6 @@ export function SuccessScreen({
                 1
               </span>
               <div>
-                <p className="font-medium">Safely Eject Drives</p>
-                <p className="text-muted-foreground">
-                  Unmount all BLUEBUZZAH drives before disconnecting
-                </p>
-              </div>
-            </li>
-            <li className="flex gap-3">
-              <span className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs font-bold">
-                2
-              </span>
-              <div>
                 <p className="font-medium">Power On PRIMARY First</p>
                 <p className="text-muted-foreground">
                   Start the PRIMARY device to initialize coordination
@@ -154,7 +143,7 @@ export function SuccessScreen({
             </li>
             <li className="flex gap-3">
               <span className="flex-shrink-0 flex items-center justify-center w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs font-bold">
-                3
+                2
               </span>
               <div>
                 <p className="font-medium">Power On SECONDARY Within 15s</p>
