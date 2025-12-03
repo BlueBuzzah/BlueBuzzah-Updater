@@ -81,11 +81,11 @@ jobs:
 
       # Build for aarch64 (Apple Silicon)
       - name: Build Tauri app (aarch64)
-        run: npm run tauri build -- --target aarch64-apple-darwin
+        run: npm run tauri:build:ci -- --target aarch64-apple-darwin
 
       # Build for x86_64 (Intel)
       - name: Build Tauri app (x86_64)
-        run: npm run tauri build -- --target x86_64-apple-darwin
+        run: npm run tauri:build:ci -- --target x86_64-apple-darwin
 
       # Note: Tauri signs the .app bundles during build using APPLE_SIGNING_IDENTITY
       # The .app.tar.gz files are also created during build, but contain pre-notarization apps
@@ -303,7 +303,7 @@ jobs:
         run: npm ci
 
       - name: Build Tauri app
-        run: npm run tauri build
+        run: npm run tauri:build:ci
 
       - name: Read updater signature
         id: read-sig
@@ -317,6 +317,19 @@ jobs:
           } else {
             Write-Host "ERROR: No NSIS signature found"
             exit 1
+          }
+        shell: pwsh
+
+      - name: Rename installer for cleaner download name
+        run: |
+          $exeFile = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter "*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($exeFile) {
+            # Replace spaces with underscores and remove version number (including prerelease tags)
+            $newName = $exeFile.Name -replace ' ', '_' -replace '_\d+\.\d+\.\d+(-[a-zA-Z]+\.\d+)?', ''
+            if ($newName -ne $exeFile.Name) {
+              Rename-Item -Path $exeFile.FullName -NewName $newName
+              Write-Host "Renamed installer to: $newName"
+            }
           }
         shell: pwsh
 
