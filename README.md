@@ -135,6 +135,6 @@ MIT License - see [LICENSE](LICENSE) file for details.
 Copyright (c) 2025 BlueBuzzah Partners
 
 [1]: assets/download-windows.png
-[2]: https://github.com/BlueBuzzah/BlueBuzzah-Updater/releases/latest/download/BlueBuzzah_Updater_x64_en-US.msi "Download for Windows"
+[2]: https://github.com/BlueBuzzah/BlueBuzzah-Updater/releases/latest/download/BlueBuzzah_Updater_x64_en-US.exe "Download for Windows"
 [3]: assets/download-macos.png
 [4]: https://github.com/BlueBuzzah/BlueBuzzah-Updater/releases/latest/download/BlueBuzzah_Updater_universal.dmg "Download for macOS"
