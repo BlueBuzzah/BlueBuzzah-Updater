@@ -73,7 +73,7 @@ describe('App', () => {
     it('renders home screen by default', () => {
       render(<App />);
 
-      expect(screen.getByText('BlueBuzzah Updater')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'BlueBuzzah Updater', level: 1 })).toBeInTheDocument();
       expect(screen.getByText('What would you like to do?')).toBeInTheDocument();
     });
 
