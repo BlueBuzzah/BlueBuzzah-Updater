@@ -15,10 +15,15 @@ import {
 } from './components/therapy';
 import { HomeScreen, AppMode } from './components/home/HomeScreen';
 import { Toaster } from './components/ui/toaster';
+import { UpdateDialog } from './components/updater/UpdateDialog';
+import { useAppUpdater } from './hooks/useAppUpdater';
 import type { FirmwareRelease, TherapyProfile } from './types';
 
 function App() {
   const [appMode, setAppMode] = useState<AppMode>('home');
+
+  // Initialize app updater (checks on startup)
+  useAppUpdater();
 
   // Firmware wizard store
   const {
@@ -178,6 +183,7 @@ function App() {
       <>
         <HomeScreen onSelectMode={setAppMode} />
         <Toaster />
+        <UpdateDialog />
       </>
     );
   }
@@ -232,6 +238,7 @@ function App() {
           {renderFirmwareStep()}
         </WizardLayout>
         <Toaster />
+        <UpdateDialog />
       </>
     );
   }
@@ -292,6 +299,7 @@ function App() {
           {renderTherapyStep()}
         </TherapyWizardLayout>
         <Toaster />
+        <UpdateDialog />
       </>
     );
   }

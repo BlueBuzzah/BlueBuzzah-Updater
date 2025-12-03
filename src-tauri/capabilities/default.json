@@ -7,6 +7,8 @@
     "core:default",
     "core:event:allow-listen",
     "core:event:allow-emit",
-    "process:allow-exit"
+    "process:allow-exit",
+    "process:allow-restart",
+    "updater:default"
   ]
 }

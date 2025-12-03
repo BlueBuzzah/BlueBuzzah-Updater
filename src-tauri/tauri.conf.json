@@ -1,6 +1,6 @@
 {
 	"productName": "BlueBuzzah Updater",
-	"version": "1.0.0",
+	"version": "1.0.0-beta.5",
 	"identifier": "com.bluebuzzah.updater",
 	"build": {
 		"beforeDevCommand": "npm run dev",
@@ -30,6 +30,7 @@
 	"bundle": {
 		"active": true,
 		"targets": "all",
+		"createUpdaterArtifacts": true,
 		"icon": [
 			"icons/32x32.png",
 			"icons/128x128.png",
@@ -39,7 +40,22 @@
 		],
 		"macOS": {
 			"minimumSystemVersion": "10.13"
+		},
+		"windows": {
+			"wix": {
+				"upgradeCode": "033444e7-cc90-503b-b698-7a51d4f47424"
+			}
 		}
 	},
-	"plugins": {}
+	"plugins": {
+		"updater": {
+			"pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFDRUExMjRBRkU0OUNDMDcKUldRSHpFbitTaExxck9rRXc2QUJvNjgvM0M1VXVuK01kZWFSWGR3S0xJOU50bW5uTVlBUm4zUFcK",
+			"endpoints": [
+				"https://github.com/BlueBuzzah/BlueBuzzah-Updater/releases/latest/download/latest.json"
+			],
+			"windows": {
+				"installMode": "passive"
+			}
+		}
+	}
 }

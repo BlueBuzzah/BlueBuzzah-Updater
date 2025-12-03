@@ -170,3 +170,37 @@ export interface TherapyState {
   result: TherapyConfigResult | null;
   logs: string[];
 }
+
+// ============================================================================
+// App Updater Types
+// ============================================================================
+
+export type AppUpdateStage =
+  | 'checking'
+  | 'available'
+  | 'downloading'
+  | 'ready'
+  | 'error';
+
+export interface AppUpdateInfo {
+  version: string;
+  currentVersion: string;
+  releaseNotes: string;
+  releaseDate: string | null;
+}
+
+export interface AppUpdateProgress {
+  stage: AppUpdateStage;
+  downloaded: number;
+  total: number;
+  percent: number;
+}
+
+export interface UpdaterState {
+  isChecking: boolean;
+  updateAvailable: boolean;
+  updateInfo: AppUpdateInfo | null;
+  progress: AppUpdateProgress | null;
+  error: string | null;
+  dismissed: boolean;
+}

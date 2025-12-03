@@ -29,6 +29,7 @@
 		"@tauri-apps/plugin-http": "^2.0.0",
 		"@tauri-apps/plugin-process": "^2.0.0",
 		"@tauri-apps/plugin-shell": "^2.0.0",
+		"@tauri-apps/plugin-updater": "^2.9.0",
 		"class-variance-authority": "^0.7.0",
 		"clsx": "^2.1.0",
 		"lucide-react": "^0.344.0",
@@ -39,7 +40,7 @@
 		"zustand": "^4.5.0"
 	},
 	"devDependencies": {
-		"@tauri-apps/cli": "^2.0.0",
+		"@tauri-apps/cli": "^2.9.5",
 		"@testing-library/jest-dom": "^6.9.1",
 		"@testing-library/react": "^16.3.0",
 		"@testing-library/user-event": "^14.6.1",

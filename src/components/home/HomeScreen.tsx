@@ -1,3 +1,5 @@
+import { useState, useEffect } from 'react';
+import { getVersion } from '@tauri-apps/api/app';
 import {
   Card,
   CardContent,
@@ -14,6 +16,12 @@ interface HomeScreenProps {
 }
 
 export function HomeScreen({ onSelectMode }: HomeScreenProps) {
+  const [appVersion, setAppVersion] = useState<string>('');
+
+  useEffect(() => {
+    getVersion().then(setAppVersion).catch(() => setAppVersion('unknown'));
+  }, []);
+
   return (
     <div className="min-h-screen flex flex-col bg-background">
       {/* Header */}
@@ -89,7 +97,7 @@ export function HomeScreen({ onSelectMode }: HomeScreenProps) {
       {/* Footer */}
       <footer className="border-t py-4">
         <div className="container mx-auto px-6 text-center text-sm text-muted-foreground">
-          BlueBuzzah Updater v1.0.0
+          BlueBuzzah Updater {appVersion && `v${appVersion}`}
         </div>
       </footer>
     </div>
