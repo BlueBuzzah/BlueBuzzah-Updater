@@ -162,6 +162,13 @@ jobs:
 
       - name: Sign updater artifacts with Tauri signer
         run: |
+          # Verify signing key is available
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "ERROR: TAURI_SIGNING_PRIVATE_KEY is not set or empty"
+            exit 1
+          fi
+          echo "Signing key available (${#TAURI_SIGNING_PRIVATE_KEY} characters)"
+
           for ARCH in aarch64 x86_64; do
             BUNDLE_DIR="src-tauri/target/${ARCH}-apple-darwin/release/bundle/macos"
             TAR_FILE=$(find "$BUNDLE_DIR" -name "*.app.tar.gz" | head -1)
@@ -169,8 +176,8 @@ jobs:
             if [ -f "$TAR_FILE" ]; then
               echo "=== Signing $TAR_FILE for updater ==="
 
-              # Use Tauri CLI to sign (reads TAURI_SIGNING_PRIVATE_KEY env var)
-              npx tauri signer sign "$TAR_FILE"
+              # Explicitly pass key and password to avoid env var detection issues
+              npx tauri signer sign -k "$TAURI_SIGNING_PRIVATE_KEY" -p "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" "$TAR_FILE"
 
               echo "Created signature file:"
               ls -la "${TAR_FILE}.sig"
@@ -301,6 +308,15 @@ jobs:
 
       - name: Install frontend dependencies
         run: npm ci
+
+      - name: Verify signing key is available
+        run: |
+          if ([string]::IsNullOrEmpty($env:TAURI_SIGNING_PRIVATE_KEY)) {
+            Write-Host "ERROR: TAURI_SIGNING_PRIVATE_KEY is not set or empty"
+            exit 1
+          }
+          Write-Host "Signing key available ($($env:TAURI_SIGNING_PRIVATE_KEY.Length) characters)"
+        shell: pwsh
 
       - name: Build Tauri app
         run: npm run tauri:build:ci
