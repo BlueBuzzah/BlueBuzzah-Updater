@@ -230,16 +230,23 @@ pub const ROLE_PRIMARY_COMMAND: &str = "SET_ROLE:PRIMARY\n";
 pub const ROLE_SECONDARY_COMMAND: &str = "SET_ROLE:SECONDARY\n";
 
 // ============================================================================
-// Profile Configuration
+// Therapy Profile Configuration
 // ============================================================================
 
+/// Profile configuration command for REGULAR therapy profile.
+/// Maps to: regular_vcr - Default vCR, non-mirrored, no jitter.
+pub const PROFILE_REGULAR_COMMAND: &str = "SET_PROFILE:REGULAR\n";
+
 /// Profile configuration command for NOISY therapy profile.
+/// Maps to: noisy_vcr - Mirrored with 23.5% jitter.
 pub const PROFILE_NOISY_COMMAND: &str = "SET_PROFILE:NOISY\n";
 
-/// Profile configuration command for STANDARD therapy profile.
-pub const PROFILE_STANDARD_COMMAND: &str = "SET_PROFILE:STANDARD\n";
+/// Profile configuration command for HYBRID therapy profile.
+/// Maps to: hybrid_vcr - Non-mirrored with 23.5% jitter.
+pub const PROFILE_HYBRID_COMMAND: &str = "SET_PROFILE:HYBRID\n";
 
 /// Profile configuration command for GENTLE therapy profile.
+/// Maps to: gentle - Lower amplitude, sequential pattern.
 pub const PROFILE_GENTLE_COMMAND: &str = "SET_PROFILE:GENTLE\n";
 
 /// Timeout for profile configuration command.

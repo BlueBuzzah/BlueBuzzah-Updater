@@ -15,8 +15,8 @@ use serde::{Deserialize, Serialize};
 use super::config::{
     calculate_erase_wait_time, BOOTLOADER_TIMEOUT_MS, FLASH_PAGE_WRITE_TIME_MS,
     FRAMES_PER_FLASH_PAGE, PROFILE_CONFIG_TIMEOUT_MS, PROFILE_GENTLE_COMMAND,
-    PROFILE_NOISY_COMMAND, PROFILE_STANDARD_COMMAND, REBOOT_TIMEOUT_MS, ROLE_CONFIG_TIMEOUT_MS,
-    ROLE_PRIMARY_COMMAND, ROLE_SECONDARY_COMMAND,
+    PROFILE_HYBRID_COMMAND, PROFILE_NOISY_COMMAND, PROFILE_REGULAR_COMMAND, REBOOT_TIMEOUT_MS,
+    ROLE_CONFIG_TIMEOUT_MS, ROLE_PRIMARY_COMMAND, ROLE_SECONDARY_COMMAND,
 };
 use super::device::{
     get_device_by_port, wait_for_application_by_serial, wait_for_bootloader_by_serial,
@@ -570,23 +570,31 @@ fn configure_device_role(port_name: &str, role: &str, serial_number: &str) -> Df
 /// Configure the device therapy profile via serial command.
 ///
 /// After receiving SET_PROFILE, the device responds with:
+/// - Success: "[CONFIG] Profile set to REGULAR - restarting..." (then reboots)
 /// - Success: "[CONFIG] Profile set to NOISY - restarting..." (then reboots)
-/// - Success: "[CONFIG] Profile set to STANDARD - restarting..." (then reboots)
+/// - Success: "[CONFIG] Profile set to HYBRID - restarting..." (then reboots)
 /// - Success: "[CONFIG] Profile set to GENTLE - restarting..." (then reboots)
-/// - Error: "[ERROR] Invalid profile. Use: SET_PROFILE:NOISY, SET_PROFILE:STANDARD, or SET_PROFILE:GENTLE"
+/// - Error: "[ERROR] Invalid profile..."
+///
+/// Profile mappings:
+/// - REGULAR → regular_vcr: Default vCR, non-mirrored, no jitter
+/// - NOISY → noisy_vcr: Mirrored with 23.5% jitter
+/// - HYBRID → hybrid_vcr: Non-mirrored with 23.5% jitter
+/// - GENTLE → gentle: Lower amplitude, sequential pattern
 ///
 /// Since the device reboots after a successful profile change, we need to:
 /// 1. Send the command and wait for the [CONFIG] acknowledgment
 /// 2. Wait for the device to reboot and reappear
 pub fn configure_device_profile(port_name: &str, profile: &str, serial_number: &str) -> DfuResult<()> {
     let command = match profile.to_uppercase().as_str() {
+        "REGULAR" => PROFILE_REGULAR_COMMAND,
         "NOISY" => PROFILE_NOISY_COMMAND,
-        "STANDARD" => PROFILE_STANDARD_COMMAND,
+        "HYBRID" => PROFILE_HYBRID_COMMAND,
         "GENTLE" => PROFILE_GENTLE_COMMAND,
         _ => {
             return Err(DfuError::ProfileConfigFailed {
                 reason: format!(
-                    "Invalid profile: {}. Valid profiles: NOISY, STANDARD, GENTLE",
+                    "Invalid profile: {}. Valid profiles: REGULAR, NOISY, HYBRID, GENTLE",
                     profile
                 ),
             })

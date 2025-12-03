@@ -127,7 +127,7 @@ export interface GitHubAsset {
 // Therapy Profile Types
 // ============================================================================
 
-export type TherapyProfile = 'NOISY' | 'STANDARD' | 'GENTLE';
+export type TherapyProfile = 'REGULAR' | 'NOISY' | 'HYBRID' | 'GENTLE';
 
 export interface TherapyProfileInfo {
   id: TherapyProfile;

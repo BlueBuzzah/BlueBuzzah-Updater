@@ -49,7 +49,7 @@ vi.mock('./components/wizard/SuccessScreen', () => ({
 vi.mock('./components/therapy', () => ({
   ProfileSelection: ({ onSelect }: { onSelect: (p: string) => void }) => (
     <div data-testid="profile-selection">
-      <button onClick={() => onSelect('STANDARD')}>Select Profile</button>
+      <button onClick={() => onSelect('REGULAR')}>Select Profile</button>
     </div>
   ),
   TherapyDeviceSelection: () => <div data-testid="therapy-device-selection" />,

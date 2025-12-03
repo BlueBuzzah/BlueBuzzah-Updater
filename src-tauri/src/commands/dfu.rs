@@ -248,7 +248,7 @@ pub struct ProfileProgressEvent {
 ///
 /// # Arguments
 /// * `serial_port` - Serial port of the device
-/// * `profile` - Profile to set ("NOISY", "STANDARD", or "GENTLE")
+/// * `profile` - Profile to set ("REGULAR", "NOISY", "HYBRID", or "GENTLE")
 /// * `progress` - Channel for progress updates
 #[tauri::command]
 pub async fn set_device_profile(

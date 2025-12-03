@@ -7,7 +7,13 @@ import {
 } from '@/components/ui/card';
 import { THERAPY_PROFILES } from '@/lib/therapy-profiles';
 import type { TherapyProfile } from '@/types';
-import { Activity, CheckCircle2, Feather, Settings } from 'lucide-react';
+import {
+  Activity,
+  CheckCircle2,
+  Feather,
+  Gauge,
+  Shuffle,
+} from 'lucide-react';
 
 interface ProfileSelectionProps {
   selectedProfile: TherapyProfile | null;
@@ -15,8 +21,9 @@ interface ProfileSelectionProps {
 }
 
 const profileIcons: Record<TherapyProfile, React.ReactNode> = {
+  REGULAR: <Gauge className="h-8 w-8 text-primary" />,
   NOISY: <Activity className="h-8 w-8 text-primary" />,
-  STANDARD: <Settings className="h-8 w-8 text-primary" />,
+  HYBRID: <Shuffle className="h-8 w-8 text-primary" />,
   GENTLE: <Feather className="h-8 w-8 text-primary" />,
 };
 
@@ -33,7 +40,7 @@ export function ProfileSelection({
         </p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-3">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {THERAPY_PROFILES.map((profile) => {
           const isSelected = selectedProfile === profile.id;
 
@@ -73,16 +80,20 @@ export function ProfileSelection({
             <p className="font-medium text-foreground mb-2">Profile Details:</p>
             <ul className="space-y-2">
               <li>
-                <span className="font-medium">Noisy:</span> Best for general
-                therapy with unpredictable patterns that prevent adaptation
+                <span className="font-medium">Regular:</span> Default vCR pattern
+                with consistent, non-mirrored stimulation
               </li>
               <li>
-                <span className="font-medium">Standard:</span> Reliable,
-                consistent pulses ideal for structured sessions
+                <span className="font-medium">Noisy:</span> Mirrored pattern with
+                23.5% jitter for varied, unpredictable stimulation
               </li>
               <li>
-                <span className="font-medium">Gentle:</span> Lower intensity for
-                users who prefer softer stimulation
+                <span className="font-medium">Hybrid:</span> Non-mirrored pattern
+                with 23.5% jitter combining consistency with variation
+              </li>
+              <li>
+                <span className="font-medium">Gentle:</span> Lower amplitude with
+                sequential pattern for sensitive users
               </li>
             </ul>
           </div>
