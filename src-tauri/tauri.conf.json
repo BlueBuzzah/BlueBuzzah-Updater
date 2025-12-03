@@ -29,7 +29,7 @@
 	},
 	"bundle": {
 		"active": true,
-		"targets": "all",
+		"targets": ["app", "dmg", "nsis"],
 		"createUpdaterArtifacts": true,
 		"icon": [
 			"icons/32x32.png",
@@ -40,11 +40,6 @@
 		],
 		"macOS": {
 			"minimumSystemVersion": "10.13"
-		},
-		"windows": {
-			"wix": {
-				"upgradeCode": "033444e7-cc90-503b-b698-7a51d4f47424"
-			}
 		}
 	},
 	"plugins": {
