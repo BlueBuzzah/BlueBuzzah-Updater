@@ -1,6 +1,6 @@
 {
 	"productName": "BlueBuzzah Updater",
-	"version": "1.0.0-beta.5",
+	"version": "1.0.0-beta.4",
 	"identifier": "com.bluebuzzah.updater",
 	"build": {
 		"beforeDevCommand": "npm run dev",

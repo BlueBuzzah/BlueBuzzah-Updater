@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import ReactMarkdown from 'react-markdown';
 import {
   AlertDialog,
   AlertDialogContent,
@@ -226,11 +227,22 @@ ${error.details}`;
                 </p>
               )}
 
-              <div className="max-h-32 overflow-y-auto rounded border border-border bg-secondary/50 p-3 text-sm">
-                <p className="mb-1 font-medium">Release Notes:</p>
-                <p className="whitespace-pre-wrap text-muted-foreground">
-                  {updateInfo.releaseNotes}
-                </p>
+              <div className="max-h-48 overflow-y-auto rounded border border-border bg-secondary/50 p-3 text-sm">
+                <p className="mb-2 font-medium">Release Notes:</p>
+                <div
+                  className="prose prose-sm prose-invert max-w-none
+                    prose-headings:text-foreground prose-headings:font-semibold prose-headings:mt-3 prose-headings:mb-1
+                    prose-p:text-muted-foreground prose-p:my-1
+                    prose-ul:text-muted-foreground prose-ul:my-1 prose-ul:pl-4
+                    prose-ol:text-muted-foreground prose-ol:my-1 prose-ol:pl-4
+                    prose-li:my-0.5
+                    prose-code:text-[#35B6F2] prose-code:bg-secondary prose-code:px-1 prose-code:rounded prose-code:text-xs
+                    prose-pre:bg-secondary prose-pre:p-2 prose-pre:rounded prose-pre:my-2
+                    prose-a:text-[#35B6F2] prose-a:no-underline hover:prose-a:underline
+                    prose-strong:text-foreground"
+                >
+                  <ReactMarkdown>{updateInfo.releaseNotes}</ReactMarkdown>
+                </div>
               </div>
 
               {isDownloading && progress && (

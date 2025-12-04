@@ -20,11 +20,12 @@ import {
 } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/components/ui/use-toast';
-import { formatBytes, formatDate, truncateText } from '@/lib/utils';
+import { formatBytes, formatDate } from '@/lib/utils';
 import { firmwareService } from '@/services/FirmwareService';
 import { FirmwareRelease } from '@/types';
 import { Calendar, ChevronDown, ChevronUp, Download, FileText, HardDrive, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
 
 interface FirmwareSelectionProps {
   onSelect: (release: FirmwareRelease) => void;
@@ -171,7 +172,6 @@ export function FirmwareSelection({
       <div className="flex flex-col gap-4">
         {releases.map((release, index) => {
           const isExpanded = expandedReleases.has(release.tagName);
-          const truncatedNotes = truncateText(release.releaseNotes, 150);
           const needsExpansion = release.releaseNotes.length > 150;
 
           return (
@@ -229,9 +229,26 @@ export function FirmwareSelection({
               <CardContent className="space-y-3">
                 <div>
                   <h4 className="text-sm font-semibold mb-1">Release Notes</h4>
-                  <p className="text-sm text-muted-foreground">
-                    {isExpanded ? release.releaseNotes : truncatedNotes}
-                  </p>
+                  <div className="relative">
+                    <div
+                      className={`prose prose-sm prose-invert max-w-none overflow-hidden transition-all duration-200
+                        prose-headings:text-foreground prose-headings:font-semibold prose-headings:mt-3 prose-headings:mb-1
+                        prose-p:text-muted-foreground prose-p:my-1
+                        prose-ul:text-muted-foreground prose-ul:my-1 prose-ul:pl-4
+                        prose-ol:text-muted-foreground prose-ol:my-1 prose-ol:pl-4
+                        prose-li:my-0.5
+                        prose-code:text-[#35B6F2] prose-code:bg-secondary prose-code:px-1 prose-code:rounded prose-code:text-xs
+                        prose-pre:bg-secondary prose-pre:p-2 prose-pre:rounded prose-pre:my-2
+                        prose-a:text-[#35B6F2] prose-a:no-underline hover:prose-a:underline
+                        prose-strong:text-foreground
+                        ${isExpanded ? 'max-h-[500px]' : 'max-h-[4.5rem]'}`}
+                    >
+                      <ReactMarkdown>{release.releaseNotes}</ReactMarkdown>
+                    </div>
+                    {!isExpanded && needsExpansion && (
+                      <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-card to-transparent pointer-events-none" />
+                    )}
+                  </div>
                   {needsExpansion && (
                     <Button
                       variant="ghost"
