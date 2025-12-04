@@ -1,14 +1,20 @@
 import { create } from 'zustand';
-import { UpdaterState, AppUpdateInfo, AppUpdateProgress } from '@/types';
+import {
+  UpdaterState,
+  AppUpdateInfo,
+  AppUpdateProgress,
+  UpdaterErrorInfo,
+} from '@/types';
 
 interface UpdaterStore extends UpdaterState {
   // Actions
   setChecking: (isChecking: boolean) => void;
   setUpdateAvailable: (info: AppUpdateInfo | null) => void;
   setProgress: (progress: AppUpdateProgress | null) => void;
-  setError: (error: string | null) => void;
+  setError: (error: UpdaterErrorInfo | null) => void;
   dismiss: () => void;
   reset: () => void;
+  clearError: () => void;
 }
 
 const initialState: UpdaterState = {
@@ -43,4 +49,6 @@ export const useUpdaterStore = create<UpdaterStore>((set) => ({
   dismiss: () => set({ dismissed: true }),
 
   reset: () => set(initialState),
+
+  clearError: () => set({ error: null, dismissed: false }),
 }));

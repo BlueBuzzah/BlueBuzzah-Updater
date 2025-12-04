@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useUpdaterStore } from '@/stores/updaterStore';
-import { updaterService } from '@/services/UpdaterService';
+import { updaterService, UpdaterError } from '@/services/UpdaterService';
+import { extractUpdaterError } from '@/lib/updater-errors';
 
 export function useAppUpdater() {
   const { setChecking, setUpdateAvailable, setError } = useUpdaterStore();
@@ -19,8 +20,13 @@ export function useAppUpdater() {
         setUpdateAvailable(updateInfo);
       } catch (error) {
         console.error('Update check failed:', error);
-        // Silently fail - don't show error to user for background check
-        setError(null);
+
+        // Extract and display error details
+        if (error instanceof UpdaterError) {
+          setError(error.info);
+        } else {
+          setError(extractUpdaterError(error, 'check'));
+        }
         setUpdateAvailable(null);
       }
     };

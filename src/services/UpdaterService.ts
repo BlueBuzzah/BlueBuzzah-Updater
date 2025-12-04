@@ -1,6 +1,20 @@
 import { check, Update } from '@tauri-apps/plugin-updater';
 import { relaunch } from '@tauri-apps/plugin-process';
-import { AppUpdateInfo, AppUpdateProgress } from '@/types';
+import { AppUpdateInfo, AppUpdateProgress, UpdaterErrorInfo } from '@/types';
+import { extractUpdaterError } from '@/lib/updater-errors';
+
+/**
+ * Custom error class that carries structured error info for display.
+ */
+export class UpdaterError extends Error {
+  public readonly info: UpdaterErrorInfo;
+
+  constructor(info: UpdaterErrorInfo) {
+    super(info.message);
+    this.name = 'UpdaterError';
+    this.info = info;
+  }
+}
 
 export interface IUpdaterRepository {
   checkForUpdate(): Promise<AppUpdateInfo | null>;
@@ -32,9 +46,7 @@ export class UpdaterService implements IUpdaterRepository {
       };
     } catch (error) {
       console.error('Failed to check for updates:', error);
-      throw new Error(
-        `Failed to check for updates: ${error instanceof Error ? error.message : 'Unknown error'}`
-      );
+      throw new UpdaterError(extractUpdaterError(error, 'check'));
     }
   }
 
@@ -83,9 +95,7 @@ export class UpdaterService implements IUpdaterRepository {
       });
     } catch (error) {
       console.error('Failed to download and install update:', error);
-      throw new Error(
-        `Failed to install update: ${error instanceof Error ? error.message : 'Unknown error'}`
-      );
+      throw new UpdaterError(extractUpdaterError(error, 'install'));
     }
   }
 
@@ -94,9 +104,7 @@ export class UpdaterService implements IUpdaterRepository {
       await relaunch();
     } catch (error) {
       console.error('Failed to relaunch app:', error);
-      throw new Error(
-        `Failed to relaunch: ${error instanceof Error ? error.message : 'Unknown error'}`
-      );
+      throw new UpdaterError(extractUpdaterError(error, 'relaunch'));
     }
   }
 }

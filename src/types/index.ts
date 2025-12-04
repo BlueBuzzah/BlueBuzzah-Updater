@@ -196,11 +196,19 @@ export interface AppUpdateProgress {
   percent: number;
 }
 
+export type UpdaterErrorStage = 'check' | 'download' | 'install' | 'relaunch';
+
+export interface UpdaterErrorInfo {
+  message: string;
+  details: string;
+  stage: UpdaterErrorStage;
+}
+
 export interface UpdaterState {
   isChecking: boolean;
   updateAvailable: boolean;
   updateInfo: AppUpdateInfo | null;
   progress: AppUpdateProgress | null;
-  error: string | null;
+  error: UpdaterErrorInfo | null;
   dismissed: boolean;
 }

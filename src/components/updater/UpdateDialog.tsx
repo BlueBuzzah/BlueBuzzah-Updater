@@ -9,10 +9,11 @@ import {
 } from '@/components/ui/alert-dialog';
 import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
-import { Download, RefreshCw, X } from 'lucide-react';
+import { Download, RefreshCw, X, AlertCircle, Copy, Check } from 'lucide-react';
 import { useUpdaterStore } from '@/stores/updaterStore';
-import { updaterService } from '@/services/UpdaterService';
+import { updaterService, UpdaterError } from '@/services/UpdaterService';
 import { useToast } from '@/components/ui/use-toast';
+import { extractUpdaterError, getStageDescription } from '@/lib/updater-errors';
 
 export function UpdateDialog() {
   const {
@@ -23,13 +24,19 @@ export function UpdateDialog() {
     dismissed,
     setProgress,
     setError,
+    setChecking,
     dismiss,
+    clearError,
   } = useUpdaterStore();
 
   const { toast } = useToast();
   const [isInstalling, setIsInstalling] = useState(false);
+  const [copied, setCopied] = useState(false);
 
-  const isOpen = updateAvailable && !dismissed && !error;
+  // Show dialog for updates OR errors
+  const showUpdateDialog = updateAvailable && !dismissed && !error;
+  const showErrorDialog = error !== null;
+  const isOpen = showUpdateDialog || showErrorDialog;
 
   const handleInstall = async () => {
     setIsInstalling(true);
@@ -43,13 +50,12 @@ export function UpdateDialog() {
       // Update downloaded and ready - relaunch
       await updaterService.relaunchApp();
     } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Update failed';
-      setError(errorMessage);
-      toast({
-        variant: 'destructive',
-        title: 'Update Failed',
-        description: errorMessage,
-      });
+      // Extract detailed error info
+      if (err instanceof UpdaterError) {
+        setError(err.info);
+      } else {
+        setError(extractUpdaterError(err, 'install'));
+      }
       setIsInstalling(false);
     }
   };
@@ -58,7 +64,63 @@ export function UpdateDialog() {
     dismiss();
   };
 
-  if (!updateInfo) return null;
+  const handleDismissError = () => {
+    clearError();
+    dismiss();
+  };
+
+  const handleRetry = async () => {
+    clearError();
+    setChecking(true);
+
+    try {
+      const updateInfo = await updaterService.checkForUpdate();
+      if (updateInfo) {
+        useUpdaterStore.getState().setUpdateAvailable(updateInfo);
+      } else {
+        toast({
+          title: 'No Update Available',
+          description: 'You are running the latest version.',
+        });
+      }
+    } catch (err) {
+      if (err instanceof UpdaterError) {
+        setError(err.info);
+      } else {
+        setError(extractUpdaterError(err, 'check'));
+      }
+    }
+  };
+
+  const handleCopyError = async () => {
+    if (!error) return;
+
+    const errorText = `BlueBuzzah Updater Error
+Stage: ${getStageDescription(error.stage)}
+Message: ${error.message}
+
+Details:
+${error.details}`;
+
+    try {
+      await navigator.clipboard.writeText(errorText);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+      toast({
+        title: 'Copied',
+        description: 'Error details copied to clipboard.',
+      });
+    } catch {
+      toast({
+        variant: 'destructive',
+        title: 'Copy Failed',
+        description: 'Could not copy to clipboard.',
+      });
+    }
+  };
+
+  // Only return null if there's nothing to show
+  if (!updateInfo && !error) return null;
 
   const isDownloading = progress?.stage === 'downloading';
   const progressPercent = progress?.percent ?? 0;
@@ -70,6 +132,73 @@ export function UpdateDialog() {
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
   };
+
+  // Render error dialog
+  if (showErrorDialog && error) {
+    return (
+      <AlertDialog open={true}>
+        <AlertDialogContent className="max-w-lg">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertCircle className="h-5 w-5" />
+              Update Failed
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p className="text-foreground">
+                  An error occurred while {getStageDescription(error.stage)}.
+                </p>
+
+                <div className="rounded border border-destructive/30 bg-destructive/10 p-3">
+                  <p className="font-medium text-destructive">{error.message}</p>
+                </div>
+
+                <div className="space-y-1">
+                  <p className="text-xs font-medium text-muted-foreground">
+                    Technical Details:
+                  </p>
+                  <div className="max-h-40 overflow-auto rounded border border-border bg-secondary/50 p-3 font-mono text-xs">
+                    <pre className="whitespace-pre-wrap break-all text-muted-foreground">
+                      {error.details}
+                    </pre>
+                  </div>
+                </div>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={handleDismissError}>
+              <X className="mr-2 h-4 w-4" />
+              Dismiss
+            </Button>
+            <Button variant="outline" onClick={handleCopyError}>
+              {copied ? (
+                <>
+                  <Check className="mr-2 h-4 w-4" />
+                  Copied
+                </>
+              ) : (
+                <>
+                  <Copy className="mr-2 h-4 w-4" />
+                  Copy Details
+                </>
+              )}
+            </Button>
+            <Button
+              onClick={handleRetry}
+              className="bg-[#35B6F2] hover:bg-[#35B6F2]/90"
+            >
+              <RefreshCw className="mr-2 h-4 w-4" />
+              Retry
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    );
+  }
+
+  // Render update available dialog
+  if (!updateInfo) return null;
 
   return (
     <AlertDialog open={isOpen}>
