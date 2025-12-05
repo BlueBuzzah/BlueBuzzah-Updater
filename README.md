@@ -3,7 +3,7 @@
 [![BlueBuzzah Updater](https://img.shields.io/github/v/release/BlueBuzzah/BlueBuzzah-Updater?label=version)](https://github.com/BlueBuzzah/BlueBuzzah-Updater/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/BlueBuzzah/BlueBuzzah-Updater/total)](https://github.com/BlueBuzzah/BlueBuzzah-Updater/releases/latest)
 [![Test Suite Status](https://img.shields.io/github/actions/workflow/status/BlueBuzzah/BlueBuzzah-Updater/test.yml?branch=main&label=tests)](https://github.com/BlueBuzzah/BlueBuzzah-Updater/actions/workflows/test.yml)
-[![Snyk Security](https://snyk.io/test/github/buzzahbuddy/bluebuzzah-firmware/badge.svg)](https://app.snyk.io/org/rbonestell/project/29618332-cdb9-45be-ba57-41da82771ad0)
+[![Snyk Security](https://snyk.io/test/github/buzzahbuddy/bluebuzzah-firmware/badge.svg)](https://app.snyk.io/org/rbonestell/project/8b6e37e4-60b5-4772-a925-9dff00d8dce2)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
 Device firmware updater for BlueBuzzah devices.
