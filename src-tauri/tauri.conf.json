@@ -43,7 +43,22 @@
 			"icons/icon.ico"
 		],
 		"macOS": {
-			"minimumSystemVersion": "10.13"
+			"minimumSystemVersion": "10.13",
+			"dmg": {
+				"background": "assets/updater-bg.png",
+				"windowSize": {
+					"width": 620,
+					"height": 480
+				},
+				"appPosition": {
+					"x": 120,
+					"y": 200
+				},
+				"applicationFolderPosition": {
+					"x": 480,
+					"y": 200
+				}
+			}
 		}
 	},
 	"plugins": {
