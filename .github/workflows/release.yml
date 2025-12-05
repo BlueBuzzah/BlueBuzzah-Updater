@@ -155,15 +155,28 @@ jobs:
           echo "Created signature file:"
           ls -la "${TAR_FILE}.sig"
 
+      - name: Install create-dmg
+        run: brew install create-dmg
+
       - name: Create DMG from notarized app
         run: |
           APP_PATH=$(find "src-tauri/target/universal-apple-darwin/release/bundle/macos" -name "*.app" -type d | head -1)
-          APP_NAME=$(basename "$APP_PATH" .app)
+          APP_NAME=$(basename "$APP_PATH")
           DMG_PATH="BlueBuzzah_Updater_universal.dmg"
 
-          echo "=== Creating $DMG_PATH ==="
+          echo "=== Creating $DMG_PATH with customizations ==="
 
-          hdiutil create -volname "$APP_NAME" -srcfolder "$APP_PATH" -ov -format UDZO "$DMG_PATH"
+          # Use create-dmg to preserve DMG customizations from tauri.conf.json
+          create-dmg \
+            --volname "Install BlueBuzzah Updater" \
+            --background "src-tauri/assets/updater-bg.png" \
+            --window-size 620 480 \
+            --icon "$APP_NAME" 120 200 \
+            --app-drop-link 480 200 \
+            --no-internet-enable \
+            "$DMG_PATH" \
+            "$APP_PATH"
+
           echo "Created $DMG_PATH"
 
       - name: Notarize and staple DMG
