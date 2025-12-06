@@ -19,6 +19,7 @@ import {
 	CardTitle,
 } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
+import { Switch } from '@/components/ui/switch';
 import {
 	Tooltip,
 	TooltipContent,
@@ -29,7 +30,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { formatBytes, formatDate } from '@/lib/utils';
 import { firmwareService } from '@/services/FirmwareService';
 import { FirmwareRelease } from '@/types';
-import { Calendar, ChevronDown, ChevronUp, Download, FileText, HardDrive, Trash2 } from 'lucide-react';
+import { Calendar, ChevronDown, ChevronUp, Download, FileText, FlaskConical, HardDrive, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 
@@ -48,6 +49,7 @@ export function FirmwareSelection({
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [releaseToDelete, setReleaseToDelete] = useState<FirmwareRelease | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showExperimental, setShowExperimental] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -166,17 +168,74 @@ export function FirmwareSelection({
     );
   }
 
+  // Filter releases based on experimental toggle
+  const filteredReleases = releases.filter(
+    (release) => showExperimental || !release.isPrerelease
+  );
+
+  // Check if there are any experimental releases to show the toggle
+  const hasExperimentalReleases = releases.some((r) => r.isPrerelease);
+
   return (
     <div className="space-y-6">
-      <div className="text-center">
-        <h2 className="text-2xl font-bold mb-2">Select Firmware Version</h2>
-        <p className="text-muted-foreground">
-          Choose the firmware version you want to install
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold mb-2">Select Firmware Version</h2>
+          <p className="text-muted-foreground">
+            Choose the firmware version you want to install
+          </p>
+        </div>
+        {hasExperimentalReleases && (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <label
+                  className={`
+                    group flex items-center gap-2.5 px-3 py-2 rounded-lg
+                    border transition-all duration-200 cursor-pointer select-none
+                    ${showExperimental
+                      ? 'bg-amber-500/10 border-amber-500/40 shadow-[0_0_12px_rgba(245,158,11,0.15)]'
+                      : 'bg-zinc-900/50 border-zinc-700/50 hover:border-zinc-600'
+                    }
+                  `}
+                >
+                  <FlaskConical
+                    className={`h-4 w-4 transition-colors duration-200 ${
+                      showExperimental ? 'text-amber-400' : 'text-zinc-500 group-hover:text-zinc-400'
+                    }`}
+                  />
+                  <span
+                    className={`text-sm font-medium transition-colors duration-200 ${
+                      showExperimental ? 'text-amber-400' : 'text-zinc-400 group-hover:text-zinc-300'
+                    }`}
+                  >
+                    Experimental
+                  </span>
+                  <Switch
+                    checked={showExperimental}
+                    onCheckedChange={setShowExperimental}
+                    className={`
+                      data-[state=checked]:bg-amber-500
+                      data-[state=unchecked]:bg-zinc-700
+                    `}
+                  />
+                </label>
+              </TooltipTrigger>
+              <TooltipContent
+                side="bottom"
+                className="bg-zinc-900 border border-zinc-700"
+              >
+                <p className="text-zinc-300 text-xs">
+                  {showExperimental ? 'Hide' : 'Show'} pre-release firmware versions
+                </p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
       </div>
 
       <div className="flex flex-col gap-4">
-        {releases.map((release, index) => {
+        {filteredReleases.map((release, index) => {
           const isExpanded = expandedReleases.has(release.tagName);
           const needsExpansion = release.releaseNotes.length > 150;
 

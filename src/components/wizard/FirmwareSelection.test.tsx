@@ -126,19 +126,38 @@ describe('FirmwareSelection', () => {
       });
     });
 
-    it('shows experimental badge for pre-release versions', async () => {
+    it('shows experimental badge for pre-release versions when toggle is enabled', async () => {
+      const stableRelease = createMockRelease({
+        version: '1.0.0',
+        isPrerelease: false,
+      });
       const prereleaseVersion = createMockRelease({
         version: '2.0.0-beta.1',
+        tagName: 'v2.0.0-beta.1',
         isPrerelease: true,
+        publishedAt: new Date('2024-01-20'),
       });
-      vi.mocked(firmwareService.fetchReleases).mockResolvedValue([prereleaseVersion]);
+      vi.mocked(firmwareService.fetchReleases).mockResolvedValue([prereleaseVersion, stableRelease]);
 
       render(
         <FirmwareSelection onSelect={mockOnSelect} />
       );
 
+      // Wait for releases to load - only stable release visible initially
       await waitFor(() => {
-        expect(screen.getByText('Experimental')).toBeInTheDocument();
+        expect(screen.getByText('1.0.0')).toBeInTheDocument();
+      });
+
+      // Pre-release version should NOT be visible initially
+      expect(screen.queryByText('2.0.0-beta.1')).not.toBeInTheDocument();
+
+      // Toggle experimental releases on
+      const experimentalToggle = screen.getByRole('switch');
+      fireEvent.click(experimentalToggle);
+
+      // Now the pre-release version should be visible
+      await waitFor(() => {
+        expect(screen.getByText('2.0.0-beta.1')).toBeInTheDocument();
       });
     });
 
