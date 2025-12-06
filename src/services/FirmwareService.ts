@@ -224,6 +224,7 @@ export class FirmwareService implements IFirmwareRepository {
         downloadUrl: asset.browser_download_url,
         size: asset.size,
       })),
+      isPrerelease: githubRelease.prerelease,
     };
   }
 }

@@ -19,6 +19,12 @@ import {
 	CardTitle,
 } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipProvider,
+	TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { useToast } from '@/components/ui/use-toast';
 import { formatBytes, formatDate } from '@/lib/utils';
 import { firmwareService } from '@/services/FirmwareService';
@@ -190,6 +196,33 @@ export function FirmwareSelection({
                       {release.version}
                       {index === 0 && (
                         <Badge variant="default">Latest</Badge>
+                      )}
+                      {release.isPrerelease && (
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="cursor-help">
+                                <Badge
+                                  variant="default"
+                                  className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30 hover:bg-yellow-500/30"
+                                >
+                                  Experimental
+                                </Badge>
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent
+                              className="max-w-xs bg-zinc-900 border border-amber-500/30 shadow-lg shadow-amber-500/5"
+                              sideOffset={8}
+                            >
+                              <p className="font-semibold text-amber-400 text-sm">
+                                Warning: Experimental Firmware
+                              </p>
+                              <p className="text-zinc-300 text-xs mt-1.5 leading-relaxed">
+                                Pre-release version for testing and evaluation. Not intended for regular therapy use. May contain defects or unexpected behavior.
+                              </p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
                       )}
                       {release.isCached && (
                         <Badge

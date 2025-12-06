@@ -126,6 +126,22 @@ describe('FirmwareSelection', () => {
       });
     });
 
+    it('shows experimental badge for pre-release versions', async () => {
+      const prereleaseVersion = createMockRelease({
+        version: '2.0.0-beta.1',
+        isPrerelease: true,
+      });
+      vi.mocked(firmwareService.fetchReleases).mockResolvedValue([prereleaseVersion]);
+
+      render(
+        <FirmwareSelection onSelect={mockOnSelect} />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('Experimental')).toBeInTheDocument();
+      });
+    });
+
     it('displays download size', async () => {
       const mockRelease = createMockRelease({
         version: '1.0.0',

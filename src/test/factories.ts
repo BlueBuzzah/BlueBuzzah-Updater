@@ -28,6 +28,7 @@ export const createMockRelease = (overrides?: Partial<FirmwareRelease>): Firmwar
   publishedAt: new Date('2024-01-15'),
   downloadUrl: 'https://github.com/test/releases/download/v1.0.0/firmware.zip',
   assets: [createMockAsset()],
+  isPrerelease: false,
   ...overrides,
 });
 
@@ -65,6 +66,7 @@ export const createMockGitHubRelease = (overrides?: Partial<GitHubRelease>): Git
   name: '1.0.0',
   body: 'Test release notes',
   published_at: '2024-01-15T00:00:00Z',
+  prerelease: false,
   assets: [createMockGitHubAsset()],
   ...overrides,
 });

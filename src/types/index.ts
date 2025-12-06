@@ -9,6 +9,7 @@ export interface FirmwareRelease {
   sha256Hash?: string;
   isCached?: boolean;
   cachedMetadata?: CachedFirmwareMetadata;
+  isPrerelease?: boolean;
 }
 
 export interface FirmwareAsset {
@@ -114,6 +115,7 @@ export interface GitHubRelease {
   name: string;
   body: string;
   published_at: string;
+  prerelease: boolean;
   assets: GitHubAsset[];
 }
 
