@@ -1,9 +1,9 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { createMockDevice, createMockRelease } from '@/test/factories';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
-import { useWizardStore } from './stores/wizardStore';
 import { useTherapyStore } from './stores/therapyStore';
-import { createMockRelease, createMockDevice } from '@/test/factories';
+import { useWizardStore } from './stores/wizardStore';
 
 // Mock the Tauri plugin process
 vi.mock('@tauri-apps/plugin-process', () => ({
@@ -77,32 +77,32 @@ describe('App', () => {
       expect(screen.getByText('What would you like to do?')).toBeInTheDocument();
     });
 
-    it('shows Firmware Update option', () => {
+    it('shows Update Devices option', () => {
       render(<App />);
 
-      expect(screen.getByText('Firmware Update')).toBeInTheDocument();
+      expect(screen.getByText('Update Devices')).toBeInTheDocument();
     });
 
-    it('shows Set Therapy Profile option', () => {
+    it('shows Configure Devices option', () => {
       render(<App />);
 
-      expect(screen.getByText('Set Therapy Profile')).toBeInTheDocument();
+      expect(screen.getByText('Configure Devices')).toBeInTheDocument();
     });
 
-    it('clicking Firmware Update enters firmware mode', async () => {
+    it('clicking Update Devices enters firmware mode', async () => {
       render(<App />);
 
-      fireEvent.click(screen.getByText('Firmware Update'));
+      fireEvent.click(screen.getByText('Update Devices'));
 
       await waitFor(() => {
         expect(screen.getByTestId('firmware-selection')).toBeInTheDocument();
       });
     });
 
-    it('clicking Set Therapy Profile enters therapy mode', async () => {
+    it('clicking Configure Devices enters therapy mode', async () => {
       render(<App />);
 
-      fireEvent.click(screen.getByText('Set Therapy Profile'));
+      fireEvent.click(screen.getByText('Configure Devices'));
 
       await waitFor(() => {
         expect(screen.getByTestId('profile-selection')).toBeInTheDocument();
@@ -119,7 +119,7 @@ describe('App', () => {
   describe('Firmware Wizard - Step Rendering', () => {
     const enterFirmwareMode = () => {
       render(<App />);
-      fireEvent.click(screen.getByText('Firmware Update'));
+      fireEvent.click(screen.getByText('Update Devices'));
     };
 
     it('renders FirmwareSelection on step 0', async () => {
@@ -172,7 +172,7 @@ describe('App', () => {
   describe('Firmware Wizard - Layout Integration', () => {
     it('wraps content in WizardLayout', async () => {
       render(<App />);
-      fireEvent.click(screen.getByText('Firmware Update'));
+      fireEvent.click(screen.getByText('Update Devices'));
 
       await waitFor(() => {
         // Check for the wizard layout header
@@ -184,7 +184,7 @@ describe('App', () => {
   describe('Firmware Wizard - Navigation Logic', () => {
     it('hides navigation footer on step 0', async () => {
       render(<App />);
-      fireEvent.click(screen.getByText('Firmware Update'));
+      fireEvent.click(screen.getByText('Update Devices'));
 
       await waitFor(() => {
         expect(screen.getByTestId('firmware-selection')).toBeInTheDocument();
@@ -201,7 +201,7 @@ describe('App', () => {
       store.setStep(1);
 
       render(<App />);
-      fireEvent.click(screen.getByText('Firmware Update'));
+      fireEvent.click(screen.getByText('Update Devices'));
 
       await waitFor(() => {
         expect(screen.getByTestId('device-selection')).toBeInTheDocument();
@@ -214,7 +214,7 @@ describe('App', () => {
   describe('Firmware Wizard - Step Transitions', () => {
     it('selecting firmware auto-advances to step 1', async () => {
       render(<App />);
-      fireEvent.click(screen.getByText('Firmware Update'));
+      fireEvent.click(screen.getByText('Update Devices'));
 
       await waitFor(() => {
         expect(screen.getByTestId('firmware-selection')).toBeInTheDocument();
@@ -234,7 +234,7 @@ describe('App', () => {
       store.setStep(1);
 
       render(<App />);
-      fireEvent.click(screen.getByText('Firmware Update'));
+      fireEvent.click(screen.getByText('Update Devices'));
 
       await waitFor(() => {
         expect(screen.getByTestId('device-selection')).toBeInTheDocument();
@@ -255,7 +255,7 @@ describe('App', () => {
       store.setStep(1);
 
       render(<App />);
-      fireEvent.click(screen.getByText('Firmware Update'));
+      fireEvent.click(screen.getByText('Update Devices'));
 
       await waitFor(() => {
         expect(screen.getByTestId('device-selection')).toBeInTheDocument();
@@ -271,7 +271,7 @@ describe('App', () => {
       store.setStep(1);
 
       render(<App />);
-      fireEvent.click(screen.getByText('Firmware Update'));
+      fireEvent.click(screen.getByText('Update Devices'));
 
       await waitFor(() => {
         expect(screen.getByTestId('device-selection')).toBeInTheDocument();
@@ -287,7 +287,7 @@ describe('App', () => {
       store.setStep(1);
 
       render(<App />);
-      fireEvent.click(screen.getByText('Firmware Update'));
+      fireEvent.click(screen.getByText('Update Devices'));
 
       await waitFor(() => {
         expect(screen.getByTestId('device-selection')).toBeInTheDocument();
@@ -305,7 +305,7 @@ describe('App', () => {
       store.setStep(3);
 
       render(<App />);
-      fireEvent.click(screen.getByText('Firmware Update'));
+      fireEvent.click(screen.getByText('Update Devices'));
 
       await waitFor(() => {
         expect(screen.getByTestId('success-screen')).toBeInTheDocument();
@@ -323,7 +323,7 @@ describe('App', () => {
   describe('Firmware Wizard - Step Indicator', () => {
     it('shows all step labels', async () => {
       render(<App />);
-      fireEvent.click(screen.getByText('Firmware Update'));
+      fireEvent.click(screen.getByText('Update Devices'));
 
       await waitFor(() => {
         expect(screen.getByText('Firmware')).toBeInTheDocument();
@@ -338,25 +338,25 @@ describe('App', () => {
   describe('Therapy Wizard', () => {
     it('shows profile selection on entry', async () => {
       render(<App />);
-      fireEvent.click(screen.getByText('Set Therapy Profile'));
+      fireEvent.click(screen.getByText('Configure Devices'));
 
       await waitFor(() => {
         expect(screen.getByTestId('profile-selection')).toBeInTheDocument();
       });
     });
 
-    it('shows Set Therapy Profile header', async () => {
+    it('shows Configure Devices header', async () => {
       render(<App />);
-      fireEvent.click(screen.getByText('Set Therapy Profile'));
+      fireEvent.click(screen.getByText('Configure Devices'));
 
       await waitFor(() => {
-        expect(screen.getByText('Set Therapy Profile')).toBeInTheDocument();
+        expect(screen.getByText('Configure Devices')).toBeInTheDocument();
       });
     });
 
     it('has Home button to return', async () => {
       render(<App />);
-      fireEvent.click(screen.getByText('Set Therapy Profile'));
+      fireEvent.click(screen.getByText('Configure Devices'));
 
       await waitFor(() => {
         expect(screen.getByRole('button', { name: /home/i })).toBeInTheDocument();
@@ -365,7 +365,7 @@ describe('App', () => {
 
     it('clicking Home returns to home screen', async () => {
       render(<App />);
-      fireEvent.click(screen.getByText('Set Therapy Profile'));
+      fireEvent.click(screen.getByText('Configure Devices'));
 
       await waitFor(() => {
         expect(screen.getByTestId('profile-selection')).toBeInTheDocument();

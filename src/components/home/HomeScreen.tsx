@@ -1,13 +1,13 @@
-import { useState, useEffect } from 'react';
-import { getVersion } from '@tauri-apps/api/app';
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
+	Card,
+	CardContent,
+	CardDescription,
+	CardHeader,
+	CardTitle,
 } from '@/components/ui/card';
+import { getVersion } from '@tauri-apps/api/app';
 import { Download, Settings } from 'lucide-react';
+import { useEffect, useState } from 'react';
 
 export type AppMode = 'home' | 'firmware' | 'therapy';
 
@@ -45,7 +45,7 @@ export function HomeScreen({ onSelectMode }: HomeScreenProps) {
           </div>
 
           <div className="grid gap-6 md:grid-cols-2">
-            {/* Firmware Update Card */}
+            {/* Update Devices Card */}
             <Card
               className="cursor-pointer transition-all hover:shadow-lg hover:border-primary/50 group"
               onClick={() => onSelectMode('firmware')}
@@ -54,7 +54,7 @@ export function HomeScreen({ onSelectMode }: HomeScreenProps) {
                 <div className="w-14 h-14 rounded-lg bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/20 transition-colors">
                   <Download className="h-7 w-7 text-primary" />
                 </div>
-                <CardTitle className="text-xl">Firmware Update</CardTitle>
+                <CardTitle className="text-xl">Update Devices</CardTitle>
                 <CardDescription>
                   Install the latest firmware version to your devices
                 </CardDescription>
@@ -77,7 +77,7 @@ export function HomeScreen({ onSelectMode }: HomeScreenProps) {
                 <div className="w-14 h-14 rounded-lg bg-primary/10 flex items-center justify-center mb-4 group-hover:bg-primary/20 transition-colors">
                   <Settings className="h-7 w-7 text-primary" />
                 </div>
-                <CardTitle className="text-xl">Set Therapy Profile</CardTitle>
+                <CardTitle className="text-xl">Configure Devices</CardTitle>
                 <CardDescription>
                   Configure the vibration pattern for your devices
                 </CardDescription>

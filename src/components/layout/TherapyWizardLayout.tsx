@@ -1,8 +1,8 @@
-import React from 'react';
-import { Check, ArrowLeft } from 'lucide-react';
-import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
+import { cn } from '@/lib/utils';
+import { ArrowLeft, Check } from 'lucide-react';
+import React from 'react';
 
 interface WizardStep {
   id: number;
@@ -67,7 +67,7 @@ export function TherapyWizardLayout({
             </Button>
             <Separator orientation="vertical" className="h-6" />
             <div>
-              <h1 className="text-2xl font-bold">Set Therapy Profile</h1>
+              <h1 className="text-2xl font-bold">Configure Devices</h1>
               <p className="text-sm text-muted-foreground">
                 Configure device therapy settings
               </p>
