@@ -45,7 +45,7 @@ mod transport;
 // Re-export public types and functions
 // Only exports what's actually used by the Tauri commands
 
-// Device detection
+// Device detection and tracking
 pub use device::{find_nrf52_devices, Nrf52Device};
 
 // Protocol

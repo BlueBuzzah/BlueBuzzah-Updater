@@ -1,18 +1,18 @@
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
+	Card,
+	CardContent,
+	CardDescription,
+	CardHeader,
+	CardTitle,
 } from '@/components/ui/card';
 import { THERAPY_PROFILES } from '@/lib/therapy-profiles';
 import type { TherapyProfile } from '@/types';
 import {
-  Activity,
-  CheckCircle2,
-  Feather,
-  Gauge,
-  Shuffle,
+	Activity,
+	CheckCircle2,
+	Feather,
+	Gauge,
+	Shuffle,
 } from 'lucide-react';
 
 interface ProfileSelectionProps {
@@ -33,7 +33,7 @@ export function ProfileSelection({
 }: ProfileSelectionProps) {
   return (
     <div className="space-y-6">
-      <div className="text-center">
+      <div>
         <h2 className="text-2xl font-bold mb-2">Select Therapy Profile</h2>
         <p className="text-muted-foreground">
           Choose a vibration pattern for your devices
@@ -47,7 +47,7 @@ export function ProfileSelection({
           return (
             <Card
               key={profile.id}
-              className={`transition-all cursor-pointer hover:shadow-lg ${
+              className={`transition-all cursor-pointer hover:shadow-lg hover:border-primary/50 group ${
                 isSelected ? 'ring-2 ring-primary' : ''
               }`}
               onClick={() => onSelect(profile.id)}
@@ -55,7 +55,9 @@ export function ProfileSelection({
               <CardHeader className="text-center pb-2">
                 <div className="flex items-center justify-between mb-2">
                   <div className="flex-1" />
-                  {profileIcons[profile.id]}
+                  <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
+                    {profileIcons[profile.id]}
+                  </div>
                   <div className="flex-1 flex justify-end">
                     {isSelected && (
                       <CheckCircle2 className="h-5 w-5 text-primary" />

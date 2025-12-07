@@ -45,13 +45,58 @@ pub const SERIAL_WRITE_TIMEOUT: Duration = Duration::from_millis(1000);
 // ============================================================================
 
 /// Timeout waiting for ACK after sending a packet.
-pub const ACK_TIMEOUT_MS: u64 = 1000;
+/// Note: Using 5000ms to allow for slow USB hubs and system load.
+/// The bootloader may take time to process packets during flash operations.
+pub const ACK_TIMEOUT_MS: u64 = 5000;
 
-/// Timeout waiting for bootloader to appear after 1200 baud touch.
-pub const BOOTLOADER_TIMEOUT_MS: u64 = 10_000;
+/// Default timeout waiting for bootloader to appear after 1200 baud touch.
+/// Use get_bootloader_timeout() for platform-specific values.
+pub const BOOTLOADER_TIMEOUT_MS: u64 = 15_000;
+
+/// Get platform-specific bootloader timeout.
+///
+/// Windows needs more time due to driver initialization after USB re-enumeration.
+/// macOS is generally faster with USB device handling.
+pub fn get_bootloader_timeout() -> u64 {
+    #[cfg(target_os = "windows")]
+    {
+        20_000 // Windows: 20 seconds for driver initialization
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        12_000 // macOS: 12 seconds (USB handling is faster)
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        BOOTLOADER_TIMEOUT_MS // Default: 15 seconds
+    }
+}
+
+/// Get platform-specific reboot timeout.
+///
+/// Similar considerations as bootloader timeout.
+pub fn get_reboot_timeout() -> u64 {
+    #[cfg(target_os = "windows")]
+    {
+        15_000 // Windows: 15 seconds
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        10_000 // macOS: 10 seconds
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        REBOOT_TIMEOUT_MS // Default
+    }
+}
 
 /// Interval between port scans when waiting for bootloader.
-pub const PORT_SCAN_INTERVAL: Duration = Duration::from_millis(500);
+/// Reduced from 500ms to 250ms for faster device detection.
+pub const PORT_SCAN_INTERVAL: Duration = Duration::from_millis(250);
 
 /// Timeout waiting for device to reboot into application mode.
 pub const REBOOT_TIMEOUT_MS: u64 = 10_000;
@@ -64,7 +109,12 @@ pub const ROLE_CONFIG_TIMEOUT_MS: u64 = 5000;
 // ============================================================================
 
 /// Maximum number of retries for packet transmission.
-pub const MAX_PACKET_RETRIES: u8 = 3;
+/// Each retry uses exponential backoff starting from RETRY_BASE_DELAY_MS.
+pub const MAX_PACKET_RETRIES: u32 = 3;
+
+/// Base delay for exponential backoff (ms).
+/// Retry delays: 100ms, 200ms, 400ms (doubles each time).
+pub const RETRY_BASE_DELAY_MS: u64 = 100;
 
 // ============================================================================
 // DFU Packet Configuration

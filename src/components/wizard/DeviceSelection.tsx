@@ -150,17 +150,15 @@ export function DeviceSelection({
               No BlueBuzzah Devices Found
             </h3>
             <p className="text-sm text-muted-foreground mb-4">
-              Make sure your BlueBuzzah device is connected via USB.
-              The device should appear as a serial port.
+              Make sure each BlueBuzzah device is <strong>powered on</strong> and connected via USB.
             </p>
             <div className="text-sm text-left bg-muted p-4 rounded-md space-y-2">
               <p className="font-semibold">Troubleshooting:</p>
               <ul className="list-disc list-inside space-y-1 text-muted-foreground">
                 <li>Check USB cable connection (use a data cable, not charge-only)</li>
-                <li>Ensure device drivers are installed</li>
-                <li>Try a different USB port</li>
-                <li>Press reset button twice quickly for DFU mode</li>
-                <li>Restart your device</li>
+                <li>Ensure each device is powered on</li>
+                <li>Try different USB ports</li>
+                <li>Power cycle your device</li>
               </ul>
             </div>
             <Button onClick={detectDevices} className="mt-4">

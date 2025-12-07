@@ -107,13 +107,46 @@ pub enum DfuError {
 
 impl DfuError {
     /// Check if this error is retriable (transient errors that may succeed on retry).
+    ///
+    /// Returns true for errors that are likely caused by:
+    /// - Timing issues (timeouts, slow responses)
+    /// - Data corruption (CRC/sequence mismatches)
+    /// - Transient I/O issues (connection hiccups, USB glitches)
     pub fn is_retriable(&self) -> bool {
-        matches!(
-            self,
-            DfuError::Timeout
-                | DfuError::CrcMismatch { .. }
-                | DfuError::SequenceMismatch { .. }
-        )
+        match self {
+            // Protocol-level transient errors
+            DfuError::Timeout => true,
+            DfuError::CrcMismatch { .. } => true,
+            DfuError::SequenceMismatch { .. } => true,
+            DfuError::IncompleteSlipFrame => true,
+            DfuError::InvalidSlipEscape => true,
+
+            // I/O errors - check for transient conditions
+            DfuError::Io(e) => {
+                matches!(
+                    e.kind(),
+                    std::io::ErrorKind::TimedOut
+                        | std::io::ErrorKind::Interrupted
+                        | std::io::ErrorKind::WouldBlock
+                        | std::io::ErrorKind::ConnectionReset
+                        | std::io::ErrorKind::BrokenPipe
+                )
+            }
+
+            // Serial errors - check for transient conditions
+            DfuError::Serial(e) => {
+                let msg = e.to_string().to_lowercase();
+                // Windows driver issues that resolve themselves
+                msg.contains("not functioning")
+                    || msg.contains("temporarily unavailable")
+                    || msg.contains("interrupted")
+                    || msg.contains("timed out")
+                    || msg.contains("resource busy")
+            }
+
+            // All other errors are not retriable
+            _ => false,
+        }
     }
 
     /// Get a user-friendly error code for support purposes.

@@ -69,6 +69,10 @@ export function InstallationProgress({
   const [isCancelling, setIsCancelling] = useState(false);
   const hasStartedRef = useRef(false);
 
+  // Track retry attempts for auto-expanding logs
+  const [retryCount, setRetryCount] = useState(0);
+  const RETRY_THRESHOLD = 2; // Auto-expand after this many retries
+
   useEffect(() => {
     // Prevent double-execution in React StrictMode (development only)
     if (hasStartedRef.current) return;
@@ -78,6 +82,24 @@ export function InstallationProgress({
 
   const addLog = (message: string) => {
     storeAddLog(`[${new Date().toLocaleTimeString()}] ${message}`);
+
+    // Detect retry messages and track count
+    const lowerMessage = message.toLowerCase();
+    const isRetryMessage =
+      (lowerMessage.includes('retry') && (lowerMessage.includes('/3') || lowerMessage.includes('attempt'))) ||
+      lowerMessage.includes('retrying') ||
+      lowerMessage.includes('recovered after');
+
+    if (isRetryMessage) {
+      setRetryCount((prev) => {
+        const newCount = prev + 1;
+        // Auto-expand logs if threshold exceeded and not already showing
+        if (newCount >= RETRY_THRESHOLD && !showLogs) {
+          setShowLogs(true);
+        }
+        return newCount;
+      });
+    }
   };
 
   const exportLogs = () => {
@@ -308,7 +330,14 @@ export function InstallationProgress({
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
-              <CardTitle className="text-base">Overall Progress</CardTitle>
+              <div className="flex items-center gap-2">
+                <CardTitle className="text-base">Overall Progress</CardTitle>
+                {retryCount > 0 && !error && (
+                  <Badge variant="outline" className="text-amber-500 border-amber-500">
+                    {retryCount} auto-{retryCount === 1 ? 'retry' : 'retries'}
+                  </Badge>
+                )}
+              </div>
               {stage !== 'complete' && (
                 <Button
                   variant="outline"

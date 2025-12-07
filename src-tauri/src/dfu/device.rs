@@ -1,6 +1,7 @@
 //! Device detection for nRF52 devices.
 //!
 //! Detects Adafruit Feather nRF52840 devices by USB VID/PID.
+//! Provides flexible device tracking via serial number or VID/PID+port pattern.
 
 use std::time::{Duration, Instant};
 
@@ -40,6 +41,111 @@ impl Nrf52Device {
             format!("BlueBuzzah ({})", self.port)
         }
     }
+}
+
+/// Device identifier for tracking devices through mode changes.
+///
+/// Devices can be tracked by serial number (preferred) or by VID/PID + port pattern
+/// (fallback for devices without serial numbers).
+#[derive(Debug, Clone)]
+pub enum DeviceIdentifier {
+    /// Track by USB serial number (preferred method).
+    Serial(String),
+    /// Track by VID/PID and port pattern (fallback for devices without serial).
+    VidPidPort {
+        vid: u16,
+        pid: u16,
+        port_pattern: String,
+    },
+}
+
+impl DeviceIdentifier {
+    /// Create a device identifier from a detected device.
+    ///
+    /// Prefers serial number tracking if available, falls back to VID/PID+port pattern.
+    pub fn from_device(device: &Nrf52Device) -> Self {
+        if let Some(ref serial) = device.serial_number {
+            DeviceIdentifier::Serial(serial.clone())
+        } else {
+            let pattern = extract_port_pattern(&device.port);
+            DeviceIdentifier::VidPidPort {
+                vid: device.vid,
+                pid: device.pid,
+                port_pattern: pattern,
+            }
+        }
+    }
+
+    /// Check if this identifier matches a given device.
+    pub fn matches(&self, device: &Nrf52Device) -> bool {
+        match self {
+            DeviceIdentifier::Serial(serial) => {
+                device.serial_number.as_deref() == Some(serial.as_str())
+            }
+            DeviceIdentifier::VidPidPort {
+                vid,
+                pid,
+                port_pattern,
+            } => {
+                // Match by VID and device family (app/bootloader pair)
+                device.vid == *vid
+                    && is_same_device_family(device.pid, *pid)
+                    && device.port.contains(port_pattern)
+            }
+        }
+    }
+
+    /// Check if this identifier uses serial number tracking.
+    pub fn has_serial(&self) -> bool {
+        matches!(self, DeviceIdentifier::Serial(_))
+    }
+}
+
+/// Extract a stable portion of the port name for matching.
+///
+/// On macOS, extracts the base portion (e.g., "usbmodem142" from "/dev/cu.usbmodem14201").
+/// On Windows, keeps the full COM port name.
+fn extract_port_pattern(port: &str) -> String {
+    // macOS: Extract base portion of usbmodem name
+    // Port names like /dev/cu.usbmodem14201 can change slightly (14201 -> 14203)
+    // but the base "usbmodem142" stays consistent for the same device
+    if let Some(idx) = port.rfind("usbmodem") {
+        let start = idx;
+        // Take "usbmodem" + first 3 digits (12 chars total)
+        let end = (start + 11).min(port.len());
+        return port[start..end].to_string();
+    }
+
+    // Windows: COM port names are usually stable
+    if port.starts_with("COM") {
+        return port.to_string();
+    }
+
+    // Linux: Extract ttyACM or ttyUSB base
+    if let Some(idx) = port.rfind("ttyACM") {
+        let start = idx;
+        let end = (start + 7).min(port.len()); // "ttyACM" + 1 digit
+        return port[start..end].to_string();
+    }
+    if let Some(idx) = port.rfind("ttyUSB") {
+        let start = idx;
+        let end = (start + 7).min(port.len());
+        return port[start..end].to_string();
+    }
+
+    // Fallback: use full port name
+    port.to_string()
+}
+
+/// Check if two PIDs represent the same device in different modes.
+///
+/// Adafruit uses a consistent pattern:
+/// - Application mode: 0x80XX (high byte = 0x80)
+/// - Bootloader mode: 0x00XX (high byte = 0x00)
+///
+/// The low byte identifies the device variant.
+fn is_same_device_family(pid1: u16, pid2: u16) -> bool {
+    (pid1 & 0x00FF) == (pid2 & 0x00FF)
 }
 
 /// Find all connected nRF52 devices.
@@ -100,12 +206,15 @@ pub fn get_device_by_port(port_name: &str) -> Option<Nrf52Device> {
 /// on a different port. This function tracks the device by serial number to
 /// ensure we find the correct device.
 ///
+/// Note: For devices without serial numbers, use `wait_for_bootloader_flexible()` instead.
+///
 /// # Arguments
 /// * `serial` - Device serial number to match
 /// * `timeout_ms` - Maximum time to wait in milliseconds
 ///
 /// # Returns
 /// The detected bootloader device, or an error if timeout expires
+#[allow(dead_code)]
 pub fn wait_for_bootloader_by_serial(serial: &str, timeout_ms: u64) -> DfuResult<Nrf52Device> {
     let timeout = Duration::from_millis(timeout_ms);
     let start = Instant::now();
@@ -143,6 +252,68 @@ pub fn wait_for_application_by_serial(serial: &str, timeout_ms: u64) -> DfuResul
         if let Some(device) = find_nrf52_devices()
             .into_iter()
             .find(|d| !d.in_bootloader && d.serial_number.as_deref() == Some(serial))
+        {
+            return Ok(device);
+        }
+        std::thread::sleep(PORT_SCAN_INTERVAL);
+    }
+
+    Err(DfuError::BootloaderTimeout { timeout_ms })
+}
+
+/// Wait for a device to appear in bootloader mode using flexible tracking.
+///
+/// This function supports both serial number and VID/PID+port pattern tracking,
+/// making it work with devices that don't have a serial number.
+///
+/// # Arguments
+/// * `identifier` - Device identifier (serial or VID/PID+port)
+/// * `timeout_ms` - Maximum time to wait in milliseconds
+///
+/// # Returns
+/// The detected bootloader device, or an error if timeout expires
+pub fn wait_for_bootloader_flexible(
+    identifier: &DeviceIdentifier,
+    timeout_ms: u64,
+) -> DfuResult<Nrf52Device> {
+    let timeout = Duration::from_millis(timeout_ms);
+    let start = Instant::now();
+
+    while start.elapsed() < timeout {
+        if let Some(device) = find_nrf52_devices()
+            .into_iter()
+            .find(|d| d.in_bootloader && identifier.matches(d))
+        {
+            return Ok(device);
+        }
+        std::thread::sleep(PORT_SCAN_INTERVAL);
+    }
+
+    Err(DfuError::BootloaderTimeout { timeout_ms })
+}
+
+/// Wait for a device to appear in application mode using flexible tracking.
+///
+/// This function supports both serial number and VID/PID+port pattern tracking,
+/// making it work with devices that don't have a serial number.
+///
+/// # Arguments
+/// * `identifier` - Device identifier (serial or VID/PID+port)
+/// * `timeout_ms` - Maximum time to wait in milliseconds
+///
+/// # Returns
+/// The detected application device, or an error if timeout expires
+pub fn wait_for_application_flexible(
+    identifier: &DeviceIdentifier,
+    timeout_ms: u64,
+) -> DfuResult<Nrf52Device> {
+    let timeout = Duration::from_millis(timeout_ms);
+    let start = Instant::now();
+
+    while start.elapsed() < timeout {
+        if let Some(device) = find_nrf52_devices()
+            .into_iter()
+            .find(|d| !d.in_bootloader && identifier.matches(d))
         {
             return Ok(device);
         }
@@ -203,5 +374,140 @@ mod tests {
             device.display_label(),
             "BlueBuzzah (/dev/cu.usbmodem5678)"
         );
+    }
+
+    #[test]
+    fn test_device_identifier_from_device_with_serial() {
+        let device = Nrf52Device {
+            port: "/dev/cu.usbmodem1234".to_string(),
+            vid: ADAFRUIT_VID,
+            pid: 0x8029,
+            serial_number: Some("ABC123".to_string()),
+            in_bootloader: false,
+            product_name: None,
+            manufacturer: None,
+        };
+
+        let identifier = DeviceIdentifier::from_device(&device);
+        assert!(identifier.has_serial());
+        assert!(matches!(identifier, DeviceIdentifier::Serial(s) if s == "ABC123"));
+    }
+
+    #[test]
+    fn test_device_identifier_from_device_without_serial() {
+        let device = Nrf52Device {
+            port: "/dev/cu.usbmodem14201".to_string(),
+            vid: ADAFRUIT_VID,
+            pid: 0x8029,
+            serial_number: None,
+            in_bootloader: false,
+            product_name: None,
+            manufacturer: None,
+        };
+
+        let identifier = DeviceIdentifier::from_device(&device);
+        assert!(!identifier.has_serial());
+        assert!(matches!(
+            identifier,
+            DeviceIdentifier::VidPidPort { vid, pid, port_pattern }
+                if vid == ADAFRUIT_VID && pid == 0x8029 && port_pattern == "usbmodem142"
+        ));
+    }
+
+    #[test]
+    fn test_device_identifier_matches_serial() {
+        let identifier = DeviceIdentifier::Serial("ABC123".to_string());
+
+        let device_match = Nrf52Device {
+            port: "/dev/cu.usbmodem9999".to_string(),
+            vid: ADAFRUIT_VID,
+            pid: 0x0029, // Different PID (bootloader mode)
+            serial_number: Some("ABC123".to_string()),
+            in_bootloader: true,
+            product_name: None,
+            manufacturer: None,
+        };
+
+        let device_no_match = Nrf52Device {
+            port: "/dev/cu.usbmodem9999".to_string(),
+            vid: ADAFRUIT_VID,
+            pid: 0x0029,
+            serial_number: Some("XYZ789".to_string()),
+            in_bootloader: true,
+            product_name: None,
+            manufacturer: None,
+        };
+
+        assert!(identifier.matches(&device_match));
+        assert!(!identifier.matches(&device_no_match));
+    }
+
+    #[test]
+    fn test_device_identifier_matches_vid_pid_port() {
+        let identifier = DeviceIdentifier::VidPidPort {
+            vid: ADAFRUIT_VID,
+            pid: 0x8029, // Application mode
+            port_pattern: "usbmodem142".to_string(),
+        };
+
+        // Same device in bootloader mode (PID 0x0029 instead of 0x8029)
+        let device_bootloader = Nrf52Device {
+            port: "/dev/cu.usbmodem14203".to_string(), // Slightly different port
+            vid: ADAFRUIT_VID,
+            pid: 0x0029, // Bootloader mode
+            serial_number: None,
+            in_bootloader: true,
+            product_name: None,
+            manufacturer: None,
+        };
+
+        // Different device (different port pattern)
+        let device_different = Nrf52Device {
+            port: "/dev/cu.usbmodem99901".to_string(),
+            vid: ADAFRUIT_VID,
+            pid: 0x0029,
+            serial_number: None,
+            in_bootloader: true,
+            product_name: None,
+            manufacturer: None,
+        };
+
+        assert!(identifier.matches(&device_bootloader));
+        assert!(!identifier.matches(&device_different));
+    }
+
+    #[test]
+    fn test_extract_port_pattern_macos() {
+        assert_eq!(
+            extract_port_pattern("/dev/cu.usbmodem14201"),
+            "usbmodem142"
+        );
+        assert_eq!(
+            extract_port_pattern("/dev/cu.usbmodem99901"),
+            "usbmodem999"
+        );
+    }
+
+    #[test]
+    fn test_extract_port_pattern_windows() {
+        assert_eq!(extract_port_pattern("COM3"), "COM3");
+        assert_eq!(extract_port_pattern("COM15"), "COM15");
+    }
+
+    #[test]
+    fn test_extract_port_pattern_linux() {
+        assert_eq!(extract_port_pattern("/dev/ttyACM0"), "ttyACM0");
+        assert_eq!(extract_port_pattern("/dev/ttyUSB1"), "ttyUSB1");
+    }
+
+    #[test]
+    fn test_is_same_device_family() {
+        // Application mode 0x8029 and bootloader mode 0x0029 are same family
+        assert!(is_same_device_family(0x8029, 0x0029));
+        assert!(is_same_device_family(0x802A, 0x002A));
+
+        // Different device variants
+        assert!(!is_same_device_family(0x8029, 0x002A));
+        assert!(!is_same_device_family(0x8029, 0x0052));
     }
 }

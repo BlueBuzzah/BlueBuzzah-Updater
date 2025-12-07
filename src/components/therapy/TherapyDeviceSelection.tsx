@@ -1,21 +1,21 @@
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
+	Card,
+	CardContent,
+	CardDescription,
+	CardHeader,
+	CardTitle,
 } from '@/components/ui/card';
 import { useToast } from '@/components/ui/use-toast';
-import { deviceService } from '@/services/DeviceService';
 import { getProfileInfo } from '@/lib/therapy-profiles';
+import { deviceService } from '@/services/DeviceService';
 import type { Device, TherapyProfile } from '@/types';
 import {
-  AlertCircle,
-  CheckCircle2,
-  CircuitBoard,
-  RefreshCw,
+	AlertCircle,
+	CheckCircle2,
+	CircuitBoard,
+	RefreshCw,
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
@@ -84,7 +84,7 @@ export function TherapyDeviceSelection({
 
   return (
     <div className="space-y-6">
-      <div className="text-center">
+      <div>
         <h2 className="text-2xl font-bold mb-2">Select Devices</h2>
         <p className="text-muted-foreground">
           Choose devices to configure with the{' '}
@@ -122,8 +122,7 @@ export function TherapyDeviceSelection({
               No BlueBuzzah Devices Found
             </h3>
             <p className="text-sm text-muted-foreground mb-4">
-              Make sure your BlueBuzzah device is connected and has fully
-              booted.
+              Make sure each BlueBuzzah device is <strong>powered on</strong> and connected via USB.
             </p>
             <div className="text-sm text-left bg-muted p-4 rounded-md space-y-2">
               <p className="font-semibold">Troubleshooting:</p>

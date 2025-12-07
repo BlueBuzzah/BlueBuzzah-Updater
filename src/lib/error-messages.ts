@@ -164,6 +164,61 @@ export const ERROR_GUIDANCE: Record<string, ErrorGuidance> = {
       'If the device is unresponsive, unplug and reconnect it',
     ],
   },
+  DFU_MAX_RETRIES: {
+    title: 'Maximum Retries Exceeded',
+    description: 'The firmware transfer failed after multiple automatic retry attempts.',
+    resolutionSteps: [
+      'The connection to the device is unstable',
+      'Try using a different USB cable (prefer shorter, high-quality cables)',
+      'Connect directly to your computer instead of through a USB hub',
+      'Make sure the device has stable power',
+      'Try a different USB port',
+      'Restart both the device and the application',
+    ],
+  },
+  DFU_DEVICE_DISCONNECTED: {
+    title: 'Device Disconnected',
+    description: 'The device was disconnected or became unresponsive during the update.',
+    resolutionSteps: [
+      'Ensure the device is securely connected via USB',
+      'Do not move or bump the device during the update',
+      'Try a different USB port or cable',
+      'If the device is in bootloader mode, double-tap reset to restart it',
+      'Restart the update process',
+    ],
+  },
+  DFU_CRC_ERROR: {
+    title: 'Data Transfer Error',
+    description: 'Data corruption was detected during the firmware transfer.',
+    resolutionSteps: [
+      'This is usually caused by an unstable USB connection',
+      'Try using a shorter or higher-quality USB cable',
+      'Connect directly to your computer (avoid USB hubs)',
+      'Ensure no other applications are using the device',
+      'Restart the update - the application will automatically retry',
+    ],
+  },
+  DFU_CONNECTION_UNSTABLE: {
+    title: 'Unstable Connection',
+    description: 'The connection to the device is experiencing intermittent issues.',
+    resolutionSteps: [
+      'Check that the USB cable is firmly connected',
+      'Try a different USB port (prefer USB 3.0 ports)',
+      'Use a shorter USB cable if possible',
+      'Close other applications that may be using USB bandwidth',
+      'The update may still succeed with automatic retries',
+    ],
+  },
+  DFU_SERIAL_NUMBER_MISSING: {
+    title: 'Device Identification Failed',
+    description: 'Unable to track the device through mode changes due to missing serial number.',
+    resolutionSteps: [
+      'Try disconnecting and reconnecting the device',
+      'Restart the application',
+      'If this persists, the device may need to have its serial number programmed',
+      'Contact support for assistance',
+    ],
+  },
 };
 
 export function getErrorGuidance(errorMessage: string): ErrorGuidance | null {
@@ -201,7 +256,21 @@ export function getErrorGuidance(errorMessage: string): ErrorGuidance | null {
     return ERROR_GUIDANCE.CONFIG_WRITE_FAILED;
   }
 
-  // DFU-specific error patterns
+  // DFU-specific error patterns - check more specific patterns first
+  if (lowerError.includes('max retries') || lowerError.includes('retries exceeded') ||
+      lowerError.includes('retry attempt')) {
+    return ERROR_GUIDANCE.DFU_MAX_RETRIES;
+  }
+  if (lowerError.includes('disconnected') || lowerError.includes('health check')) {
+    return ERROR_GUIDANCE.DFU_DEVICE_DISCONNECTED;
+  }
+  if (lowerError.includes('crc') || lowerError.includes('checksum') ||
+      lowerError.includes('data corruption')) {
+    return ERROR_GUIDANCE.DFU_CRC_ERROR;
+  }
+  if (lowerError.includes('no serial number') || lowerError.includes('serial number')) {
+    return ERROR_GUIDANCE.DFU_SERIAL_NUMBER_MISSING;
+  }
   if (lowerError.includes('bootloader') || lowerError.includes('dfu mode')) {
     return ERROR_GUIDANCE.DFU_BOOTLOADER_FAILED;
   }
@@ -219,6 +288,11 @@ export function getErrorGuidance(errorMessage: string): ErrorGuidance | null {
   }
   if (lowerError.includes('cancelled') || lowerError.includes('canceled')) {
     return ERROR_GUIDANCE.DFU_CANCELLED;
+  }
+  // Catch-all for general connection issues with retry indicators
+  if ((lowerError.includes('retry') || lowerError.includes('recovered')) &&
+      lowerError.includes('connection')) {
+    return ERROR_GUIDANCE.DFU_CONNECTION_UNSTABLE;
   }
 
   return null;

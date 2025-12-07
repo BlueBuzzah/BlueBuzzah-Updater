@@ -13,13 +13,15 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use super::config::{
-    calculate_erase_wait_time, BOOTLOADER_TIMEOUT_MS, FLASH_PAGE_WRITE_TIME_MS,
-    FRAMES_PER_FLASH_PAGE, PROFILE_CONFIG_TIMEOUT_MS, PROFILE_GENTLE_COMMAND,
-    PROFILE_HYBRID_COMMAND, PROFILE_NOISY_COMMAND, PROFILE_REGULAR_COMMAND, REBOOT_TIMEOUT_MS,
-    ROLE_CONFIG_TIMEOUT_MS, ROLE_PRIMARY_COMMAND, ROLE_SECONDARY_COMMAND,
+    calculate_erase_wait_time, get_bootloader_timeout, get_reboot_timeout, ACK_TIMEOUT_MS,
+    FLASH_PAGE_WRITE_TIME_MS, FRAMES_PER_FLASH_PAGE, MAX_PACKET_RETRIES,
+    PROFILE_CONFIG_TIMEOUT_MS, PROFILE_GENTLE_COMMAND, PROFILE_HYBRID_COMMAND,
+    PROFILE_NOISY_COMMAND, PROFILE_REGULAR_COMMAND, RETRY_BASE_DELAY_MS, ROLE_CONFIG_TIMEOUT_MS,
+    ROLE_PRIMARY_COMMAND, ROLE_SECONDARY_COMMAND,
 };
 use super::device::{
-    get_device_by_port, wait_for_application_by_serial, wait_for_bootloader_by_serial,
+    get_device_by_port, wait_for_application_by_serial, wait_for_application_flexible,
+    wait_for_bootloader_flexible, DeviceIdentifier,
 };
 use super::error::{DfuError, DfuResult};
 use super::firmware_reader::read_firmware_zip;
@@ -28,9 +30,6 @@ use super::packet::{
     reset_sequence_number, HciAck, HciSlipDecoder, FIRMWARE_CHUNK_SIZE, IMAGE_TYPE_APPLICATION,
 };
 use super::transport::{DfuTransport, SerialTransport};
-
-/// Timeout for waiting for ACK response (milliseconds).
-const ACK_TIMEOUT_MS: u64 = 5000;
 
 /// DFU progress stages for UI feedback.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -150,18 +149,41 @@ impl<T: DfuTransport, L: Fn(&str)> HciDfuProtocol<T, L> {
         }
     }
 
+    /// Verify the connection is still healthy before a critical operation.
+    ///
+    /// Returns an error if the connection appears to be stale or disconnected.
+    /// This helps detect issues early rather than waiting for a timeout.
+    pub fn verify_connection(&mut self) -> DfuResult<()> {
+        if !self.transport.is_healthy() {
+            return Err(DfuError::DeviceDisconnected {
+                operation: "connection health check".to_string(),
+            });
+        }
+        Ok(())
+    }
+
     /// Wait for a specified duration while keeping the serial port active.
     ///
     /// This periodically reads from the port to drain any incoming data
-    /// and prevent the port handle from going stale on macOS.
+    /// and uses the keep_alive method to prevent the port handle from
+    /// going stale on macOS.
     pub fn wait_with_drain(&mut self, total_ms: u64) -> DfuResult<()> {
         const POLL_INTERVAL_MS: u64 = 100;
+        const KEEPALIVE_INTERVAL_MS: u64 = 500; // Send keep-alive every 500ms
         let mut buffer = [0u8; 256];
         let mut elapsed = 0u64;
+        let mut since_keepalive = 0u64;
 
         while elapsed < total_ms {
             // Try to read any pending data (with short timeout)
             let _ = self.transport.read(&mut buffer, POLL_INTERVAL_MS);
+
+            // Periodically send keep-alive to prevent port from going stale
+            since_keepalive += POLL_INTERVAL_MS;
+            if since_keepalive >= KEEPALIVE_INTERVAL_MS {
+                self.transport.keep_alive()?;
+                since_keepalive = 0;
+            }
 
             // Small sleep to prevent busy-waiting
             std::thread::sleep(Duration::from_millis(POLL_INTERVAL_MS));
@@ -173,22 +195,77 @@ impl<T: DfuTransport, L: Fn(&str)> HciDfuProtocol<T, L> {
         Ok(())
     }
 
-    /// Send a packet and wait for ACK.
+    /// Send a packet and wait for ACK (single attempt, no retry).
     ///
     /// Matches nrfutil behavior: accept any ACK without sequence validation.
     /// The bootloader handles sequencing internally.
-    fn send_and_wait_ack(&mut self, packet: &[u8]) -> DfuResult<()> {
-        // Debug: log packet being sent
-        (self.log)(&format!("Sending data ({} bytes)", packet.len()));
-
+    fn send_and_wait_ack_once(&mut self, packet: &[u8]) -> DfuResult<HciAck> {
         // Send the packet (no explicit flush - pyserial doesn't flush either)
         self.transport.write(packet)?;
 
         // Wait for ACK - nrfutil doesn't validate sequence numbers
-        let ack = self.wait_for_ack()?;
-        (self.log)(&format!("Received ACK: seq={}", ack.ack_number));
+        self.wait_for_ack()
+    }
 
-        Ok(())
+    /// Send a packet and wait for ACK with automatic retry on transient failures.
+    ///
+    /// Uses exponential backoff: 100ms, 200ms, 400ms between retries.
+    /// Retries on timeout, CRC mismatch, and sequence mismatch errors.
+    /// All retry attempts are logged transparently for debugging.
+    fn send_and_wait_ack(&mut self, packet: &[u8]) -> DfuResult<()> {
+        // Debug: log packet being sent
+        (self.log)(&format!("Sending data ({} bytes)", packet.len()));
+
+        for attempt in 0..=MAX_PACKET_RETRIES {
+            match self.send_and_wait_ack_once(packet) {
+                Ok(ack) => {
+                    // Log recovery if we had to retry
+                    if attempt > 0 {
+                        (self.log)(&format!(
+                            "Recovered after {} retry attempt(s)",
+                            attempt
+                        ));
+                    }
+                    (self.log)(&format!("Received ACK: seq={}", ack.ack_number));
+                    return Ok(());
+                }
+                Err(e) if e.is_retriable() && attempt < MAX_PACKET_RETRIES => {
+                    // Calculate exponential backoff delay: 100ms, 200ms, 400ms
+                    let delay_ms = RETRY_BASE_DELAY_MS * 2u64.pow(attempt);
+
+                    (self.log)(&format!(
+                        "Retry {}/{}: {}, waiting {}ms...",
+                        attempt + 1,
+                        MAX_PACKET_RETRIES,
+                        e,
+                        delay_ms
+                    ));
+
+                    // Wait before retry
+                    std::thread::sleep(Duration::from_millis(delay_ms));
+
+                    // Clear any partial SLIP frames from the decoder
+                    self.slip_decoder.reset();
+
+                    // Re-send the packet on next iteration
+                }
+                Err(e) => {
+                    // Non-retriable error, or max retries exhausted
+                    if attempt > 0 {
+                        (self.log)(&format!(
+                            "Failed after {} retry attempt(s): {}",
+                            attempt, e
+                        ));
+                    }
+                    return Err(e);
+                }
+            }
+        }
+
+        // This should be unreachable due to the loop logic, but satisfy the compiler
+        Err(DfuError::MaxRetriesExceeded {
+            operation: "send_and_wait_ack".to_string(),
+        })
     }
 
     /// Wait for an ACK response from the bootloader.
@@ -321,15 +398,24 @@ where
         return Err(DfuError::Cancelled);
     }
 
-    // Step 2: Get device info and serial number for tracking
+    // Step 2: Get device info and create identifier for tracking
+    // Supports both serial number (preferred) and VID/PID+port pattern (fallback)
     let device = get_device_by_port(port_name).ok_or(DfuError::NoDeviceFound)?;
 
-    let serial_number = device
-        .serial_number
-        .clone()
-        .ok_or(DfuError::NoSerialNumber)?;
-
+    let device_identifier = DeviceIdentifier::from_device(&device);
     let already_in_bootloader = device.in_bootloader;
+
+    // Log tracking method for debugging
+    if device_identifier.has_serial() {
+        on_progress(DfuStage::Log {
+            message: "Tracking device by serial number".to_string(),
+        });
+    } else {
+        on_progress(DfuStage::Log {
+            message: "Device has no serial number - using VID/PID+port pattern for tracking"
+                .to_string(),
+        });
+    }
 
     // Report detected device mode to UI
     on_progress(DfuStage::DetectedDevice {
@@ -353,7 +439,7 @@ where
 
         on_progress(DfuStage::WaitingForBootloader);
         let bootloader_device =
-            wait_for_bootloader_by_serial(&serial_number, BOOTLOADER_TIMEOUT_MS)?;
+            wait_for_bootloader_flexible(&device_identifier, get_bootloader_timeout())?;
         bootloader_device.port
     } else {
         // Device is in application mode - use 1200 baud touch to enter bootloader
@@ -361,7 +447,7 @@ where
 
         on_progress(DfuStage::WaitingForBootloader);
         let bootloader_device =
-            wait_for_bootloader_by_serial(&serial_number, BOOTLOADER_TIMEOUT_MS)?;
+            wait_for_bootloader_flexible(&device_identifier, get_bootloader_timeout())?;
         bootloader_device.port
     };
 
@@ -392,6 +478,10 @@ where
 
     // Step 5: Start DFU
     on_progress(DfuStage::Starting);
+
+    // Verify connection is healthy before starting the critical DFU process
+    protocol.verify_connection()?;
+
     let firmware_size = firmware.firmware_data.len();
     on_progress(DfuStage::Log {
         message: format!("Sending START DFU for {} bytes firmware", firmware_size),
@@ -452,18 +542,18 @@ where
     // Step 9: Wait for device to reboot into application mode
     on_progress(DfuStage::WaitingForReboot);
     std::thread::sleep(Duration::from_millis(2000)); // Give device time to boot
-    let app_device = wait_for_application_by_serial(&serial_number, REBOOT_TIMEOUT_MS)?;
+    let app_device = wait_for_application_flexible(&device_identifier, get_reboot_timeout())?;
 
     // Step 10: Configure device role
     // Note: This will cause another reboot as the device restarts after role change
     on_progress(DfuStage::ConfiguringRole);
-    configure_device_role(&app_device.port, device_role, &serial_number)?;
+    configure_device_role_flexible(&app_device.port, device_role, &device_identifier)?;
 
     on_progress(DfuStage::Complete);
     Ok(())
 }
 
-/// Configure the device role via serial command.
+/// Configure the device role via serial command (serial number tracking).
 ///
 /// After receiving SET_ROLE, the device responds with:
 /// - Success: "[CONFIG] Role set to PRIMARY - restarting..." (then reboots)
@@ -473,6 +563,9 @@ where
 /// Since the device reboots after a successful role change, we need to:
 /// 1. Send the command and wait for the [CONFIG] acknowledgment
 /// 2. Wait for the device to reboot and reappear
+///
+/// Note: For flexible device tracking, use `configure_device_role_flexible()` instead.
+#[allow(dead_code)]
 fn configure_device_role(port_name: &str, role: &str, serial_number: &str) -> DfuResult<()> {
     let command = match role.to_uppercase().as_str() {
         "PRIMARY" => ROLE_PRIMARY_COMMAND,
@@ -539,7 +632,7 @@ fn configure_device_role(port_name: &str, role: &str, serial_number: &str) -> Df
 
                 // Wait for device to reboot and reappear
                 std::thread::sleep(Duration::from_millis(2000));
-                wait_for_application_by_serial(serial_number, REBOOT_TIMEOUT_MS)?;
+                wait_for_application_by_serial(serial_number, get_reboot_timeout())?;
 
                 return Ok(());
             }
@@ -567,7 +660,140 @@ fn configure_device_role(port_name: &str, role: &str, serial_number: &str) -> Df
     })
 }
 
-/// Configure the device therapy profile via serial command.
+/// Configure the device role using flexible device tracking.
+///
+/// Works with both serial number and VID/PID+port pattern tracking.
+fn configure_device_role_flexible(
+    port_name: &str,
+    role: &str,
+    identifier: &DeviceIdentifier,
+) -> DfuResult<()> {
+    let command = match role.to_uppercase().as_str() {
+        "PRIMARY" => ROLE_PRIMARY_COMMAND,
+        "SECONDARY" => ROLE_SECONDARY_COMMAND,
+        _ => {
+            return Err(DfuError::RoleConfigFailed {
+                reason: format!("Invalid role: {}", role),
+            })
+        }
+    };
+
+    // Open port and send command
+    let mut transport = SerialTransport::open(port_name)?;
+
+    // Drain boot output using enhanced detection
+    drain_boot_output(&mut transport)?;
+
+    // Clear any remaining input
+    transport.clear_input().ok();
+
+    // Small delay then send command
+    std::thread::sleep(Duration::from_millis(100));
+    transport.write(command.as_bytes())?;
+    transport.flush()?;
+
+    // Wait for acknowledgment - device sends [CONFIG] on success, [ERROR] on failure
+    // After [CONFIG], the device will reboot, so we may lose the connection
+    let timeout = Duration::from_millis(ROLE_CONFIG_TIMEOUT_MS);
+    let start = Instant::now();
+    let mut response = Vec::new();
+    let mut buffer = [0u8; 256];
+
+    while start.elapsed() < timeout {
+        let remaining = timeout.saturating_sub(start.elapsed());
+        let bytes_read = transport.read(&mut buffer, remaining.as_millis() as u64)?;
+
+        if bytes_read > 0 {
+            response.extend_from_slice(&buffer[..bytes_read]);
+
+            let response_str = String::from_utf8_lossy(&response);
+
+            // Check for success - device confirmed role change
+            if response_str.contains("[CONFIG]") && response_str.contains("Role set to") {
+                // Success! Device will now reboot.
+                // Close the transport before device disconnects
+                drop(transport);
+
+                // Wait for device to reboot and reappear
+                std::thread::sleep(Duration::from_millis(2000));
+                wait_for_application_flexible(identifier, get_reboot_timeout())?;
+
+                return Ok(());
+            }
+
+            // Check for explicit error from firmware
+            if response_str.contains("[ERROR]") {
+                return Err(DfuError::RoleConfigFailed {
+                    reason: response_str.to_string(),
+                });
+            }
+        }
+    }
+
+    // Timeout without receiving [CONFIG] or [ERROR] - this is a failure
+    let response_str = String::from_utf8_lossy(&response);
+    Err(DfuError::RoleConfigFailed {
+        reason: format!(
+            "Timeout waiting for role configuration acknowledgment. Received: {}",
+            if response_str.is_empty() {
+                "(no response)"
+            } else {
+                &response_str
+            }
+        ),
+    })
+}
+
+/// Drain boot output with marker-based and silence-based detection.
+///
+/// Returns true if a boot completion marker was detected.
+fn drain_boot_output(transport: &mut SerialTransport) -> DfuResult<bool> {
+    let mut buffer = [0u8; 256];
+    let drain_timeout = Duration::from_millis(5000);
+    let drain_start = Instant::now();
+    let mut last_data_time = Instant::now();
+    const SILENCE_THRESHOLD_MS: u64 = 500;
+
+    // Known boot completion markers from BlueBuzzah firmware
+    const BOOT_MARKERS: &[&str] = &["[READY]", "[INIT]", "[BOOT]", "BlueBuzzah"];
+    let mut found_marker = false;
+    let mut accumulated = String::new();
+
+    while drain_start.elapsed() < drain_timeout {
+        let bytes_read = transport.read(&mut buffer, 200)?;
+        if bytes_read > 0 {
+            last_data_time = Instant::now();
+
+            // Accumulate for marker detection
+            if let Ok(text) = std::str::from_utf8(&buffer[..bytes_read]) {
+                accumulated.push_str(text);
+                // Check for boot markers
+                for marker in BOOT_MARKERS {
+                    if accumulated.contains(marker) {
+                        found_marker = true;
+                        break;
+                    }
+                }
+            }
+            // Truncate to prevent unbounded growth
+            if accumulated.len() > 1024 {
+                accumulated = accumulated[accumulated.len() - 512..].to_string();
+            }
+        } else if last_data_time.elapsed() > Duration::from_millis(SILENCE_THRESHOLD_MS) {
+            // No data for 500ms - boot likely complete
+            break;
+        }
+    }
+
+    // Extra safety wait after marker detection
+    if found_marker {
+        std::thread::sleep(Duration::from_millis(200));
+    }
+
+    Ok(found_marker)
+}
+
+/// Configure the device therapy profile via serial command (serial number tracking).
 ///
 /// After receiving SET_PROFILE, the device responds with:
 /// - Success: "[CONFIG] Profile set to REGULAR - restarting..." (then reboots)
@@ -585,7 +811,30 @@ fn configure_device_role(port_name: &str, role: &str, serial_number: &str) -> Df
 /// Since the device reboots after a successful profile change, we need to:
 /// 1. Send the command and wait for the [CONFIG] acknowledgment
 /// 2. Wait for the device to reboot and reappear
+///
+/// Note: For flexible device tracking, use `configure_device_profile_flexible()` instead.
+#[allow(dead_code)]
 pub fn configure_device_profile(port_name: &str, profile: &str, serial_number: &str) -> DfuResult<()> {
+    let identifier = DeviceIdentifier::Serial(serial_number.to_string());
+    configure_device_profile_flexible(port_name, profile, &identifier, |_| {})
+}
+
+/// Configure the device therapy profile using flexible device tracking.
+///
+/// Works with both serial number and VID/PID+port pattern tracking.
+/// Includes enhanced boot detection and detailed logging.
+///
+/// # Arguments
+/// * `port_name` - Serial port of the device
+/// * `profile` - Profile to set ("REGULAR", "NOISY", "HYBRID", or "GENTLE")
+/// * `identifier` - Device identifier for tracking through reboot
+/// * `log` - Callback for debug log messages
+pub fn configure_device_profile_flexible<L: Fn(&str)>(
+    port_name: &str,
+    profile: &str,
+    identifier: &DeviceIdentifier,
+    log: L,
+) -> DfuResult<()> {
     let command = match profile.to_uppercase().as_str() {
         "REGULAR" => PROFILE_REGULAR_COMMAND,
         "NOISY" => PROFILE_NOISY_COMMAND,
@@ -601,28 +850,26 @@ pub fn configure_device_profile(port_name: &str, profile: &str, serial_number: &
         }
     };
 
+    log(&format!("Opening serial port: {}", port_name));
+
     // Open port and send command
     let mut transport = SerialTransport::open(port_name)?;
 
-    // Wait for device to finish booting and drain boot log output.
-    // The device outputs initialization logs on boot which can contain
-    // "ERROR" from hardware init - we need to drain these first.
-    // We wait for a period of silence (no data for 500ms) to indicate boot complete.
-    let mut buffer = [0u8; 256];
-    let drain_timeout = Duration::from_millis(5000);
-    let drain_start = Instant::now();
-    let mut last_data_time = Instant::now();
-    const SILENCE_THRESHOLD_MS: u64 = 500;
+    // Verify connection is healthy before proceeding
+    if !transport.is_healthy() {
+        return Err(DfuError::DeviceDisconnected {
+            operation: "profile configuration health check".to_string(),
+        });
+    }
 
-    while drain_start.elapsed() < drain_timeout {
-        let bytes_read = transport.read(&mut buffer, 200)?;
-        if bytes_read > 0 {
-            last_data_time = Instant::now();
-            // Keep draining boot output
-        } else if last_data_time.elapsed() > Duration::from_millis(SILENCE_THRESHOLD_MS) {
-            // No data for 500ms - device has likely finished booting
-            break;
-        }
+    log("Draining boot output...");
+
+    // Use enhanced boot detection with marker support
+    let found_marker = drain_boot_output(&mut transport)?;
+    if found_marker {
+        log("Boot completion marker detected");
+    } else {
+        log("Boot detected via silence threshold");
     }
 
     // Clear any remaining input
@@ -630,6 +877,7 @@ pub fn configure_device_profile(port_name: &str, profile: &str, serial_number: &
 
     // Small delay then send command
     std::thread::sleep(Duration::from_millis(100));
+    log(&format!("Sending profile command: {}", profile));
     transport.write(command.as_bytes())?;
     transport.flush()?;
 
@@ -638,6 +886,7 @@ pub fn configure_device_profile(port_name: &str, profile: &str, serial_number: &
     let timeout = Duration::from_millis(PROFILE_CONFIG_TIMEOUT_MS);
     let start = Instant::now();
     let mut response = Vec::new();
+    let mut buffer = [0u8; 256];
 
     while start.elapsed() < timeout {
         let remaining = timeout.saturating_sub(start.elapsed());
@@ -650,19 +899,23 @@ pub fn configure_device_profile(port_name: &str, profile: &str, serial_number: &
 
             // Check for success - device confirmed profile change
             if response_str.contains("[CONFIG]") && response_str.contains("Profile set to") {
+                log("Profile configuration acknowledged");
                 // Success! Device will now reboot.
                 // Close the transport before device disconnects
                 drop(transport);
 
                 // Wait for device to reboot and reappear
+                log("Waiting for device to reboot...");
                 std::thread::sleep(Duration::from_millis(2000));
-                wait_for_application_by_serial(serial_number, REBOOT_TIMEOUT_MS)?;
+                wait_for_application_flexible(identifier, get_reboot_timeout())?;
+                log("Device reappeared after reboot");
 
                 return Ok(());
             }
 
             // Check for explicit error from firmware
             if response_str.contains("[ERROR]") {
+                log(&format!("Device returned error: {}", response_str));
                 return Err(DfuError::ProfileConfigFailed {
                     reason: response_str.to_string(),
                 });
@@ -672,6 +925,14 @@ pub fn configure_device_profile(port_name: &str, profile: &str, serial_number: &
 
     // Timeout without receiving [CONFIG] or [ERROR] - this is a failure
     let response_str = String::from_utf8_lossy(&response);
+    log(&format!(
+        "Timeout waiting for acknowledgment. Received: {}",
+        if response_str.is_empty() {
+            "(no response)"
+        } else {
+            &response_str
+        }
+    ));
     Err(DfuError::ProfileConfigFailed {
         reason: format!(
             "Timeout waiting for profile configuration acknowledgment. Received: {}",

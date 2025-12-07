@@ -6,7 +6,12 @@ use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::thread;
+use std::time::Duration;
 use tauri::ipc::Channel;
+
+/// Maximum number of operation-level retries for complete DFU failure.
+/// This catches high-level failures like bootloader entry timeout or device disconnect.
+const MAX_OPERATION_RETRIES: u32 = 1;
 
 /// Global cancellation flag for DFU operations.
 static DFU_CANCELLED: AtomicBool = AtomicBool::new(false);
@@ -14,6 +19,20 @@ static DFU_CANCELLED: AtomicBool = AtomicBool::new(false);
 /// Check if cancellation was requested.
 pub fn is_dfu_cancelled() -> bool {
     DFU_CANCELLED.load(Ordering::SeqCst)
+}
+
+/// Check if an operation-level error is retriable.
+///
+/// These are high-level failures that may succeed on a full retry,
+/// such as bootloader entry timeout or device disconnection.
+fn is_operation_retriable(error: &str) -> bool {
+    let e = error.to_lowercase();
+    e.contains("timeout")
+        || e.contains("bootloader")
+        || e.contains("disconnected")
+        || e.contains("health check")
+        || e.contains("no compatible device")
+        || e.contains("not found")
 }
 
 use crate::dfu::{
@@ -142,6 +161,10 @@ pub async fn detect_dfu_devices() -> Result<Vec<DfuDevice>, String> {
 /// * `firmware_path` - Path to the firmware.zip file
 /// * `device_role` - Role to configure ("PRIMARY" or "SECONDARY")
 /// * `progress` - Channel for progress updates
+///
+/// This command includes automatic retry logic for transient failures.
+/// If the operation fails with a retriable error (timeout, device disconnect, etc.),
+/// it will wait and retry up to MAX_OPERATION_RETRIES times.
 #[tauri::command]
 pub async fn flash_dfu_firmware(
     serial_port: String,
@@ -152,6 +175,74 @@ pub async fn flash_dfu_firmware(
     // Reset cancellation flag at start of new operation
     DFU_CANCELLED.store(false, Ordering::SeqCst);
 
+    for attempt in 0..=MAX_OPERATION_RETRIES {
+        // Check for cancellation before each attempt
+        if is_dfu_cancelled() {
+            return Err("Operation cancelled by user".to_string());
+        }
+
+        let result = flash_dfu_firmware_inner(
+            serial_port.clone(),
+            firmware_path.clone(),
+            device_role.clone(),
+            progress.clone(),
+        )
+        .await;
+
+        match result {
+            Ok(()) => return Ok(()),
+            Err(e) if is_operation_retriable(&e) && attempt < MAX_OPERATION_RETRIES => {
+                // Log the retry attempt
+                let _ = progress.send(DfuProgressEvent {
+                    stage: "log".to_string(),
+                    sent: None,
+                    total: None,
+                    percent: -1.0,
+                    message: format!(
+                        "Operation failed (attempt {}/{}): {}. Retrying in 3 seconds...",
+                        attempt + 1,
+                        MAX_OPERATION_RETRIES + 1,
+                        e
+                    ),
+                });
+
+                // Wait before retry to allow device to stabilize
+                tokio::time::sleep(Duration::from_secs(3)).await;
+
+                // Reset cancellation flag for retry
+                DFU_CANCELLED.store(false, Ordering::SeqCst);
+            }
+            Err(e) => {
+                // Non-retriable error or max retries exceeded
+                if attempt > 0 {
+                    let _ = progress.send(DfuProgressEvent {
+                        stage: "log".to_string(),
+                        sent: None,
+                        total: None,
+                        percent: -1.0,
+                        message: format!(
+                            "Operation failed after {} attempt(s): {}",
+                            attempt + 1,
+                            e
+                        ),
+                    });
+                }
+                return Err(e);
+            }
+        }
+    }
+
+    // This shouldn't be reached, but just in case
+    Err("Maximum retry attempts exceeded".to_string())
+}
+
+/// Inner implementation of flash_dfu_firmware without retry logic.
+async fn flash_dfu_firmware_inner(
+    serial_port: String,
+    firmware_path: String,
+    device_role: String,
+    progress: Channel<DfuProgressEvent>,
+) -> Result<(), String> {
     // Create a channel for progress updates from the blocking thread
     let (tx, rx) = mpsc::channel::<DfuStage>();
 
