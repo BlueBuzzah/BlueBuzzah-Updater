@@ -36,8 +36,10 @@ fn is_operation_retriable(error: &str) -> bool {
 }
 
 use crate::dfu::{
-    configure_device_profile, find_nrf52_devices, upload_firmware, DfuStage, Nrf52Device,
+    configure_device_with_settings, find_nrf52_devices, upload_firmware, DeviceIdentifier,
+    DfuStage, Nrf52Device,
 };
+use crate::settings::AdvancedSettings;
 
 /// Device information for the frontend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -331,20 +333,25 @@ pub struct ProfileProgressEvent {
     pub message: String,
 }
 
-/// Set the therapy profile for a device.
+/// Set the therapy profile for a device with optional advanced settings.
 ///
-/// This command configures a device's therapy profile by sending a serial command.
+/// This command configures a device's therapy profile by sending serial commands.
 /// The device must be in APPLICATION mode (not bootloader mode).
 /// After configuration, the device will automatically reboot.
+///
+/// If `advanced_settings` is provided, setting commands are sent BEFORE the
+/// profile command. This allows configuring device behavior like LED state.
 ///
 /// # Arguments
 /// * `serial_port` - Serial port of the device
 /// * `profile` - Profile to set ("REGULAR", "NOISY", "HYBRID", or "GENTLE")
+/// * `advanced_settings` - Optional advanced settings (LED off, etc.)
 /// * `progress` - Channel for progress updates
 #[tauri::command]
 pub async fn set_device_profile(
     serial_port: String,
     profile: String,
+    advanced_settings: Option<AdvancedSettings>,
     progress: Channel<ProfileProgressEvent>,
 ) -> Result<(), String> {
     // Get device info to retrieve serial number
@@ -391,6 +398,18 @@ pub async fn set_device_profile(
         }
     });
 
+    // Get pre-profile commands from advanced settings
+    let pre_commands = advanced_settings
+        .as_ref()
+        .map(|s| s.to_pre_profile_commands())
+        .unwrap_or_default();
+
+    let has_settings = !pre_commands.is_empty()
+        && advanced_settings
+            .as_ref()
+            .map(|s| s.has_non_default_settings())
+            .unwrap_or(false);
+
     // Run profile configuration in a blocking task
     let result = tokio::task::spawn_blocking({
         let serial_port = serial_port.clone();
@@ -399,14 +418,43 @@ pub async fn set_device_profile(
 
         move || {
             // Send progress: sending command
+            let message = if has_settings {
+                format!("Applying settings and {} profile...", profile)
+            } else {
+                format!("Sending {} profile command...", profile)
+            };
             let _ = tx.send(ProfileProgressEvent {
                 stage: "sending".to_string(),
                 percent: 30.0,
-                message: format!("Sending {} profile command...", profile),
+                message,
             });
 
-            // Configure the profile
-            let config_result = configure_device_profile(&serial_port, &profile, &serial_number);
+            // Create a logger that forwards to the progress channel
+            let tx_log = tx.clone();
+            let log = move |msg: &str| {
+                let _ = tx_log.send(ProfileProgressEvent {
+                    stage: "log".to_string(),
+                    percent: -1.0, // Log messages don't affect progress
+                    message: msg.to_string(),
+                });
+            };
+
+            // Configure the profile (with or without advanced settings)
+            let config_result = if pre_commands.is_empty() {
+                // No advanced settings - use original function with logging
+                let identifier = DeviceIdentifier::Serial(serial_number.clone());
+                configure_device_with_settings(&serial_port, &profile, &[], &identifier, log)
+            } else {
+                // Has advanced settings - use new function with logging
+                let identifier = DeviceIdentifier::Serial(serial_number.clone());
+                configure_device_with_settings(
+                    &serial_port,
+                    &profile,
+                    &pre_commands,
+                    &identifier,
+                    log,
+                )
+            };
 
             match &config_result {
                 Ok(()) => {

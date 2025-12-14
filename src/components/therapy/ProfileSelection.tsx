@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import {
 	Card,
 	CardContent,
@@ -5,13 +6,23 @@ import {
 	CardHeader,
 	CardTitle,
 } from '@/components/ui/card';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
+import {
+	Tooltip,
+	TooltipContent,
+	TooltipProvider,
+	TooltipTrigger,
+} from '@/components/ui/tooltip';
 import { THERAPY_PROFILES } from '@/lib/therapy-profiles';
+import { useSettingsStore } from '@/stores/settingsStore';
 import type { TherapyProfile } from '@/types';
 import {
 	Activity,
 	CheckCircle2,
 	Feather,
 	Gauge,
+	Settings,
 	Shuffle,
 } from 'lucide-react';
 
@@ -31,14 +42,131 @@ export function ProfileSelection({
   selectedProfile,
   onSelect,
 }: ProfileSelectionProps) {
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const { settings, setSettings, loadFromBackend, isLoaded } = useSettingsStore();
+
+  // Load settings from backend on mount
+  useEffect(() => {
+    if (!isLoaded) {
+      loadFromBackend();
+    }
+  }, [isLoaded, loadFromBackend]);
+
   return (
     <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold mb-2">Select Therapy Profile</h2>
-        <p className="text-muted-foreground">
-          Choose a vibration pattern for your devices
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-2xl font-bold mb-2">Select Therapy Profile</h2>
+          <p className="text-muted-foreground">
+            Choose a vibration pattern for your devices
+          </p>
+        </div>
+
+        {/* Advanced Toggle - right aligned */}
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <label
+                className={`
+                  group flex items-center gap-2.5 px-3 py-2 rounded-lg
+                  border transition-all duration-200 cursor-pointer select-none
+                  ${
+                    showAdvanced
+                      ? 'bg-emerald-500/10 border-emerald-500/40 shadow-[0_0_12px_rgba(16,185,129,0.15)]'
+                      : 'bg-zinc-900/50 border-zinc-700/50 hover:border-zinc-600'
+                  }
+                `}
+              >
+                <Settings
+                  className={`h-4 w-4 transition-colors duration-200 ${
+                    showAdvanced
+                      ? 'text-emerald-400'
+                      : 'text-zinc-500 group-hover:text-zinc-400'
+                  }`}
+                />
+                <span
+                  className={`text-sm font-medium transition-colors duration-200 ${
+                    showAdvanced
+                      ? 'text-emerald-400'
+                      : 'text-zinc-400 group-hover:text-zinc-300'
+                  }`}
+                >
+                  Advanced
+                </span>
+                <Switch
+                  checked={showAdvanced}
+                  onCheckedChange={setShowAdvanced}
+                  className="data-[state=checked]:bg-emerald-500 data-[state=unchecked]:bg-zinc-700"
+                />
+              </label>
+            </TooltipTrigger>
+            <TooltipContent
+              className="max-w-xs bg-zinc-900 border border-emerald-500/30 shadow-lg shadow-emerald-500/5"
+              sideOffset={8}
+            >
+              <p className="font-semibold text-emerald-400 text-sm">
+                Advanced Settings
+              </p>
+              <p className="text-zinc-300 text-xs mt-1.5 leading-relaxed">
+                Configure additional device behavior options for therapy sessions.
+              </p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
       </div>
+
+      {/* Advanced Settings Card - shown when toggle is ON */}
+      {showAdvanced && (
+        <Card className="border-emerald-500/20 bg-emerald-500/5">
+          <CardHeader className="pb-4">
+            <CardTitle className="text-lg flex items-center gap-2">
+              <Settings className="h-5 w-5 text-emerald-400" />
+              <span>Advanced Settings</span>
+            </CardTitle>
+            <CardDescription>
+              Configure additional advanced device behaviors
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex items-center gap-4">
+              <Switch
+                id="disable-led"
+                checked={settings.disableLedDuringTherapy}
+                onCheckedChange={(checked) =>
+                  setSettings({ disableLedDuringTherapy: checked })
+                }
+                className="data-[state=checked]:bg-emerald-500"
+              />
+              <div className="space-y-0.5">
+                <Label htmlFor="disable-led" className="text-sm font-medium">
+                  Disable LED During Therapy
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Turn off device LED indicators while therapy is active
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-4">
+              <Switch
+                id="debug-mode"
+                checked={settings.debugMode}
+                onCheckedChange={(checked) =>
+                  setSettings({ debugMode: checked })
+                }
+                className="data-[state=checked]:bg-emerald-500"
+              />
+              <div className="space-y-0.5">
+                <Label htmlFor="debug-mode" className="text-sm font-medium">
+                  Debug Mode
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Enable debug output from device during therapy sessions
+                </p>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
         {THERAPY_PROFILES.map((profile) => {

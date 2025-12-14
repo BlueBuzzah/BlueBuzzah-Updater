@@ -48,8 +48,14 @@ mod transport;
 // Device detection and tracking
 pub use device::{find_nrf52_devices, Nrf52Device};
 
+// Device identifier (for flexible tracking through reboots)
+pub mod device_pub {
+    pub use super::device::DeviceIdentifier;
+}
+pub use device_pub::*;
+
 // Protocol
-pub use protocol::{configure_device_profile, upload_firmware, DfuStage};
+pub use protocol::{configure_device_with_settings, upload_firmware, DfuStage};
 
 // Firmware reading
 pub use firmware_reader::read_firmware_zip;

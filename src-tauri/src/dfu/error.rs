@@ -96,6 +96,10 @@ pub enum DfuError {
     #[error("Failed to configure therapy profile: {reason}")]
     ProfileConfigFailed { reason: String },
 
+    /// Advanced setting configuration failed.
+    #[error("Failed to configure advanced setting: {reason}")]
+    SettingConfigFailed { reason: String },
+
     /// Device has no serial number (required for tracking through mode changes).
     #[error("Device has no serial number - cannot track through mode changes")]
     NoSerialNumber,
@@ -173,6 +177,7 @@ impl DfuError {
             DfuError::PacketTooLarge { .. } => "DFU-061",
             DfuError::RoleConfigFailed { .. } => "DFU-070",
             DfuError::ProfileConfigFailed { .. } => "DFU-071",
+            DfuError::SettingConfigFailed { .. } => "DFU-072",
             DfuError::NoSerialNumber => "DFU-054",
             DfuError::Cancelled => "DFU-099",
         }

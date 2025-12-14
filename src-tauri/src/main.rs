@@ -4,6 +4,7 @@
 mod cache;
 mod commands;
 mod dfu;
+mod settings;
 
 use commands::dfu::{
     cancel_dfu_flash,
@@ -23,6 +24,7 @@ use commands::firmware::{
     verify_and_clean_cache,
     verify_cached_firmware,
 };
+use commands::settings::{get_advanced_settings, save_advanced_settings};
 
 fn main() {
     tauri::Builder::default()
@@ -53,7 +55,10 @@ fn main() {
             delete_cached_firmware,
             clear_all_cache,
             verify_cached_firmware,
-            verify_and_clean_cache
+            verify_and_clean_cache,
+            // Settings commands
+            get_advanced_settings,
+            save_advanced_settings
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

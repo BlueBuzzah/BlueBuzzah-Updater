@@ -945,6 +945,216 @@ pub fn configure_device_profile_flexible<L: Fn(&str)>(
     })
 }
 
+// =============================================================================
+// Advanced Settings Configuration
+// =============================================================================
+
+/// Timeout for setting command acknowledgment (shorter than profile commands).
+const SETTING_CONFIG_TIMEOUT_MS: u64 = 2000;
+
+/// Send a single setting command and wait for acknowledgment.
+///
+/// Unlike profile commands, setting commands do NOT trigger a device reboot.
+/// They configure device behavior that takes effect on the next therapy session.
+///
+/// Expected responses:
+/// - Success: "[SETTING] ..." or device may not respond (backwards compatibility)
+/// - Error: "[ERROR] ..."
+///
+/// # Arguments
+/// * `transport` - Open serial transport
+/// * `command` - Command string to send (should include newline)
+/// * `log` - Callback for debug log messages
+fn send_setting_command<L: Fn(&str)>(
+    transport: &mut SerialTransport,
+    command: &str,
+    log: &L,
+) -> DfuResult<()> {
+    // Parse command to create human-readable log message
+    let trimmed = command.trim();
+    let (setting_name, setting_value) = trimmed
+        .split_once(':')
+        .unwrap_or((trimmed, "unknown"));
+
+    let friendly_name = match setting_name {
+        "THERAPY_LED_OFF" => "Disable LED During Therapy",
+        "DEBUG" => "Debug Mode",
+        _ => setting_name,
+    };
+
+    log(&format!("Setting {} = {}", friendly_name, setting_value));
+
+    transport.write(command.as_bytes())?;
+    transport.flush()?;
+
+    // Wait for acknowledgment (shorter timeout than profile commands)
+    let timeout = Duration::from_millis(SETTING_CONFIG_TIMEOUT_MS);
+    let start = Instant::now();
+    let mut response = Vec::new();
+    let mut buffer = [0u8; 256];
+
+    while start.elapsed() < timeout {
+        let remaining = timeout.saturating_sub(start.elapsed());
+        let bytes_read = transport.read(&mut buffer, remaining.as_millis() as u64)?;
+
+        if bytes_read > 0 {
+            response.extend_from_slice(&buffer[..bytes_read]);
+            let response_str = String::from_utf8_lossy(&response);
+
+            // Check for success acknowledgment
+            if response_str.contains("[SETTING]") {
+                log(&format!("Setting acknowledged: {}", response_str.trim()));
+                return Ok(());
+            }
+
+            // Check for error
+            if response_str.contains("[ERROR]") {
+                return Err(DfuError::SettingConfigFailed {
+                    reason: response_str.to_string(),
+                });
+            }
+        }
+    }
+
+    // Timeout - treat as success for backwards compatibility with older firmware
+    // that doesn't respond to setting commands
+    log("Setting command timeout - device may not support this setting (continuing)");
+    Ok(())
+}
+
+/// Configure device with advanced settings and therapy profile.
+///
+/// This is the main entry point for therapy configuration that supports
+/// advanced settings. It:
+/// 1. Opens the serial connection
+/// 2. Drains boot output (waits for device ready)
+/// 3. Sends each advanced setting command (no reboot triggered)
+/// 4. Sends the profile command (triggers reboot)
+/// 5. Waits for device to reappear
+///
+/// # Arguments
+/// * `port_name` - Serial port of the device
+/// * `profile` - Profile to set ("REGULAR", "NOISY", "HYBRID", or "GENTLE")
+/// * `pre_profile_commands` - Commands to send before SET_PROFILE (from AdvancedSettings)
+/// * `identifier` - Device identifier for tracking through reboot
+/// * `log` - Callback for debug log messages
+pub fn configure_device_with_settings<L: Fn(&str)>(
+    port_name: &str,
+    profile: &str,
+    pre_profile_commands: &[String],
+    identifier: &DeviceIdentifier,
+    log: L,
+) -> DfuResult<()> {
+    let profile_command = match profile.to_uppercase().as_str() {
+        "REGULAR" => PROFILE_REGULAR_COMMAND,
+        "NOISY" => PROFILE_NOISY_COMMAND,
+        "HYBRID" => PROFILE_HYBRID_COMMAND,
+        "GENTLE" => PROFILE_GENTLE_COMMAND,
+        _ => {
+            return Err(DfuError::ProfileConfigFailed {
+                reason: format!(
+                    "Invalid profile: {}. Valid profiles: REGULAR, NOISY, HYBRID, GENTLE",
+                    profile
+                ),
+            })
+        }
+    };
+
+    log(&format!("Opening serial port: {}", port_name));
+    let mut transport = SerialTransport::open(port_name)?;
+
+    // Verify connection is healthy
+    if !transport.is_healthy() {
+        return Err(DfuError::DeviceDisconnected {
+            operation: "settings configuration health check".to_string(),
+        });
+    }
+
+    log("Draining boot output...");
+    let found_marker = drain_boot_output(&mut transport)?;
+    if found_marker {
+        log("Boot completion marker detected");
+    } else {
+        log("Boot detected via silence threshold");
+    }
+
+    transport.clear_input().ok();
+    std::thread::sleep(Duration::from_millis(100));
+
+    // Phase 1: Send all advanced setting commands
+    if !pre_profile_commands.is_empty() {
+        log(&format!(
+            "Sending {} advanced setting command(s)...",
+            pre_profile_commands.len()
+        ));
+        for command in pre_profile_commands {
+            send_setting_command(&mut transport, command, &log)?;
+            // Small delay between commands
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    // Phase 2: Send profile command (this triggers reboot)
+    log(&format!("Sending profile command: {}", profile));
+    transport.write(profile_command.as_bytes())?;
+    transport.flush()?;
+
+    // Wait for profile acknowledgment
+    let timeout = Duration::from_millis(PROFILE_CONFIG_TIMEOUT_MS);
+    let start = Instant::now();
+    let mut response = Vec::new();
+    let mut buffer = [0u8; 256];
+
+    while start.elapsed() < timeout {
+        let remaining = timeout.saturating_sub(start.elapsed());
+        let bytes_read = transport.read(&mut buffer, remaining.as_millis() as u64)?;
+
+        if bytes_read > 0 {
+            response.extend_from_slice(&buffer[..bytes_read]);
+            let response_str = String::from_utf8_lossy(&response);
+
+            if response_str.contains("[CONFIG]") && response_str.contains("Profile set to") {
+                log("Profile configuration acknowledged");
+                drop(transport);
+
+                log("Waiting for device to reboot...");
+                std::thread::sleep(Duration::from_millis(2000));
+                wait_for_application_flexible(identifier, get_reboot_timeout())?;
+                log("Device reappeared after reboot");
+
+                return Ok(());
+            }
+
+            if response_str.contains("[ERROR]") {
+                log(&format!("Device returned error: {}", response_str));
+                return Err(DfuError::ProfileConfigFailed {
+                    reason: response_str.to_string(),
+                });
+            }
+        }
+    }
+
+    let response_str = String::from_utf8_lossy(&response);
+    log(&format!(
+        "Timeout waiting for acknowledgment. Received: {}",
+        if response_str.is_empty() {
+            "(no response)"
+        } else {
+            &response_str
+        }
+    ));
+    Err(DfuError::ProfileConfigFailed {
+        reason: format!(
+            "Timeout waiting for profile configuration acknowledgment. Received: {}",
+            if response_str.is_empty() {
+                "(no response)"
+            } else {
+                &response_str
+            }
+        ),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

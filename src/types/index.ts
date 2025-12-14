@@ -99,6 +99,11 @@ export interface ValidationResult {
   requiredSpaceMB?: number;
 }
 
+export interface AdvancedSettings {
+  disableLedDuringTherapy: boolean;
+  debugMode: boolean;
+}
+
 export interface WizardState {
   currentStep: number;
   selectedRelease: FirmwareRelease | null;
