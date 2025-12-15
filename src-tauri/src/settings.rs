@@ -148,6 +148,9 @@ impl SettingsManager {
     }
 
     /// Get the path where settings are stored.
+    ///
+    /// Useful for debugging or displaying settings location to users.
+    #[allow(dead_code)]
     pub fn settings_path(&self) -> &Path {
         &self.settings_file_path
     }
