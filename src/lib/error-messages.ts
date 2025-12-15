@@ -219,6 +219,28 @@ export const ERROR_GUIDANCE: Record<string, ErrorGuidance> = {
       'Contact support for assistance',
     ],
   },
+  DFU_WINDOWS_DRIVER: {
+    title: 'Windows Driver Issue',
+    description: 'Windows USB driver encountered a temporary issue communicating with the device.',
+    resolutionSteps: [
+      'The application will automatically retry the operation',
+      'If retries fail, try unplugging and reconnecting the device',
+      'Ensure no other applications are using the device',
+      'Try a different USB port (prefer USB 3.0 ports)',
+      'Avoid USB hubs - connect directly to your computer',
+      'Restart the application if the issue persists',
+    ],
+  },
+  DFU_RETRYING: {
+    title: 'Automatic Retry in Progress',
+    description: 'The operation encountered a temporary issue and is being retried automatically.',
+    resolutionSteps: [
+      'This is normal behavior for intermittent USB communication issues',
+      'Keep the device connected and wait for the retry to complete',
+      'If multiple retries fail, try a different USB cable or port',
+      'The update may still succeed after one or more retries',
+    ],
+  },
 };
 
 export function getErrorGuidance(errorMessage: string): ErrorGuidance | null {
@@ -257,6 +279,13 @@ export function getErrorGuidance(errorMessage: string): ErrorGuidance | null {
   }
 
   // DFU-specific error patterns - check more specific patterns first
+
+  // Windows driver issues
+  if (lowerError.includes('not functioning') ||
+      (lowerError.includes('windows') && lowerError.includes('driver'))) {
+    return ERROR_GUIDANCE.DFU_WINDOWS_DRIVER;
+  }
+
   if (lowerError.includes('max retries') || lowerError.includes('retries exceeded') ||
       lowerError.includes('retry attempt')) {
     return ERROR_GUIDANCE.DFU_MAX_RETRIES;

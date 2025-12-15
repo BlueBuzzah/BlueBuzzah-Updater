@@ -14,8 +14,8 @@ use serde::{Deserialize, Serialize};
 
 use super::config::{
     calculate_erase_wait_time, get_bootloader_timeout, get_reboot_timeout, ACK_TIMEOUT_MS,
-    FLASH_PAGE_WRITE_TIME_MS, FRAMES_PER_FLASH_PAGE, MAX_PACKET_RETRIES,
-    PROFILE_CONFIG_TIMEOUT_MS, PROFILE_GENTLE_COMMAND, PROFILE_HYBRID_COMMAND,
+    CONFIG_RETRY_DELAY_MS, FLASH_PAGE_WRITE_TIME_MS, FRAMES_PER_FLASH_PAGE, MAX_CONFIG_RETRIES,
+    MAX_PACKET_RETRIES, PROFILE_CONFIG_TIMEOUT_MS, PROFILE_GENTLE_COMMAND, PROFILE_HYBRID_COMMAND,
     PROFILE_NOISY_COMMAND, PROFILE_REGULAR_COMMAND, RETRY_BASE_DELAY_MS, ROLE_CONFIG_TIMEOUT_MS,
     ROLE_PRIMARY_COMMAND, ROLE_SECONDARY_COMMAND,
 };
@@ -660,10 +660,42 @@ fn configure_device_role(port_name: &str, role: &str, serial_number: &str) -> Df
     })
 }
 
-/// Configure the device role using flexible device tracking.
+/// Configure the device role using flexible device tracking with retry logic.
 ///
 /// Works with both serial number and VID/PID+port pattern tracking.
+/// Includes automatic retry for timing-related failures.
 fn configure_device_role_flexible(
+    port_name: &str,
+    role: &str,
+    identifier: &DeviceIdentifier,
+) -> DfuResult<()> {
+    let mut last_error: Option<DfuError> = None;
+
+    for attempt in 0..=MAX_CONFIG_RETRIES {
+        // On retry, wait for device to stabilize
+        if attempt > 0 {
+            std::thread::sleep(Duration::from_millis(CONFIG_RETRY_DELAY_MS));
+            // Re-wait for device to be available
+            let _ = wait_for_application_flexible(identifier, 5000);
+        }
+
+        match configure_device_role_flexible_inner(port_name, role, identifier) {
+            Ok(()) => return Ok(()),
+            Err(e) if e.is_retriable() && attempt < MAX_CONFIG_RETRIES => {
+                last_error = Some(e);
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    // All retries exhausted
+    Err(last_error.unwrap_or(DfuError::RoleConfigFailed {
+        reason: "Max retries exceeded".to_string(),
+    }))
+}
+
+/// Inner implementation of role configuration without retry logic.
+fn configure_device_role_flexible_inner(
     port_name: &str,
     role: &str,
     identifier: &DeviceIdentifier,
@@ -1032,13 +1064,59 @@ fn send_setting_command<L: Fn(&str)>(
 /// 4. Sends the profile command (triggers reboot)
 /// 5. Waits for device to reappear
 ///
+/// Includes automatic retry logic for timing-related failures.
+///
 /// # Arguments
 /// * `port_name` - Serial port of the device
 /// * `profile` - Profile to set ("REGULAR", "NOISY", "HYBRID", or "GENTLE")
 /// * `pre_profile_commands` - Commands to send before SET_PROFILE (from AdvancedSettings)
 /// * `identifier` - Device identifier for tracking through reboot
 /// * `log` - Callback for debug log messages
-pub fn configure_device_with_settings<L: Fn(&str)>(
+pub fn configure_device_with_settings<L: Fn(&str) + Clone>(
+    port_name: &str,
+    profile: &str,
+    pre_profile_commands: &[String],
+    identifier: &DeviceIdentifier,
+    log: L,
+) -> DfuResult<()> {
+    let mut last_error: Option<DfuError> = None;
+
+    for attempt in 0..=MAX_CONFIG_RETRIES {
+        // On retry, wait for device to stabilize
+        if attempt > 0 {
+            log(&format!(
+                "Profile configuration retry {}/{}",
+                attempt, MAX_CONFIG_RETRIES
+            ));
+            std::thread::sleep(Duration::from_millis(CONFIG_RETRY_DELAY_MS));
+            // Re-wait for device to be available
+            let _ = wait_for_application_flexible(identifier, 5000);
+        }
+
+        match configure_device_with_settings_inner(
+            port_name,
+            profile,
+            pre_profile_commands,
+            identifier,
+            log.clone(),
+        ) {
+            Ok(()) => return Ok(()),
+            Err(e) if e.is_retriable() && attempt < MAX_CONFIG_RETRIES => {
+                log(&format!("Profile configuration failed: {}, will retry", e));
+                last_error = Some(e);
+            }
+            Err(e) => return Err(e),
+        }
+    }
+
+    // All retries exhausted
+    Err(last_error.unwrap_or(DfuError::ProfileConfigFailed {
+        reason: "Max retries exceeded".to_string(),
+    }))
+}
+
+/// Inner implementation of settings/profile configuration without retry logic.
+fn configure_device_with_settings_inner<L: Fn(&str)>(
     port_name: &str,
     profile: &str,
     pre_profile_commands: &[String],

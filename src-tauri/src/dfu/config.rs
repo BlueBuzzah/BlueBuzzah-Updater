@@ -117,6 +117,42 @@ pub const MAX_PACKET_RETRIES: u32 = 3;
 pub const RETRY_BASE_DELAY_MS: u64 = 100;
 
 // ============================================================================
+// Operation-Level Retry Configuration
+// ============================================================================
+
+/// Maximum retries for 1200 baud touch to enter bootloader mode.
+/// Touch can fail due to USB timing issues, especially on Windows.
+pub const MAX_TOUCH_RETRIES: u32 = 2;
+
+/// Delay between touch retries (ms).
+pub const TOUCH_RETRY_DELAY_MS: u64 = 500;
+
+/// Maximum retries for bootloader reset (clearing stale state).
+pub const MAX_BOOTLOADER_RESET_RETRIES: u32 = 2;
+
+/// Delay between bootloader reset retries (ms).
+pub const BOOTLOADER_RESET_RETRY_DELAY_MS: u64 = 300;
+
+/// Maximum retries for role/profile configuration.
+/// Configuration can fail due to serial timing after device reboot.
+pub const MAX_CONFIG_RETRIES: u32 = 2;
+
+/// Delay between config retries (ms).
+pub const CONFIG_RETRY_DELAY_MS: u64 = 1000;
+
+/// Get platform-specific wait multiplier for touch retries.
+///
+/// On retry attempts, we use progressively longer waits to allow
+/// USB drivers more time to stabilize.
+pub fn get_touch_wait_multiplier(attempt: u32) -> u64 {
+    match attempt {
+        0 => 1, // First attempt: normal wait
+        1 => 2, // Second attempt: 2x wait
+        _ => 3, // Third+ attempt: 3x wait
+    }
+}
+
+// ============================================================================
 // DFU Packet Configuration
 // ============================================================================
 

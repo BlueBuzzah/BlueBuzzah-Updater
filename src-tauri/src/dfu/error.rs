@@ -146,11 +146,42 @@ impl DfuError {
                     || msg.contains("interrupted")
                     || msg.contains("timed out")
                     || msg.contains("resource busy")
+                    // macOS transient issues
+                    || msg.contains("device not configured")
+                    // Linux transient issues
+                    || msg.contains("no such device")
+                    // Generic I/O issues
+                    || msg.contains("i/o error")
+                    // Windows permission issues (sometimes transient)
+                    || msg.contains("access denied")
+            }
+
+            // Role/profile config failures may be timing-related
+            DfuError::RoleConfigFailed { reason } => {
+                let r = reason.to_lowercase();
+                r.contains("timeout") || r.contains("no response")
+            }
+
+            DfuError::ProfileConfigFailed { reason } => {
+                let r = reason.to_lowercase();
+                r.contains("timeout") || r.contains("no response")
             }
 
             // All other errors are not retriable
             _ => false,
         }
+    }
+
+    /// Check if this error should trigger a full operation retry.
+    ///
+    /// More permissive than is_retriable() - includes high-level failures
+    /// like bootloader timeout and device disconnection that may succeed
+    /// if the entire operation is retried from the beginning.
+    pub fn is_operation_retriable(&self) -> bool {
+        self.is_retriable()
+            || matches!(self, DfuError::BootloaderTimeout { .. })
+            || matches!(self, DfuError::DeviceDisconnected { .. })
+            || matches!(self, DfuError::NoDeviceFound)
     }
 
     /// Get a user-friendly error code for support purposes.

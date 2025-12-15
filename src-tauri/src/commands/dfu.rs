@@ -11,7 +11,8 @@ use tauri::ipc::Channel;
 
 /// Maximum number of operation-level retries for complete DFU failure.
 /// This catches high-level failures like bootloader entry timeout or device disconnect.
-const MAX_OPERATION_RETRIES: u32 = 1;
+/// Increased from 1 to 2 (3 total attempts) for better reliability on Windows.
+const MAX_OPERATION_RETRIES: u32 = 2;
 
 /// Global cancellation flag for DFU operations.
 static DFU_CANCELLED: AtomicBool = AtomicBool::new(false);
@@ -25,6 +26,7 @@ pub fn is_dfu_cancelled() -> bool {
 ///
 /// These are high-level failures that may succeed on a full retry,
 /// such as bootloader entry timeout or device disconnection.
+/// Extended to catch more Windows-specific transient errors.
 fn is_operation_retriable(error: &str) -> bool {
     let e = error.to_lowercase();
     e.contains("timeout")
@@ -33,6 +35,15 @@ fn is_operation_retriable(error: &str) -> bool {
         || e.contains("health check")
         || e.contains("no compatible device")
         || e.contains("not found")
+        // Windows driver transient issues
+        || e.contains("not functioning")
+        || e.contains("access denied")
+        // macOS transient issues
+        || e.contains("device not configured")
+        // Generic transient issues
+        || e.contains("i/o error")
+        || e.contains("connection reset")
+        || e.contains("temporarily unavailable")
 }
 
 use crate::dfu::{
@@ -166,7 +177,7 @@ pub async fn detect_dfu_devices() -> Result<Vec<DfuDevice>, String> {
 ///
 /// This command includes automatic retry logic for transient failures.
 /// If the operation fails with a retriable error (timeout, device disconnect, etc.),
-/// it will wait and retry up to MAX_OPERATION_RETRIES times.
+/// it will wait and retry up to MAX_OPERATION_RETRIES times with progressive delays.
 #[tauri::command]
 pub async fn flash_dfu_firmware(
     serial_port: String,
@@ -183,6 +194,21 @@ pub async fn flash_dfu_firmware(
             return Err("Operation cancelled by user".to_string());
         }
 
+        // Report retry attempt to frontend (except for first attempt)
+        if attempt > 0 {
+            let _ = progress.send(DfuProgressEvent {
+                stage: "retrying".to_string(),
+                sent: None,
+                total: None,
+                percent: -1.0,
+                message: format!(
+                    "Retrying firmware installation (attempt {}/{})...",
+                    attempt + 1,
+                    MAX_OPERATION_RETRIES + 1
+                ),
+            });
+        }
+
         let result = flash_dfu_firmware_inner(
             serial_port.clone(),
             firmware_path.clone(),
@@ -194,6 +220,9 @@ pub async fn flash_dfu_firmware(
         match result {
             Ok(()) => return Ok(()),
             Err(e) if is_operation_retriable(&e) && attempt < MAX_OPERATION_RETRIES => {
+                // Progressive delay: 3s for first retry, 5s for second
+                let delay_secs = 3 + (attempt as u64 * 2);
+
                 // Log the retry attempt
                 let _ = progress.send(DfuProgressEvent {
                     stage: "log".to_string(),
@@ -201,15 +230,15 @@ pub async fn flash_dfu_firmware(
                     total: None,
                     percent: -1.0,
                     message: format!(
-                        "Operation failed (attempt {}/{}): {}. Retrying in 3 seconds...",
+                        "Attempt {} failed: {}. Waiting {} seconds before retry...",
                         attempt + 1,
-                        MAX_OPERATION_RETRIES + 1,
-                        e
+                        e,
+                        delay_secs
                     ),
                 });
 
                 // Wait before retry to allow device to stabilize
-                tokio::time::sleep(Duration::from_secs(3)).await;
+                tokio::time::sleep(Duration::from_secs(delay_secs)).await;
 
                 // Reset cancellation flag for retry
                 DFU_CANCELLED.store(false, Ordering::SeqCst);
@@ -223,7 +252,7 @@ pub async fn flash_dfu_firmware(
                         total: None,
                         percent: -1.0,
                         message: format!(
-                            "Operation failed after {} attempt(s): {}",
+                            "Installation failed after {} attempt(s): {}",
                             attempt + 1,
                             e
                         ),

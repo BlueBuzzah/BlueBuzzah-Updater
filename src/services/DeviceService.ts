@@ -34,6 +34,7 @@ function mapDfuStageToUpdateStage(dfuStage: string): UpdateStage | null {
     case 'connecting':
     case 'init':
     case 'starting':
+    case 'retrying': // Retry attempts show as preparing (restart process)
       return 'preparing'; // Pre-transfer phases (bootloader entry)
     case 'uploading':
       return 'copying'; // Main transfer phase

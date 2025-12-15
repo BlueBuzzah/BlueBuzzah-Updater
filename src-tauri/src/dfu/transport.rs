@@ -8,7 +8,11 @@ use std::time::Duration;
 
 use serialport::SerialPort;
 
-use super::config::{DFU_BAUD_RATE, SERIAL_READ_TIMEOUT};
+use super::config::{
+    get_touch_wait_multiplier, DFU_BAUD_RATE, MAX_BOOTLOADER_RESET_RETRIES,
+    MAX_TOUCH_RETRIES, SERIAL_READ_TIMEOUT, TOUCH_RETRY_DELAY_MS,
+    BOOTLOADER_RESET_RETRY_DELAY_MS,
+};
 use super::error::{DfuError, DfuResult};
 
 /// Trait for DFU transport operations.
@@ -147,7 +151,7 @@ impl SerialTransport {
         ))
     }
 
-    /// Perform a 1200 baud touch to trigger bootloader mode.
+    /// Perform a 1200 baud touch to trigger bootloader mode with retry logic.
     ///
     /// Sequence:
     /// 1. Open at 1200 baud
@@ -156,10 +160,33 @@ impl SerialTransport {
     /// 4. Set DTR=False (triggers bootloader)
     /// 5. Close
     /// 6. Platform-specific wait for driver initialization
+    ///
+    /// If the touch fails, it will retry up to MAX_TOUCH_RETRIES times with
+    /// progressively longer wait times to allow USB drivers to stabilize.
     pub fn touch_reset(port_name: &str) -> DfuResult<()> {
         let normalized = normalize_port_name(port_name);
+        let mut last_error: Option<DfuError> = None;
 
-        let mut port = serialport::new(&normalized, 1200)
+        for attempt in 0..=MAX_TOUCH_RETRIES {
+            match Self::touch_reset_once(&normalized, attempt) {
+                Ok(()) => return Ok(()),
+                Err(e) => {
+                    last_error = Some(e);
+                    if attempt < MAX_TOUCH_RETRIES {
+                        // Wait before retry to allow USB to stabilize
+                        std::thread::sleep(Duration::from_millis(TOUCH_RETRY_DELAY_MS));
+                    }
+                }
+            }
+        }
+
+        // All retries exhausted
+        Err(last_error.unwrap_or(DfuError::NoDeviceFound))
+    }
+
+    /// Single attempt at 1200 baud touch with configurable wait time.
+    fn touch_reset_once(normalized_port: &str, attempt: u32) -> DfuResult<()> {
+        let mut port = serialport::new(normalized_port, 1200)
             .timeout(Duration::from_millis(100))
             .open()
             .map_err(DfuError::Serial)?;
@@ -176,29 +203,54 @@ impl SerialTransport {
         // Close the port
         drop(port);
 
+        // Get wait multiplier for this attempt (increases on retries)
+        let multiplier = get_touch_wait_multiplier(attempt);
+
         // Wait for bootloader to initialize and driver to be ready
         // Windows needs extra time for USB driver re-enumeration
         #[cfg(target_os = "windows")]
         {
-            std::thread::sleep(Duration::from_millis(1000));
+            std::thread::sleep(Duration::from_millis(1000 * multiplier));
         }
 
         #[cfg(not(target_os = "windows"))]
         {
-            std::thread::sleep(Duration::from_millis(400));
+            std::thread::sleep(Duration::from_millis(400 * multiplier));
         }
 
         Ok(())
     }
 
-    /// Reset a device that's already in bootloader mode.
+    /// Reset a device that's already in bootloader mode with retry logic.
     ///
     /// This clears any stale state from previous failed DFU attempts
     /// by toggling DTR at the normal DFU baud rate.
+    ///
+    /// Includes retry logic to handle transient port access failures.
     pub fn reset_bootloader(port_name: &str) -> DfuResult<()> {
         let normalized = normalize_port_name(port_name);
+        let mut last_error: Option<DfuError> = None;
 
-        let mut port = serialport::new(&normalized, DFU_BAUD_RATE)
+        for attempt in 0..=MAX_BOOTLOADER_RESET_RETRIES {
+            match Self::reset_bootloader_once(&normalized) {
+                Ok(()) => return Ok(()),
+                Err(e) => {
+                    last_error = Some(e);
+                    if attempt < MAX_BOOTLOADER_RESET_RETRIES {
+                        // Wait before retry
+                        std::thread::sleep(Duration::from_millis(BOOTLOADER_RESET_RETRY_DELAY_MS));
+                    }
+                }
+            }
+        }
+
+        // All retries exhausted
+        Err(last_error.unwrap_or(DfuError::NoDeviceFound))
+    }
+
+    /// Single attempt at bootloader reset.
+    fn reset_bootloader_once(normalized_port: &str) -> DfuResult<()> {
+        let mut port = serialport::new(normalized_port, DFU_BAUD_RATE)
             .timeout(Duration::from_millis(100))
             .open()
             .map_err(DfuError::Serial)?;
