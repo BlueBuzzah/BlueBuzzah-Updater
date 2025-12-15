@@ -47,7 +47,6 @@ function App() {
     selectedProfile,
     selectedDevices: therapyDevices,
     result: therapyResult,
-    selectProfile,
     toggleDevice,
     nextStep: nextTherapyStep,
     previousStep: previousTherapyStep,
@@ -149,8 +148,9 @@ function App() {
     }
   };
 
-  const handleProfileSelect = (profile: TherapyProfile) => {
-    selectProfile(profile);
+  const handleProfileSelect = (_profile: TherapyProfile) => {
+    // ProfileSelection handles syncing to therapyStore internally
+    // We just need to navigate to device selection step
     nextTherapyStep();
   };
 
@@ -249,10 +249,7 @@ function App() {
       switch (therapyStep) {
         case 0:
           return (
-            <ProfileSelection
-              selectedProfile={selectedProfile}
-              onSelect={handleProfileSelect}
-            />
+            <ProfileSelection onSelect={handleProfileSelect} />
           );
         case 1:
           return selectedProfile ? (

@@ -6,6 +6,7 @@ import type {
   TherapyConfigResult,
   TherapyState,
 } from '@/types';
+import { useSettingsStore } from './settingsStore';
 
 interface TherapyStore extends TherapyState {
   // Navigation
@@ -15,6 +16,8 @@ interface TherapyStore extends TherapyState {
 
   // Profile selection
   selectProfile: (profile: TherapyProfile) => void;
+  /** Sync selectedProfile from settingsStore (called when entering workflow) */
+  syncProfileFromSettings: () => void;
 
   // Device management
   setDevices: (devices: Device[]) => void;
@@ -52,6 +55,17 @@ export const useTherapyStore = create<TherapyStore>((set) => ({
     set((state) => ({ step: Math.max(state.step - 1, 0) })),
 
   selectProfile: (profile) => set({ selectedProfile: profile }),
+
+  /**
+   * Copy the persisted selectedProfile from settingsStore to this workflow.
+   * Called when entering the therapy configuration workflow.
+   */
+  syncProfileFromSettings: () => {
+    const settingsProfile = useSettingsStore.getState().settings.selectedProfile;
+    if (settingsProfile) {
+      set({ selectedProfile: settingsProfile });
+    }
+  },
 
   setDevices: (devices) => set({ selectedDevices: devices }),
 

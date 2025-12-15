@@ -35,6 +35,12 @@ pub struct AdvancedSettings {
     #[serde(default)]
     pub debug_mode: bool,
 
+    /// Selected therapy profile to use for device configuration.
+    /// Valid values: "REGULAR", "NOISY", "HYBRID", "GENTLE"
+    /// Persisted so users don't have to re-select on each session.
+    #[serde(default)]
+    pub selected_profile: Option<String>,
+
     // =========================================================================
     // EXTENSIBILITY: Add new settings below
     // =========================================================================
@@ -183,6 +189,7 @@ mod tests {
         let settings = AdvancedSettings {
             disable_led_during_therapy: true,
             debug_mode: false,
+            selected_profile: None,
         };
         let commands = settings.to_pre_profile_commands();
 
@@ -196,6 +203,7 @@ mod tests {
         let settings = AdvancedSettings {
             disable_led_during_therapy: false,
             debug_mode: true,
+            selected_profile: None,
         };
         let commands = settings.to_pre_profile_commands();
 
@@ -209,6 +217,7 @@ mod tests {
         let settings = AdvancedSettings {
             disable_led_during_therapy: true,
             debug_mode: true,
+            selected_profile: None,
         };
         let commands = settings.to_pre_profile_commands();
 
@@ -230,6 +239,7 @@ mod tests {
         let settings = AdvancedSettings {
             disable_led_during_therapy: true,
             debug_mode: true,
+            selected_profile: Some("REGULAR".to_string()),
         };
         manager.save(&settings).unwrap();
 
@@ -246,14 +256,23 @@ mod tests {
         let custom_led = AdvancedSettings {
             disable_led_during_therapy: true,
             debug_mode: false,
+            selected_profile: None,
         };
         assert!(custom_led.has_non_default_settings());
 
         let custom_debug = AdvancedSettings {
             disable_led_during_therapy: false,
             debug_mode: true,
+            selected_profile: None,
         };
         assert!(custom_debug.has_non_default_settings());
+
+        let custom_profile = AdvancedSettings {
+            disable_led_during_therapy: false,
+            debug_mode: false,
+            selected_profile: Some("NOISY".to_string()),
+        };
+        assert!(custom_profile.has_non_default_settings());
     }
 
     #[test]
@@ -261,6 +280,7 @@ mod tests {
         let settings = AdvancedSettings {
             disable_led_during_therapy: true,
             debug_mode: true,
+            selected_profile: Some("REGULAR".to_string()),
         };
         let json = serde_json::to_string(&settings).unwrap();
 
@@ -269,5 +289,7 @@ mod tests {
         assert!(!json.contains("disable_led_during_therapy"));
         assert!(json.contains("debugMode"));
         assert!(!json.contains("debug_mode"));
+        assert!(json.contains("selectedProfile"));
+        assert!(!json.contains("selected_profile"));
     }
 }

@@ -102,6 +102,8 @@ export interface ValidationResult {
 export interface AdvancedSettings {
   disableLedDuringTherapy: boolean;
   debugMode: boolean;
+  /** Selected therapy profile, persisted for convenience */
+  selectedProfile?: TherapyProfile | null;
 }
 
 export interface WizardState {

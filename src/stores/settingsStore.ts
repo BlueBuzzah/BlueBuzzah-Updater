@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { invoke } from '@tauri-apps/api/core';
-import type { AdvancedSettings } from '@/types';
+import type { AdvancedSettings, TherapyProfile } from '@/types';
 
 /**
  * Default advanced settings values.
@@ -10,6 +10,7 @@ import type { AdvancedSettings } from '@/types';
 const defaultSettings: AdvancedSettings = {
   disableLedDuringTherapy: false,
   debugMode: false,
+  selectedProfile: null,
 };
 
 interface SettingsStore {
@@ -20,6 +21,7 @@ interface SettingsStore {
 
   // Actions
   setSettings: (settings: Partial<AdvancedSettings>) => void;
+  setSelectedProfile: (profile: TherapyProfile | null) => void;
   loadFromBackend: () => Promise<void>;
   syncToBackend: () => Promise<void>;
   reset: () => void;
@@ -49,6 +51,17 @@ export const useSettingsStore = create<SettingsStore>()(
           settings: { ...state.settings, ...newSettings },
         }));
         // Auto-sync to backend (fire and forget, don't block UI)
+        get().syncToBackend();
+      },
+
+      /**
+       * Convenience method to set just the selected profile.
+       * Syncs to backend automatically.
+       */
+      setSelectedProfile: (profile) => {
+        set((state) => ({
+          settings: { ...state.settings, selectedProfile: profile },
+        }));
         get().syncToBackend();
       },
 

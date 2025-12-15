@@ -6,6 +6,7 @@ import {
 	CardHeader,
 	CardTitle,
 } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import {
@@ -16,9 +17,11 @@ import {
 } from '@/components/ui/tooltip';
 import { THERAPY_PROFILES } from '@/lib/therapy-profiles';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { useTherapyStore } from '@/stores/therapyStore';
 import type { TherapyProfile } from '@/types';
 import {
 	Activity,
+	ArrowRight,
 	CheckCircle2,
 	Feather,
 	Gauge,
@@ -27,7 +30,9 @@ import {
 } from 'lucide-react';
 
 interface ProfileSelectionProps {
-  selectedProfile: TherapyProfile | null;
+  /** @deprecated - selectedProfile is now read from settingsStore */
+  selectedProfile?: TherapyProfile | null;
+  /** Called when "Apply Settings" is clicked - syncs to therapyStore and navigates */
   onSelect: (profile: TherapyProfile) => void;
 }
 
@@ -39,11 +44,20 @@ const profileIcons: Record<TherapyProfile, React.ReactNode> = {
 };
 
 export function ProfileSelection({
-  selectedProfile,
   onSelect,
 }: ProfileSelectionProps) {
   const [showAdvanced, setShowAdvanced] = useState(false);
-  const { settings, setSettings, loadFromBackend, isLoaded } = useSettingsStore();
+  const {
+    settings,
+    setSettings,
+    setSelectedProfile,
+    loadFromBackend,
+    isLoaded,
+  } = useSettingsStore();
+  const { selectProfile } = useTherapyStore();
+
+  // Read persisted profile from settings
+  const selectedProfile = settings.selectedProfile ?? null;
 
   // Load settings from backend on mount
   useEffect(() => {
@@ -51,6 +65,21 @@ export function ProfileSelection({
       loadFromBackend();
     }
   }, [isLoaded, loadFromBackend]);
+
+  // Handle profile card click - update settingsStore (persisted)
+  const handleProfileClick = (profile: TherapyProfile) => {
+    setSelectedProfile(profile);
+  };
+
+  // Handle Apply Settings - sync to therapyStore and navigate
+  const handleApplySettings = () => {
+    if (selectedProfile) {
+      // Sync to therapy workflow store
+      selectProfile(selectedProfile);
+      // Navigate to device selection
+      onSelect(selectedProfile);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -178,7 +207,7 @@ export function ProfileSelection({
               className={`transition-all cursor-pointer hover:shadow-lg hover:border-primary/50 group ${
                 isSelected ? 'ring-2 ring-primary' : ''
               }`}
-              onClick={() => onSelect(profile.id)}
+              onClick={() => handleProfileClick(profile.id)}
             >
               <CardHeader className="text-center pb-2">
                 <div className="flex items-center justify-between mb-2">
@@ -229,6 +258,19 @@ export function ProfileSelection({
           </div>
         </CardContent>
       </Card>
+
+      {/* Apply Settings Button */}
+      <div className="flex justify-end pt-2">
+        <Button
+          size="lg"
+          onClick={handleApplySettings}
+          disabled={!selectedProfile}
+          className="min-w-[200px]"
+        >
+          Apply Settings
+          <ArrowRight className="ml-2 h-4 w-4" />
+        </Button>
+      </div>
     </div>
   );
 }
