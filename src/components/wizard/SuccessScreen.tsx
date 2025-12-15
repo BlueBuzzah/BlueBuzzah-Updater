@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -20,7 +19,7 @@ import {
 	RotateCcw,
 	X,
 } from 'lucide-react';
-import React from 'react';
+import React, { useState } from 'react';
 
 interface SuccessScreenProps {
   release: FirmwareRelease;
@@ -135,9 +134,9 @@ export function SuccessScreen({
                 1
               </span>
               <div>
-                <p className="font-medium">Power On PRIMARY First</p>
+                <p className="font-medium">Disconnect device(s) from your computer</p>
                 <p className="text-muted-foreground">
-                  Start the PRIMARY device to initialize coordination
+                  Disconnect your updated BlueBuzzah device(s) from your computer before use.
                 </p>
               </div>
             </li>
@@ -146,9 +145,9 @@ export function SuccessScreen({
                 2
               </span>
               <div>
-                <p className="font-medium">Power On SECONDARY Within 15s</p>
+                <p className="font-medium">Power on both devices within 15sec</p>
                 <p className="text-muted-foreground">
-                  Start the SECONDARY device within 15 seconds for pairing
+                  Power on both device(s) within approximately 15 seconds for pairing.
                 </p>
               </div>
             </li>

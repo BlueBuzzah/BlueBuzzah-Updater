@@ -237,7 +237,8 @@ export function FirmwareSelection({
       <div className="flex flex-col gap-4">
         {filteredReleases.map((release, index) => {
           const isExpanded = expandedReleases.has(release.tagName);
-          const needsExpansion = release.releaseNotes.length > 150;
+          // Lower threshold - markdown with newlines/bullets renders taller than plain text
+          const needsExpansion = release.releaseNotes.length > 100;
 
           return (
             <Card

@@ -1,8 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
-import { SuccessScreen } from './SuccessScreen';
 import { useWizardStore } from '@/stores/wizardStore';
-import { createMockRelease, createMockDevice } from '@/test/factories';
+import { createMockDevice, createMockRelease } from '@/test/factories';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { SuccessScreen } from './SuccessScreen';
 
 describe('SuccessScreen', () => {
   const mockOnReset = vi.fn();
@@ -143,7 +143,7 @@ describe('SuccessScreen', () => {
       expect(screen.getByText('Next Steps')).toBeInTheDocument();
     });
 
-    it('shows power on primary instruction', () => {
+    it('shows disconnect devices instruction', () => {
       render(
         <SuccessScreen
           release={mockRelease}
@@ -153,10 +153,10 @@ describe('SuccessScreen', () => {
         />
       );
 
-      expect(screen.getByText('Power On PRIMARY First')).toBeInTheDocument();
+      expect(screen.getByText('Disconnect device(s) from your computer')).toBeInTheDocument();
     });
 
-    it('shows power on secondary instruction', () => {
+    it('shows power on devices instruction', () => {
       render(
         <SuccessScreen
           release={mockRelease}
@@ -166,7 +166,7 @@ describe('SuccessScreen', () => {
         />
       );
 
-      expect(screen.getByText('Power On SECONDARY Within 15s')).toBeInTheDocument();
+      expect(screen.getByText('Power on both devices within 15sec')).toBeInTheDocument();
     });
   });
 
