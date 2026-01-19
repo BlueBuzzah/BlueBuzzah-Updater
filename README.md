@@ -58,16 +58,31 @@ npm run tauri:build
 
 ### Project Structure
 
-```
-src/
-├── components/     # React components (UI, wizard steps, layout)
-├── services/       # Business logic (firmware, device operations)
-├── stores/         # Zustand state management
-├── types/          # TypeScript type definitions
-└── lib/            # Utilities and config templates
-
-src-tauri/
-└── src/commands/   # Rust commands (device.rs, firmware.rs)
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {
+  'primaryColor': '#0d3a4d',
+  'primaryTextColor': '#fafafa',
+  'primaryBorderColor': '#35B6F2',
+  'lineColor': '#35B6F2',
+  'secondaryColor': '#05212D',
+  'tertiaryColor': '#0a0a0a'
+}}}%%
+mindmap
+  root((BlueBuzzah Updater))
+    src/
+      components/
+        UI, wizard steps, layout
+      services/
+        Business logic
+      stores/
+        Zustand state
+      types/
+        TypeScript definitions
+      lib/
+        Utilities, templates
+    src-tauri/
+      src/commands/
+        device.rs, firmware.rs
 ```
 
 ### Wizard Flow
