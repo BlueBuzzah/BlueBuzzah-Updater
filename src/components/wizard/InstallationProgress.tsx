@@ -53,7 +53,7 @@ export function InstallationProgress({
   onComplete,
   onProgressUpdate,
 }: InstallationProgressProps) {
-  const { reset, updateDeviceInfo, addLog: storeAddLog, logs } = useWizardStore();
+  const { updateDeviceInfo, addLog: storeAddLog, logs } = useWizardStore();
   const { toast } = useToast();
   const [stage, setStage] = useState<'validating' | 'downloading' | 'installing' | 'complete'>(
     'validating'
@@ -68,6 +68,7 @@ export function InstallationProgress({
   const [showStopConfirm, setShowStopConfirm] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const hasStartedRef = useRef(false);
+  const completedDevices = useRef<Set<string>>(new Set());
 
   // Track retry attempts for auto-expanding logs
   const [retryCount, setRetryCount] = useState(0);
@@ -111,8 +112,24 @@ export function InstallationProgress({
     });
   };
 
-  const handleStartOver = () => {
-    reset();
+  const handleRetry = () => {
+    const retryDevices = updatedDevices.filter(
+      (d) => !completedDevices.current.has(d.path)
+    );
+    setError(null);
+    setStage('validating');
+    setDownloadProgress(0);
+    setDeviceProgress((prev) => {
+      const next = new Map(prev);
+      for (const d of retryDevices) {
+        next.delete(d.path);
+      }
+      return next;
+    });
+    setRetryCount(0);
+    setIsCancelling(false);
+    addLog('--- Retrying failed devices ---');
+    startInstallation(retryDevices);
   };
 
   const handleStopClick = () => {
@@ -130,18 +147,20 @@ export function InstallationProgress({
     }
   };
 
-  const startInstallation = async () => {
+  const startInstallation = async (devicesToFlash?: Device[]) => {
+    const targetDevices = devicesToFlash ?? updatedDevices;
+
     try {
       // Stage 0: Validate devices
       addLog('Validating devices before installation...');
       setStage('validating');
 
-      const validationResults = await deviceService.validateDevices(devices);
+      const validationResults = await deviceService.validateDevices(targetDevices);
       let hasValidationErrors = false;
       const validationErrors: string[] = [];
 
       validationResults.forEach((result, devicePath) => {
-        const device = devices.find((d) => d.path === devicePath);
+        const device = targetDevices.find((d) => d.path === devicePath);
         const deviceLabel = device?.label || devicePath;
 
         if (!result.valid) {
@@ -178,9 +197,9 @@ export function InstallationProgress({
 
       // Stage 2: Install on devices
       setStage('installing');
-      addLog(`Installing firmware on ${devices.length} device(s)...`);
+      addLog(`Installing firmware on ${targetDevices.length} device(s)...`);
 
-      for (const device of updatedDevices) {
+      for (const device of targetDevices) {
         addLog(`Starting update for ${device.label} (${device.role})...`);
 
         await deviceService.deployFirmware(
@@ -236,6 +255,7 @@ export function InstallationProgress({
           }
         );
 
+        completedDevices.current.add(device.path);
         addLog(`✓ Successfully updated ${device.label}`);
       }
 
@@ -404,9 +424,9 @@ export function InstallationProgress({
             )}
 
             <div className="pt-2">
-              <Button onClick={handleStartOver}>
+              <Button onClick={handleRetry}>
                 <RotateCcw className="h-4 w-4 mr-2" />
-                Start Over
+                Retry
               </Button>
             </div>
           </CardContent>

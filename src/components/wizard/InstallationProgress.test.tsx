@@ -367,7 +367,7 @@ describe('InstallationProgress', () => {
       }, { timeout: 3000 });
     });
 
-    it('shows start over button on error', async () => {
+    it('shows retry button on error', async () => {
       vi.mocked(deviceService.validateDevices).mockRejectedValue(
         new Error('Failed')
       );
@@ -382,7 +382,7 @@ describe('InstallationProgress', () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByRole('button', { name: /start over/i })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
       });
     });
 
