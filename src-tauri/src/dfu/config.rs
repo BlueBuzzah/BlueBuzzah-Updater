@@ -49,6 +49,10 @@ pub const SERIAL_WRITE_TIMEOUT: Duration = Duration::from_millis(1000);
 /// The bootloader may take time to process packets during flash operations.
 pub const ACK_TIMEOUT_MS: u64 = 5000;
 
+/// Overall timeout for the firmware data transfer phase (in seconds).
+/// Prevents indefinite hangs if the bootloader stops responding mid-transfer.
+pub const FIRMWARE_TRANSFER_TIMEOUT_SECS: u64 = 300;
+
 /// Default timeout waiting for bootloader to appear after 1200 baud touch.
 /// Use get_bootloader_timeout() for platform-specific values.
 pub const BOOTLOADER_TIMEOUT_MS: u64 = 15_000;

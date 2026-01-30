@@ -216,15 +216,22 @@ pub fn get_device_by_port(port_name: &str) -> Option<Nrf52Device> {
 /// The detected bootloader device, or an error if timeout expires
 #[allow(dead_code)]
 pub fn wait_for_bootloader_by_serial(serial: &str, timeout_ms: u64) -> DfuResult<Nrf52Device> {
+    const REQUIRED_CONSECUTIVE: u32 = 2;
     let timeout = Duration::from_millis(timeout_ms);
     let start = Instant::now();
+    let mut consecutive_detections: u32 = 0;
 
     while start.elapsed() < timeout {
         if let Some(device) = find_nrf52_devices()
             .into_iter()
             .find(|d| d.in_bootloader && d.serial_number.as_deref() == Some(serial))
         {
-            return Ok(device);
+            consecutive_detections += 1;
+            if consecutive_detections >= REQUIRED_CONSECUTIVE {
+                return Ok(device);
+            }
+        } else {
+            consecutive_detections = 0;
         }
         std::thread::sleep(PORT_SCAN_INTERVAL);
     }
@@ -245,15 +252,22 @@ pub fn wait_for_bootloader_by_serial(serial: &str, timeout_ms: u64) -> DfuResult
 /// # Returns
 /// The detected application device, or an error if timeout expires
 pub fn wait_for_application_by_serial(serial: &str, timeout_ms: u64) -> DfuResult<Nrf52Device> {
+    const REQUIRED_CONSECUTIVE: u32 = 2;
     let timeout = Duration::from_millis(timeout_ms);
     let start = Instant::now();
+    let mut consecutive_detections: u32 = 0;
 
     while start.elapsed() < timeout {
         if let Some(device) = find_nrf52_devices()
             .into_iter()
             .find(|d| !d.in_bootloader && d.serial_number.as_deref() == Some(serial))
         {
-            return Ok(device);
+            consecutive_detections += 1;
+            if consecutive_detections >= REQUIRED_CONSECUTIVE {
+                return Ok(device);
+            }
+        } else {
+            consecutive_detections = 0;
         }
         std::thread::sleep(PORT_SCAN_INTERVAL);
     }
@@ -276,15 +290,22 @@ pub fn wait_for_bootloader_flexible(
     identifier: &DeviceIdentifier,
     timeout_ms: u64,
 ) -> DfuResult<Nrf52Device> {
+    const REQUIRED_CONSECUTIVE: u32 = 2;
     let timeout = Duration::from_millis(timeout_ms);
     let start = Instant::now();
+    let mut consecutive_detections: u32 = 0;
 
     while start.elapsed() < timeout {
         if let Some(device) = find_nrf52_devices()
             .into_iter()
             .find(|d| d.in_bootloader && identifier.matches(d))
         {
-            return Ok(device);
+            consecutive_detections += 1;
+            if consecutive_detections >= REQUIRED_CONSECUTIVE {
+                return Ok(device);
+            }
+        } else {
+            consecutive_detections = 0;
         }
         std::thread::sleep(PORT_SCAN_INTERVAL);
     }
@@ -307,15 +328,22 @@ pub fn wait_for_application_flexible(
     identifier: &DeviceIdentifier,
     timeout_ms: u64,
 ) -> DfuResult<Nrf52Device> {
+    const REQUIRED_CONSECUTIVE: u32 = 2;
     let timeout = Duration::from_millis(timeout_ms);
     let start = Instant::now();
+    let mut consecutive_detections: u32 = 0;
 
     while start.elapsed() < timeout {
         if let Some(device) = find_nrf52_devices()
             .into_iter()
             .find(|d| !d.in_bootloader && identifier.matches(d))
         {
-            return Ok(device);
+            consecutive_detections += 1;
+            if consecutive_detections >= REQUIRED_CONSECUTIVE {
+                return Ok(device);
+            }
+        } else {
+            consecutive_detections = 0;
         }
         std::thread::sleep(PORT_SCAN_INTERVAL);
     }

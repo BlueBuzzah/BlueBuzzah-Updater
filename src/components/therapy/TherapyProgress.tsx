@@ -48,6 +48,7 @@ export function TherapyProgress({
   const [configuredCount, setConfiguredCount] = useState(0);
   const [showLogs, setShowLogs] = useState(false);
   const hasStartedRef = useRef(false);
+  const cancelledRef = useRef(false);
 
   const profileInfo = getProfileInfo(profile);
 
@@ -69,6 +70,10 @@ export function TherapyProgress({
     if (hasStartedRef.current) return;
     hasStartedRef.current = true;
     startConfiguration();
+
+    return () => {
+      cancelledRef.current = true;
+    };
   }, []);
 
   const startConfiguration = async () => {
@@ -85,6 +90,12 @@ export function TherapyProgress({
     }[] = [];
 
     for (const device of devices) {
+      // Check cancellation before starting next device
+      if (cancelledRef.current) {
+        addLog(`Skipping ${device.label} — configuration cancelled`);
+        break;
+      }
+
       addLog(`Starting configuration for ${device.label}...`);
       try {
         await therapyService.configureProfile(device, profile, (progress) => {
@@ -129,6 +140,11 @@ export function TherapyProgress({
     }
 
     const allSuccess = results.every((r) => r.success);
+
+    if (cancelledRef.current) {
+      addLog('Configuration cancelled');
+      return;
+    }
 
     if (allSuccess) {
       addLog('All devices configured successfully!');

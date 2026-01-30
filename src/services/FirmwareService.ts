@@ -26,7 +26,30 @@ export class FirmwareService implements IFirmwareRepository {
       // Verify and clean stale cache entries before loading
       await this.verifyAndCleanCache();
 
-      const response = await fetch(this.GITHUB_API_URL);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 15_000);
+
+      let response: Response;
+      try {
+        response = await fetch(this.GITHUB_API_URL, { signal: controller.signal });
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          throw new Error('Request timed out while fetching firmware releases. Check your internet connection and try again.');
+        }
+        throw error;
+      } finally {
+        clearTimeout(timeoutId);
+      }
+
+      if (response.status === 403 || response.status === 429) {
+        const resetHeader = response.headers.get('X-RateLimit-Reset');
+        if (resetHeader) {
+          const resetTime = new Date(parseInt(resetHeader, 10) * 1000);
+          const waitMinutes = Math.max(1, Math.ceil((resetTime.getTime() - Date.now()) / 60_000));
+          throw new Error(`GitHub API rate limit exceeded. Try again in ${waitMinutes} minute${waitMinutes === 1 ? '' : 's'}.`);
+        }
+        throw new Error('GitHub API rate limit exceeded. Try again later.');
+      }
 
       if (!response.ok) {
         throw new Error(`GitHub API error: ${response.statusText}`);

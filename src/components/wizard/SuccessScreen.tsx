@@ -15,9 +15,9 @@ import {
 	AlertCircle,
 	CheckCircle2,
 	ClipboardCopy,
-	HardDrive,
 	RotateCcw,
 	X,
+	XCircle,
 } from 'lucide-react';
 import React, { useState } from 'react';
 
@@ -35,8 +35,13 @@ export function SuccessScreen({
   onClose,
 }: SuccessScreenProps) {
   const { toast } = useToast();
-  const { logs } = useWizardStore();
+  const { logs, updateResult } = useWizardStore();
   const [showLogs, setShowLogs] = useState(false);
+
+  const successCount = updateResult?.deviceUpdates?.filter((r) => r.success).length ?? devices.length;
+  const failCount = updateResult?.deviceUpdates?.filter((r) => !r.success).length ?? 0;
+  const isPartialSuccess = failCount > 0 && successCount > 0;
+  const isAllFailed = failCount > 0 && successCount === 0;
 
   const exportLogs = () => {
     const logsText = logs.join('\n');
@@ -53,15 +58,33 @@ export function SuccessScreen({
       <div className="text-center space-y-4">
         <div className="flex justify-center">
           <div className="relative">
-            <CheckCircle2 className="h-20 w-20 text-primary animate-in zoom-in-50 duration-300" />
-            <div className="absolute inset-0 bg-primary rounded-full blur-xl opacity-20 animate-pulse" />
+            {isAllFailed ? (
+              <XCircle className="h-20 w-20 text-destructive animate-in zoom-in-50 duration-300" />
+            ) : isPartialSuccess ? (
+              <AlertCircle className="h-20 w-20 text-amber-500 animate-in zoom-in-50 duration-300" />
+            ) : (
+              <CheckCircle2 className="h-20 w-20 text-primary animate-in zoom-in-50 duration-300" />
+            )}
+            <div className={`absolute inset-0 rounded-full blur-xl opacity-20 animate-pulse ${
+              isAllFailed ? 'bg-destructive' : isPartialSuccess ? 'bg-amber-500' : 'bg-primary'
+            }`} />
           </div>
         </div>
 
         <div>
-          <h2 className="text-3xl font-bold mb-2">Installation Complete!</h2>
+          <h2 className="text-3xl font-bold mb-2">
+            {isAllFailed
+              ? 'Installation Failed'
+              : isPartialSuccess
+              ? 'Partial Success'
+              : 'Installation Complete!'}
+          </h2>
           <p className="text-muted-foreground">
-            Your devices have been successfully updated
+            {isAllFailed
+              ? 'All devices failed to update'
+              : isPartialSuccess
+              ? `${successCount} of ${devices.length} devices updated successfully`
+              : 'Your devices have been successfully updated'}
           </p>
         </div>
       </div>
@@ -90,32 +113,54 @@ export function SuccessScreen({
         <CardHeader>
           <CardTitle className="text-base">Updated Devices</CardTitle>
           <CardDescription>
-            {devices.length} device{devices.length !== 1 ? 's' : ''} updated
-            successfully
+            {failCount > 0
+              ? `${successCount} of ${devices.length} device${devices.length !== 1 ? 's' : ''} updated successfully`
+              : `${devices.length} device${devices.length !== 1 ? 's' : ''} updated successfully`}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          {devices.map((device, index) => (
-            <React.Fragment key={device.path}>
-              {index > 0 && <Separator />}
-              <div className="flex items-center justify-between py-2">
-                <div className="flex items-center gap-3">
-                  <HardDrive className="h-5 w-5 text-muted-foreground" />
-                  <div>
-                    <p className="font-medium">{device.label}</p>
-                    <p className="text-sm text-muted-foreground">
-                      {device.path}
-                    </p>
+          {devices.map((device, index) => {
+            const deviceResult = updateResult?.deviceUpdates?.find(
+              (r) => r.device.path === device.path
+            );
+            const deviceFailed = deviceResult ? !deviceResult.success : false;
+
+            return (
+              <React.Fragment key={device.path}>
+                {index > 0 && <Separator />}
+                <div className="flex items-center justify-between py-2">
+                  <div className="flex items-center gap-3">
+                    {deviceFailed ? (
+                      <XCircle className="h-5 w-5 text-destructive" />
+                    ) : (
+                      <CheckCircle2 className="h-5 w-5 text-primary" />
+                    )}
+                    <div>
+                      <p className="font-medium">{device.label}</p>
+                      <p className="text-sm text-muted-foreground">
+                        {device.path}
+                      </p>
+                      {deviceFailed && deviceResult?.error && (
+                        <p className="text-sm text-destructive mt-1">
+                          {deviceResult.error}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {deviceFailed && (
+                      <Badge variant="destructive">Failed</Badge>
+                    )}
+                    <Badge
+                      variant={device.role === 'PRIMARY' ? 'default' : 'secondary'}
+                    >
+                      {device.role}
+                    </Badge>
                   </div>
                 </div>
-                <Badge
-                  variant={device.role === 'PRIMARY' ? 'default' : 'secondary'}
-                >
-                  {device.role}
-                </Badge>
-              </div>
-            </React.Fragment>
-          ))}
+              </React.Fragment>
+            );
+          })}
         </CardContent>
       </Card>
 

@@ -30,9 +30,9 @@ vi.mock('./components/wizard/DeviceSelection', () => ({
 }));
 
 vi.mock('./components/wizard/InstallationProgress', () => ({
-  InstallationProgress: ({ onComplete }: { onComplete: (s: boolean) => void }) => (
+  InstallationProgress: ({ onComplete }: { onComplete: (r: { success: boolean; message: string; deviceUpdates: unknown[] }) => void }) => (
     <div data-testid="installation-progress">
-      <button onClick={() => onComplete(true)}>Complete</button>
+      <button onClick={() => onComplete({ success: true, message: 'All devices updated', deviceUpdates: [] })}>Complete</button>
     </div>
   ),
 }));
@@ -284,6 +284,63 @@ describe('App', () => {
       const store = useWizardStore.getState();
       store.selectRelease(createMockRelease());
       store.setDevices([createMockDevice({ role: 'PRIMARY' })]);
+      store.setStep(1);
+
+      render(<App />);
+      fireEvent.click(screen.getByText('Update Devices'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('device-selection')).toBeInTheDocument();
+      });
+
+      expect(screen.getByRole('button', { name: /start installation/i })).toBeEnabled();
+    });
+
+    it('start installation disabled when two devices have same role (both PRIMARY)', async () => {
+      const store = useWizardStore.getState();
+      store.selectRelease(createMockRelease());
+      store.setDevices([
+        createMockDevice({ path: '/dev/a', role: 'PRIMARY' }),
+        createMockDevice({ path: '/dev/b', role: 'PRIMARY' }),
+      ]);
+      store.setStep(1);
+
+      render(<App />);
+      fireEvent.click(screen.getByText('Update Devices'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('device-selection')).toBeInTheDocument();
+      });
+
+      expect(screen.getByRole('button', { name: /start installation/i })).toBeDisabled();
+    });
+
+    it('start installation disabled when two devices have same role (both SECONDARY)', async () => {
+      const store = useWizardStore.getState();
+      store.selectRelease(createMockRelease());
+      store.setDevices([
+        createMockDevice({ path: '/dev/a', role: 'SECONDARY' }),
+        createMockDevice({ path: '/dev/b', role: 'SECONDARY' }),
+      ]);
+      store.setStep(1);
+
+      render(<App />);
+      fireEvent.click(screen.getByText('Update Devices'));
+
+      await waitFor(() => {
+        expect(screen.getByTestId('device-selection')).toBeInTheDocument();
+      });
+
+      expect(screen.getByRole('button', { name: /start installation/i })).toBeDisabled();
+    });
+
+    it('start installation enabled when two devices have complementary roles', async () => {
+      const store = useWizardStore.getState();
+      store.selectRelease(createMockRelease());
+      store.setDevices([
+        createMockDevice({ path: '/dev/a', role: 'PRIMARY' }),
+        createMockDevice({ path: '/dev/b', role: 'SECONDARY' }),
+      ]);
       store.setStep(1);
 
       render(<App />);

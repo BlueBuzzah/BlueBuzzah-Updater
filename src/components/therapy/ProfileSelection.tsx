@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
 	Card,
 	CardContent,
@@ -15,6 +15,7 @@ import {
 	TooltipProvider,
 	TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { useToast } from '@/components/ui/use-toast';
 import { THERAPY_PROFILES } from '@/lib/therapy-profiles';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useTherapyStore } from '@/stores/therapyStore';
@@ -47,12 +48,14 @@ export function ProfileSelection({
   onSelect,
 }: ProfileSelectionProps) {
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const { toast } = useToast();
   const {
     settings,
     setSettings,
     setSelectedProfile,
     loadFromBackend,
     isLoaded,
+    loadError,
   } = useSettingsStore();
   const { selectProfile } = useTherapyStore();
 
@@ -65,6 +68,19 @@ export function ProfileSelection({
       loadFromBackend();
     }
   }, [isLoaded, loadFromBackend]);
+
+  // Show toast when settings fail to load from backend (fire once per error)
+  const shownErrorRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (loadError && loadError !== shownErrorRef.current) {
+      shownErrorRef.current = loadError;
+      toast({
+        variant: 'destructive',
+        title: 'Settings Load Error',
+        description: `Could not load saved settings: ${loadError}. Using defaults.`,
+      });
+    }
+  }, [loadError, toast]);
 
   // Handle profile card click - update settingsStore (persisted)
   const handleProfileClick = (profile: TherapyProfile) => {

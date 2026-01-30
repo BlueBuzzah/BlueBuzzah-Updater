@@ -4,6 +4,7 @@ use std::path::Path;
 use tauri::Manager;
 use crate::cache::{CacheManager, CachedFirmwareMetadata, FirmwareCacheIndex};
 use chrono;
+use std::time::Duration;
 use tauri_plugin_http::reqwest;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -32,22 +33,50 @@ pub async fn download_firmware(
         .map_err(|e| format!("Failed to create firmware directory: {}", e))?;
 
     let firmware_file = firmware_dir.join(format!("{}.zip", version));
+    let tmp_file = firmware_dir.join(format!("{}.zip.tmp", version));
 
-    // Download the file
-    let response = reqwest::get(&url)
+    // Download the file with connect and total timeouts
+    let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(30))
+        .timeout(Duration::from_secs(120))
+        .build()
+        .map_err(|e| format!("Failed to create HTTP client: {}", e))?;
+
+    let response = client
+        .get(&url)
+        .send()
         .await
         .map_err(|e| format!("Failed to download firmware: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!(
+            "Firmware download failed with HTTP status {}",
+            response.status()
+        ));
+    }
 
     let bytes = response
         .bytes()
         .await
         .map_err(|e| format!("Failed to read firmware data: {}", e))?;
 
-    fs::write(&firmware_file, &bytes)
-        .map_err(|e| format!("Failed to write firmware file: {}", e))?;
+    // Write to temp file first to prevent partial downloads from corrupting cache
+    fs::write(&tmp_file, &bytes).map_err(|e| {
+        let _ = fs::remove_file(&tmp_file);
+        format!("Failed to write firmware file: {}", e)
+    })?;
 
-    // Calculate SHA256 hash
-    let sha256_hash = CacheManager::calculate_sha256(&firmware_file)?;
+    // Calculate SHA256 hash on the temp file
+    let sha256_hash = CacheManager::calculate_sha256(&tmp_file).map_err(|e| {
+        let _ = fs::remove_file(&tmp_file);
+        format!("Failed to calculate hash: {}", e)
+    })?;
+
+    // Atomic rename from temp to final path
+    fs::rename(&tmp_file, &firmware_file).map_err(|e| {
+        let _ = fs::remove_file(&tmp_file);
+        format!("Failed to finalize firmware file: {}", e)
+    })?;
 
     // Get file size
     let file_size = fs::metadata(&firmware_file)

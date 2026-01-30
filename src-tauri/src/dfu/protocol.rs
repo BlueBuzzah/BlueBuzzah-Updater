@@ -14,10 +14,11 @@ use serde::{Deserialize, Serialize};
 
 use super::config::{
     calculate_erase_wait_time, get_bootloader_timeout, get_reboot_timeout, ACK_TIMEOUT_MS,
-    CONFIG_RETRY_DELAY_MS, FLASH_PAGE_WRITE_TIME_MS, FRAMES_PER_FLASH_PAGE, MAX_CONFIG_RETRIES,
-    MAX_PACKET_RETRIES, PROFILE_CONFIG_TIMEOUT_MS, PROFILE_GENTLE_COMMAND, PROFILE_HYBRID_COMMAND,
-    PROFILE_NOISY_COMMAND, PROFILE_REGULAR_COMMAND, RETRY_BASE_DELAY_MS, ROLE_CONFIG_TIMEOUT_MS,
-    ROLE_PRIMARY_COMMAND, ROLE_SECONDARY_COMMAND,
+    CONFIG_RETRY_DELAY_MS, FIRMWARE_TRANSFER_TIMEOUT_SECS, FLASH_PAGE_WRITE_TIME_MS,
+    FRAMES_PER_FLASH_PAGE, MAX_CONFIG_RETRIES, MAX_PACKET_RETRIES, PROFILE_CONFIG_TIMEOUT_MS,
+    PROFILE_GENTLE_COMMAND, PROFILE_HYBRID_COMMAND, PROFILE_NOISY_COMMAND,
+    PROFILE_REGULAR_COMMAND, RETRY_BASE_DELAY_MS, ROLE_CONFIG_TIMEOUT_MS, ROLE_PRIMARY_COMMAND,
+    ROLE_SECONDARY_COMMAND,
 };
 use super::device::{
     get_device_by_port, wait_for_application_by_serial, wait_for_application_flexible,
@@ -328,11 +329,18 @@ impl<T: DfuTransport, L: Fn(&str)> HciDfuProtocol<T, L> {
         let total = firmware.len();
         let mut sent = 0;
         let mut frames = 0;
+        let transfer_start = Instant::now();
+        let transfer_timeout = Duration::from_secs(FIRMWARE_TRANSFER_TIMEOUT_SECS);
 
         for chunk in firmware.chunks(FIRMWARE_CHUNK_SIZE) {
             // Check for cancellation before each chunk
             if is_cancelled() {
                 return Err(DfuError::Cancelled);
+            }
+
+            // Check overall transfer timeout
+            if transfer_start.elapsed() > transfer_timeout {
+                return Err(DfuError::Timeout);
             }
 
             let packet = build_firmware_data_packet(chunk);

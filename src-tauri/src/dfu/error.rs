@@ -32,6 +32,10 @@ pub enum DfuError {
     #[error("Invalid SLIP escape sequence")]
     InvalidSlipEscape,
 
+    /// SLIP decoder buffer exceeded maximum allowed size.
+    #[error("SLIP buffer overflow: {size} bytes exceeds maximum {max_size}")]
+    SlipBufferOverflow { size: usize, max_size: usize },
+
     /// SLIP frame is incomplete (no END delimiter found).
     #[error("Incomplete SLIP frame")]
     IncompleteSlipFrame,
@@ -167,6 +171,12 @@ impl DfuError {
                 r.contains("timeout") || r.contains("no response")
             }
 
+            // Buffer overflow is not retriable - indicates protocol corruption
+            DfuError::SlipBufferOverflow { .. } => false,
+
+            // Port busy is transient - another process may release the port
+            DfuError::PortBusy { .. } => true,
+
             // All other errors are not retriable
             _ => false,
         }
@@ -206,6 +216,7 @@ impl DfuError {
             DfuError::PortPermissionDenied { .. } => "DFU-053",
             DfuError::SequenceMismatch { .. } => "DFU-060",
             DfuError::PacketTooLarge { .. } => "DFU-061",
+            DfuError::SlipBufferOverflow { .. } => "DFU-062",
             DfuError::RoleConfigFailed { .. } => "DFU-070",
             DfuError::ProfileConfigFailed { .. } => "DFU-071",
             DfuError::SettingConfigFailed { .. } => "DFU-072",
@@ -230,10 +241,18 @@ mod tests {
         }
         .is_retriable());
         assert!(!DfuError::NoDeviceFound.is_retriable());
-        assert!(!DfuError::PortBusy {
+        assert!(DfuError::PortBusy {
             port: "COM3".into()
         }
         .is_retriable());
+    }
+
+    #[test]
+    fn test_port_busy_is_retriable() {
+        let err = DfuError::PortBusy {
+            port: "/dev/cu.usbmodem1234".into(),
+        };
+        assert!(err.is_retriable(), "PortBusy should be retriable as it is a transient condition");
     }
 
     #[test]

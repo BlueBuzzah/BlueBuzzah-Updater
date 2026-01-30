@@ -14,6 +14,10 @@ use super::error::{DfuError, DfuResult};
 /// Default chunk size for firmware data (BLE-compatible).
 pub const FIRMWARE_CHUNK_SIZE: usize = 512;
 
+/// Maximum allowed SLIP frame size (2x max valid frame: 4+512+2 = 518 bytes).
+/// Prevents OOM from malformed or corrupted data streams.
+pub const MAX_SLIP_FRAME_SIZE: usize = 1536;
+
 /// HCI packet type for DFU commands.
 const HCI_PACKET_TYPE: u8 = 14;
 
@@ -372,6 +376,16 @@ impl HciSlipDecoder {
             self.in_frame = true;
         }
 
+        // Check buffer overflow before adding any byte
+        if self.buffer.len() >= MAX_SLIP_FRAME_SIZE {
+            let size = self.buffer.len();
+            self.reset();
+            return Some(Err(DfuError::SlipBufferOverflow {
+                size,
+                max_size: MAX_SLIP_FRAME_SIZE,
+            }));
+        }
+
         if self.escape_next {
             match byte {
                 SLIP_ESC_END => self.buffer.push(SLIP_END),
@@ -525,6 +539,51 @@ mod tests {
         let data = [0x18]; // ack_number in bits 3-5
         let ack = HciAck::parse(&data).unwrap();
         assert_eq!(ack.ack_number, 3);
+    }
+
+    #[test]
+    fn test_hci_slip_decoder_buffer_overflow() {
+        let mut decoder = HciSlipDecoder::new();
+
+        // Start a frame
+        assert!(decoder.feed(SLIP_END).is_none());
+
+        // Feed MAX_SLIP_FRAME_SIZE bytes of data
+        for _ in 0..MAX_SLIP_FRAME_SIZE {
+            assert!(decoder.feed(0x42).is_none());
+        }
+
+        // The next byte should trigger overflow
+        let result = decoder.feed(0x42);
+        assert!(result.is_some());
+        let err = result.unwrap().unwrap_err();
+        assert!(
+            matches!(err, DfuError::SlipBufferOverflow { size, max_size }
+                if size == MAX_SLIP_FRAME_SIZE && max_size == MAX_SLIP_FRAME_SIZE),
+            "Expected SlipBufferOverflow error, got: {:?}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_hci_slip_decoder_recovers_after_overflow() {
+        let mut decoder = HciSlipDecoder::new();
+
+        // Trigger overflow
+        assert!(decoder.feed(SLIP_END).is_none());
+        for _ in 0..MAX_SLIP_FRAME_SIZE {
+            decoder.feed(0x42);
+        }
+        let result = decoder.feed(0x42);
+        assert!(result.is_some()); // overflow error
+
+        // Decoder should recover and handle a new valid frame
+        assert!(decoder.feed(SLIP_END).is_none());
+        assert!(decoder.feed(0x01).is_none());
+        assert!(decoder.feed(0x02).is_none());
+        let result = decoder.feed(SLIP_END);
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().unwrap(), vec![0x01, 0x02]);
     }
 
     #[test]

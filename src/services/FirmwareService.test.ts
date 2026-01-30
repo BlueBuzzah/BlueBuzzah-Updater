@@ -123,16 +123,67 @@ describe('FirmwareService', () => {
       );
     });
 
-    it('handles rate limiting response', async () => {
+    it('handles rate limiting response (429)', async () => {
       vi.mocked(invoke).mockResolvedValueOnce([]); // verify_and_clean_cache
 
       vi.mocked(global.fetch).mockResolvedValueOnce({
         ok: false,
         statusText: 'Too Many Requests',
         status: 429,
+        headers: new Headers(),
       } as Response);
 
-      await expect(service.fetchReleases()).rejects.toThrow('GitHub API error: Too Many Requests');
+      await expect(service.fetchReleases()).rejects.toThrow('GitHub API rate limit exceeded. Try again later.');
+      expect(mockConsole.error).toHaveBeenCalledWith(
+        'Failed to fetch releases:',
+        expect.any(Error)
+      );
+    });
+
+    it('handles 403 rate limit with X-RateLimit-Reset header', async () => {
+      vi.mocked(invoke).mockResolvedValueOnce([]); // verify_and_clean_cache
+
+      const resetTimestamp = Math.floor(Date.now() / 1000) + 300; // 5 minutes from now
+      vi.mocked(global.fetch).mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        statusText: 'Forbidden',
+        headers: new Headers({
+          'X-RateLimit-Reset': String(resetTimestamp),
+        }),
+      } as Response);
+
+      await expect(service.fetchReleases()).rejects.toThrow(/GitHub API rate limit exceeded.*minute/);
+      expect(mockConsole.error).toHaveBeenCalledWith(
+        'Failed to fetch releases:',
+        expect.any(Error)
+      );
+    });
+
+    it('handles 403 rate limit without reset header', async () => {
+      vi.mocked(invoke).mockResolvedValueOnce([]); // verify_and_clean_cache
+
+      vi.mocked(global.fetch).mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        statusText: 'Forbidden',
+        headers: new Headers(),
+      } as Response);
+
+      await expect(service.fetchReleases()).rejects.toThrow('GitHub API rate limit exceeded. Try again later.');
+      expect(mockConsole.error).toHaveBeenCalledWith(
+        'Failed to fetch releases:',
+        expect.any(Error)
+      );
+    });
+
+    it('handles fetch timeout via AbortController', async () => {
+      vi.mocked(invoke).mockResolvedValueOnce([]); // verify_and_clean_cache
+
+      const abortError = new DOMException('The operation was aborted.', 'AbortError');
+      vi.mocked(global.fetch).mockRejectedValueOnce(abortError);
+
+      await expect(service.fetchReleases()).rejects.toThrow('Request timed out while fetching firmware releases');
       expect(mockConsole.error).toHaveBeenCalledWith(
         'Failed to fetch releases:',
         expect.any(Error)

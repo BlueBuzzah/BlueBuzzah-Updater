@@ -53,22 +53,38 @@ impl CacheManager {
         Ok(format!("{:x}", hash))
     }
 
-    /// Load the cache index from disk
+    /// Load the cache index from disk.
+    ///
+    /// Returns an empty index on read or parse errors (graceful recovery).
     pub fn load_index(&self) -> Result<FirmwareCacheIndex, String> {
         if !self.cache_file_path.exists() {
             return Ok(HashMap::new());
         }
 
-        let contents = fs::read_to_string(&self.cache_file_path)
-            .map_err(|e| format!("Failed to read cache index: {}", e))?;
+        let contents = match fs::read_to_string(&self.cache_file_path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!(
+                    "[Cache] Warning: Failed to read cache index, returning empty: {}",
+                    e
+                );
+                return Ok(HashMap::new());
+            }
+        };
 
-        let index: FirmwareCacheIndex = serde_json::from_str(&contents)
-            .map_err(|e| format!("Failed to parse cache index: {}", e))?;
-
-        Ok(index)
+        match serde_json::from_str(&contents) {
+            Ok(index) => Ok(index),
+            Err(e) => {
+                eprintln!(
+                    "[Cache] Warning: Cache index corrupted, returning empty: {}",
+                    e
+                );
+                Ok(HashMap::new())
+            }
+        }
     }
 
-    /// Save the cache index to disk
+    /// Save the cache index to disk using atomic write (write-to-tmp then rename).
     pub fn save_index(&self, index: &FirmwareCacheIndex) -> Result<(), String> {
         let contents = serde_json::to_string_pretty(index)
             .map_err(|e| format!("Failed to serialize cache index: {}", e))?;
@@ -79,8 +95,17 @@ impl CacheManager {
                 .map_err(|e| format!("Failed to create cache directory: {}", e))?;
         }
 
-        fs::write(&self.cache_file_path, contents)
-            .map_err(|e| format!("Failed to write cache index: {}", e))?;
+        let tmp_path = self.cache_file_path.with_extension("json.tmp");
+
+        fs::write(&tmp_path, &contents).map_err(|e| {
+            let _ = fs::remove_file(&tmp_path);
+            format!("Failed to write cache index: {}", e)
+        })?;
+
+        fs::rename(&tmp_path, &self.cache_file_path).map_err(|e| {
+            let _ = fs::remove_file(&tmp_path);
+            format!("Failed to finalize cache index: {}", e)
+        })?;
 
         Ok(())
     }
@@ -561,8 +586,25 @@ mod tests {
         let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
         let result = cache_manager.load_index();
 
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("Failed to parse cache index"));
+        // Graceful recovery: returns empty index instead of error
+        assert!(result.is_ok());
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_save_index_atomic_no_tmp_leftover() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
+
+        let mut index = HashMap::new();
+        index.insert("v1.0.0".to_string(), create_test_metadata("1.0.0"));
+
+        cache_manager.save_index(&index).unwrap();
+
+        // Final file should exist
+        assert!(temp_dir.path().join("firmware_cache.json").exists());
+        // Temp file should NOT exist
+        assert!(!temp_dir.path().join("firmware_cache.json.tmp").exists());
     }
 
     #[test]

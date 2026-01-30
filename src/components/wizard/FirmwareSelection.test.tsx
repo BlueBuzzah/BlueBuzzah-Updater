@@ -228,6 +228,56 @@ describe('FirmwareSelection', () => {
       expect(mockOnSelect).toHaveBeenCalledWith(mockRelease);
     });
 
+    it('disables install button after click to prevent double-click', async () => {
+      const mockRelease = createMockRelease({ version: '1.0.0' });
+      vi.mocked(firmwareService.fetchReleases).mockResolvedValue([mockRelease]);
+
+      render(
+        <FirmwareSelection onSelect={mockOnSelect} />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('1.0.0')).toBeInTheDocument();
+      });
+
+      const installButton = screen.getByRole('button', { name: /install 1\.0\.0/i });
+      fireEvent.click(installButton);
+
+      // Button should be disabled after click and show spinner
+      await waitFor(() => {
+        expect(screen.getByText('Loading...')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /loading/i })).toBeDisabled();
+      });
+      expect(mockOnSelect).toHaveBeenCalledTimes(1);
+    });
+
+    it('shows spinner only on the clicked release card', async () => {
+      const releases = [
+        createMockRelease({ version: '2.0.0', publishedAt: new Date('2024-12-01') }),
+        createMockRelease({ version: '1.0.0', publishedAt: new Date('2024-06-01') }),
+      ];
+      vi.mocked(firmwareService.fetchReleases).mockResolvedValue(releases);
+
+      render(
+        <FirmwareSelection onSelect={mockOnSelect} />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText('2.0.0')).toBeInTheDocument();
+        expect(screen.getByText('1.0.0')).toBeInTheDocument();
+      });
+
+      // Click first release
+      fireEvent.click(screen.getByRole('button', { name: /install 2\.0\.0/i }));
+
+      await waitFor(() => {
+        // Clicked card shows spinner
+        expect(screen.getByText('Loading...')).toBeInTheDocument();
+        // Other card still shows its install text (disabled but no spinner)
+        expect(screen.getByText('Install 1.0.0')).toBeInTheDocument();
+      });
+    });
+
   });
 
   describe('Release Notes Expansion', () => {

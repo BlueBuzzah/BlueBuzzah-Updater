@@ -17,6 +17,18 @@ const MAX_OPERATION_RETRIES: u32 = 2;
 /// Global cancellation flag for DFU operations.
 static DFU_CANCELLED: AtomicBool = AtomicBool::new(false);
 
+/// Global guard to prevent concurrent flash operations.
+static DFU_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+
+/// RAII guard that resets DFU_IN_PROGRESS when dropped.
+struct DfuGuard;
+
+impl Drop for DfuGuard {
+    fn drop(&mut self) {
+        DFU_IN_PROGRESS.store(false, Ordering::SeqCst);
+    }
+}
+
 /// Check if cancellation was requested.
 pub fn is_dfu_cancelled() -> bool {
     DFU_CANCELLED.load(Ordering::SeqCst)
@@ -185,6 +197,12 @@ pub async fn flash_dfu_firmware(
     device_role: String,
     progress: Channel<DfuProgressEvent>,
 ) -> Result<(), String> {
+    // Prevent concurrent flash operations
+    if DFU_IN_PROGRESS.swap(true, Ordering::SeqCst) {
+        return Err("A firmware installation is already in progress".into());
+    }
+    let _guard = DfuGuard;
+
     // Reset cancellation flag at start of new operation
     DFU_CANCELLED.store(false, Ordering::SeqCst);
 
@@ -282,7 +300,12 @@ async fn flash_dfu_firmware_inner(
     let progress_task = thread::spawn(move || {
         while let Ok(stage) = rx.recv() {
             let event = DfuProgressEvent::from(stage);
-            let _ = progress_channel.send(event);
+            if progress_channel.send(event).is_err() {
+                // Frontend disconnected — cancel the DFU operation
+                eprintln!("[DFU] Warning: progress channel disconnected, cancelling operation");
+                DFU_CANCELLED.store(true, Ordering::SeqCst);
+                break;
+            }
         }
     });
 
@@ -423,7 +446,10 @@ pub async fn set_device_profile(
     let progress_channel = progress.clone();
     let progress_task = thread::spawn(move || {
         while let Ok(event) = rx.recv() {
-            let _ = progress_channel.send(event);
+            if progress_channel.send(event).is_err() {
+                eprintln!("[DFU] Warning: profile progress channel disconnected");
+                break;
+            }
         }
     });
 
@@ -554,6 +580,21 @@ mod tests {
         assert_eq!(event.sent, Some(50000));
         assert_eq!(event.total, Some(100000));
         assert!(event.percent > 0.0);
+    }
+
+    #[test]
+    fn test_dfu_guard_resets_on_drop() {
+        // Ensure clean state
+        DFU_IN_PROGRESS.store(false, Ordering::SeqCst);
+
+        {
+            // Simulate acquiring the guard
+            assert!(!DFU_IN_PROGRESS.swap(true, Ordering::SeqCst));
+            let _guard = DfuGuard;
+            assert!(DFU_IN_PROGRESS.load(Ordering::SeqCst));
+        }
+        // Guard dropped — should be reset
+        assert!(!DFU_IN_PROGRESS.load(Ordering::SeqCst));
     }
 
     #[test]

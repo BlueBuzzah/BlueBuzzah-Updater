@@ -421,6 +421,43 @@ describe('DeviceSelection', () => {
     });
   });
 
+  describe('Race Condition Prevention', () => {
+    it('refresh shows latest detection results', async () => {
+      // Initial call returns Device A
+      const deviceA = createMockDevice({ path: '/dev/cu.usbmodemA', label: 'Device A' });
+      vi.mocked(deviceService.detectDevices).mockResolvedValueOnce([deviceA]);
+
+      render(
+        <DeviceSelection
+          selectedDevices={[]}
+          onDevicesChange={mockOnDevicesChange}
+          onRoleChange={mockOnRoleChange}
+        />
+      );
+
+      // Wait for initial detection
+      await waitFor(() => {
+        expect(screen.getByText('Device A')).toBeInTheDocument();
+      });
+
+      // Setup second call to return Device B
+      const deviceB = createMockDevice({ path: '/dev/cu.usbmodemB', label: 'Device B' });
+      vi.mocked(deviceService.detectDevices).mockResolvedValueOnce([deviceB]);
+
+      // Click refresh
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /refresh/i }));
+      });
+
+      // Latest result should be shown, not stale data
+      await waitFor(() => {
+        expect(screen.getByText('Device B')).toBeInTheDocument();
+      });
+      expect(screen.queryByText('Device A')).not.toBeInTheDocument();
+      expect(deviceService.detectDevices).toHaveBeenCalledTimes(2);
+    });
+  });
+
   describe('Error Handling', () => {
     it('handles detection error gracefully', async () => {
       vi.mocked(deviceService.detectDevices).mockRejectedValue(

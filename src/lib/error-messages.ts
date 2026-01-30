@@ -241,6 +241,16 @@ export const ERROR_GUIDANCE: Record<string, ErrorGuidance> = {
       'The update may still succeed after one or more retries',
     ],
   },
+  RATE_LIMITED: {
+    title: 'GitHub Rate Limit Exceeded',
+    description: 'Too many requests have been made to the GitHub API.',
+    resolutionSteps: [
+      'Wait a few minutes before trying again',
+      'GitHub allows 60 requests per hour for unauthenticated users',
+      'Cached firmware versions are still available for installation',
+      'Try again after the rate limit resets',
+    ],
+  },
 };
 
 export function getErrorGuidance(errorMessage: string): ErrorGuidance | null {
@@ -264,6 +274,9 @@ export function getErrorGuidance(errorMessage: string): ErrorGuidance | null {
   }
   if (lowerError.includes('permission denied') || lowerError.includes('access denied')) {
     return ERROR_GUIDANCE.PERMISSION_DENIED;
+  }
+  if (lowerError.includes('rate limit')) {
+    return ERROR_GUIDANCE.RATE_LIMITED;
   }
   if (lowerError.includes('network') || lowerError.includes('connection')) {
     return ERROR_GUIDANCE.NETWORK_ERROR;

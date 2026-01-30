@@ -95,9 +95,13 @@ impl SerialTransport {
                 Ok(mut port) => {
                     // Success - proceed with DTR toggle to reset connection state.
                     // This ensures the bootloader is ready to receive commands.
-                    port.write_data_terminal_ready(false).ok();
+                    if let Err(e) = port.write_data_terminal_ready(false) {
+                        eprintln!("[DFU] Warning: DTR toggle (false) failed during port open: {}", e);
+                    }
                     std::thread::sleep(Duration::from_millis(50));
-                    port.write_data_terminal_ready(true).ok();
+                    if let Err(e) = port.write_data_terminal_ready(true) {
+                        eprintln!("[DFU] Warning: DTR toggle (true) failed during port open: {}", e);
+                    }
 
                     // Allow port to stabilize after DTR toggle
                     std::thread::sleep(Duration::from_millis(100));
@@ -256,11 +260,17 @@ impl SerialTransport {
             .map_err(DfuError::Serial)?;
 
         // Toggle DTR to reset the bootloader state
-        port.write_data_terminal_ready(false).ok();
+        if let Err(e) = port.write_data_terminal_ready(false) {
+            eprintln!("[DFU] Warning: DTR toggle (false) failed during bootloader reset: {}", e);
+        }
         std::thread::sleep(Duration::from_millis(50));
-        port.write_data_terminal_ready(true).ok();
+        if let Err(e) = port.write_data_terminal_ready(true) {
+            eprintln!("[DFU] Warning: DTR toggle (true) failed during bootloader reset: {}", e);
+        }
         std::thread::sleep(Duration::from_millis(50));
-        port.write_data_terminal_ready(false).ok();
+        if let Err(e) = port.write_data_terminal_ready(false) {
+            eprintln!("[DFU] Warning: DTR toggle (false) failed during bootloader reset: {}", e);
+        }
 
         // Close the port
         drop(port);
@@ -311,9 +321,13 @@ impl DfuTransport for SerialTransport {
         // Note: We intentionally ignore errors here as the keep-alive is best-effort.
         #[cfg(target_os = "macos")]
         {
-            self.port.write_data_terminal_ready(true).ok();
+            if let Err(e) = self.port.write_data_terminal_ready(true) {
+                eprintln!("[DFU] Warning: DTR keep-alive toggle (true) failed: {}", e);
+            }
             std::thread::sleep(Duration::from_millis(10));
-            self.port.write_data_terminal_ready(false).ok();
+            if let Err(e) = self.port.write_data_terminal_ready(false) {
+                eprintln!("[DFU] Warning: DTR keep-alive toggle (false) failed: {}", e);
+            }
         }
 
         // On other platforms, just do a quick settings check to verify port is open

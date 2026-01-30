@@ -289,4 +289,81 @@ describe('SuccessScreen', () => {
       expect(screen.getByText('Latest')).toBeInTheDocument();
     });
   });
+
+  describe('Per-Device Results', () => {
+    it('shows partial success when one device fails', () => {
+      const device1 = createMockDevice({ path: '/Volumes/BLUEBUZZAH1', label: 'BLUEBUZZAH1', role: 'PRIMARY' });
+      const device2 = createMockDevice({ path: '/Volumes/BLUEBUZZAH2', label: 'BLUEBUZZAH2', role: 'SECONDARY' });
+
+      useWizardStore.getState().setUpdateResult({
+        success: false,
+        message: 'Some devices failed to update',
+        deviceUpdates: [
+          { device: device1, success: true },
+          { device: device2, success: false, error: 'DFU transfer failed' },
+        ],
+      });
+
+      render(
+        <SuccessScreen
+          release={mockRelease}
+          devices={[device1, device2]}
+          onReset={mockOnReset}
+          onClose={mockOnClose}
+        />
+      );
+
+      expect(screen.getByText('Partial Success')).toBeInTheDocument();
+      const matches = screen.getAllByText('1 of 2 devices updated successfully');
+      expect(matches.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('shows failure message for failed device', () => {
+      const device1 = createMockDevice({ path: '/Volumes/BLUEBUZZAH1', label: 'BLUEBUZZAH1', role: 'PRIMARY' });
+
+      useWizardStore.getState().setUpdateResult({
+        success: false,
+        message: 'Device failed',
+        deviceUpdates: [
+          { device: device1, success: false, error: 'DFU transfer failed' },
+        ],
+      });
+
+      render(
+        <SuccessScreen
+          release={mockRelease}
+          devices={[device1]}
+          onReset={mockOnReset}
+          onClose={mockOnClose}
+        />
+      );
+
+      expect(screen.getByText('Installation Failed')).toBeInTheDocument();
+      expect(screen.getByText('DFU transfer failed')).toBeInTheDocument();
+      expect(screen.getByText('Failed')).toBeInTheDocument();
+    });
+
+    it('shows Failed badge for failed device', () => {
+      const device1 = createMockDevice({ path: '/Volumes/BLUEBUZZAH1', label: 'BLUEBUZZAH1', role: 'PRIMARY' });
+
+      useWizardStore.getState().setUpdateResult({
+        success: false,
+        message: 'Device failed',
+        deviceUpdates: [
+          { device: device1, success: false, error: 'Connection lost' },
+        ],
+      });
+
+      render(
+        <SuccessScreen
+          release={mockRelease}
+          devices={[device1]}
+          onReset={mockOnReset}
+          onClose={mockOnClose}
+        />
+      );
+
+      expect(screen.getByText('Failed')).toBeInTheDocument();
+    });
+  });
 });

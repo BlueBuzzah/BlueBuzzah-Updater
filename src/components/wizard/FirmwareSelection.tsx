@@ -30,7 +30,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { formatBytes, formatDate } from '@/lib/utils';
 import { firmwareService } from '@/services/FirmwareService';
 import { FirmwareRelease } from '@/types';
-import { Calendar, ChevronDown, ChevronUp, Download, FileText, FlaskConical, HardDrive, Trash2 } from 'lucide-react';
+import { Calendar, ChevronDown, ChevronUp, Download, FileText, FlaskConical, HardDrive, Loader2, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 
@@ -50,6 +50,7 @@ export function FirmwareSelection({
   const [releaseToDelete, setReleaseToDelete] = useState<FirmwareRelease | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [showExperimental, setShowExperimental] = useState(false);
+  const [selectingVersion, setSelectingVersion] = useState<string | null>(null);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -379,10 +380,27 @@ export function FirmwareSelection({
               <CardFooter>
                 <Button
                   className="w-full"
-                  onClick={() => onSelect(release)}
+                  disabled={selectingVersion !== null}
+                  onClick={() => {
+                    try {
+                      setSelectingVersion(release.version);
+                      onSelect(release);
+                    } catch {
+                      setSelectingVersion(null);
+                    }
+                  }}
                 >
-                  <Download className="h-4 w-4 mr-2" />
-                  Install {release.version}
+                  {selectingVersion === release.version ? (
+                    <>
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      Loading...
+                    </>
+                  ) : (
+                    <>
+                      <Download className="h-4 w-4 mr-2" />
+                      Install {release.version}
+                    </>
+                  )}
                 </Button>
               </CardFooter>
             </Card>

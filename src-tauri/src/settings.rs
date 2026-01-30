@@ -118,25 +118,41 @@ impl SettingsManager {
         Self { settings_file_path }
     }
 
-    /// Load settings from disk, returning defaults if file doesn't exist.
+    /// Load settings from disk, returning defaults on any error (graceful recovery).
     pub fn load(&self) -> Result<AdvancedSettings, String> {
         if !self.settings_file_path.exists() {
             return Ok(AdvancedSettings::default());
         }
 
-        let contents = fs::read_to_string(&self.settings_file_path)
-            .map_err(|e| format!("Failed to read settings file: {}", e))?;
+        let contents = match fs::read_to_string(&self.settings_file_path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!(
+                    "[Settings] Warning: Failed to read settings file, using defaults: {}",
+                    e
+                );
+                return Ok(AdvancedSettings::default());
+            }
+        };
 
         // Handle empty file gracefully
         if contents.trim().is_empty() {
             return Ok(AdvancedSettings::default());
         }
 
-        serde_json::from_str(&contents)
-            .map_err(|e| format!("Failed to parse settings JSON: {}", e))
+        match serde_json::from_str(&contents) {
+            Ok(settings) => Ok(settings),
+            Err(e) => {
+                eprintln!(
+                    "[Settings] Warning: Settings file corrupted, using defaults: {}",
+                    e
+                );
+                Ok(AdvancedSettings::default())
+            }
+        }
     }
 
-    /// Save settings to disk.
+    /// Save settings to disk using atomic write (write-to-tmp then rename).
     pub fn save(&self, settings: &AdvancedSettings) -> Result<(), String> {
         // Ensure parent directory exists
         if let Some(parent) = self.settings_file_path.parent() {
@@ -147,8 +163,17 @@ impl SettingsManager {
         let contents = serde_json::to_string_pretty(settings)
             .map_err(|e| format!("Failed to serialize settings: {}", e))?;
 
-        fs::write(&self.settings_file_path, contents)
-            .map_err(|e| format!("Failed to write settings file: {}", e))?;
+        let tmp_path = self.settings_file_path.with_extension("json.tmp");
+
+        fs::write(&tmp_path, &contents).map_err(|e| {
+            let _ = fs::remove_file(&tmp_path);
+            format!("Failed to write settings file: {}", e)
+        })?;
+
+        fs::rename(&tmp_path, &self.settings_file_path).map_err(|e| {
+            let _ = fs::remove_file(&tmp_path);
+            format!("Failed to finalize settings file: {}", e)
+        })?;
 
         Ok(())
     }
@@ -273,6 +298,40 @@ mod tests {
             selected_profile: Some("NOISY".to_string()),
         };
         assert!(custom_profile.has_non_default_settings());
+    }
+
+    #[test]
+    fn test_load_corrupted_settings_returns_defaults() {
+        let dir = tempdir().unwrap();
+        let settings_file = dir.path().join("advanced_settings.json");
+
+        // Write invalid JSON
+        fs::write(&settings_file, "{ not valid json!!!").unwrap();
+
+        let manager = SettingsManager::new(dir.path());
+        let result = manager.load();
+
+        // Graceful recovery: returns defaults instead of error
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), AdvancedSettings::default());
+    }
+
+    #[test]
+    fn test_save_settings_atomic_no_tmp_leftover() {
+        let dir = tempdir().unwrap();
+        let manager = SettingsManager::new(dir.path());
+
+        let settings = AdvancedSettings {
+            disable_led_during_therapy: true,
+            debug_mode: false,
+            selected_profile: Some("REGULAR".to_string()),
+        };
+        manager.save(&settings).unwrap();
+
+        // Final file should exist
+        assert!(dir.path().join("advanced_settings.json").exists());
+        // Temp file should NOT exist
+        assert!(!dir.path().join("advanced_settings.json.tmp").exists());
     }
 
     #[test]

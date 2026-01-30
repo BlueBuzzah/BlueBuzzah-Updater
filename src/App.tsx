@@ -17,7 +17,7 @@ import { HomeScreen, AppMode } from './components/home/HomeScreen';
 import { Toaster } from './components/ui/toaster';
 import { UpdateDialog } from './components/updater/UpdateDialog';
 import { useAppUpdater } from './hooks/useAppUpdater';
-import type { FirmwareRelease, TherapyProfile } from './types';
+import type { FirmwareRelease, TherapyProfile, UpdateResult } from './types';
 
 function App() {
   const [appMode, setAppMode] = useState<AppMode>('home');
@@ -64,11 +64,17 @@ function App() {
     switch (firmwareStep) {
       case 0:
         return selectedRelease !== null;
-      case 1:
-        return (
-          firmwareDevices.length > 0 &&
-          firmwareDevices.every((d) => d.role !== undefined)
-        );
+      case 1: {
+        if (firmwareDevices.length === 0) return false;
+        if (!firmwareDevices.every((d) => d.role !== undefined)) return false;
+        // When 2 devices selected, require complementary PRIMARY + SECONDARY roles
+        if (firmwareDevices.length === 2) {
+          const hasPrimary = firmwareDevices.some((d) => d.role === 'PRIMARY');
+          const hasSecondary = firmwareDevices.some((d) => d.role === 'SECONDARY');
+          return hasPrimary && hasSecondary;
+        }
+        return true;
+      }
       case 2:
         return false; // Can't manually proceed during installation
       case 3:
@@ -94,16 +100,9 @@ function App() {
     }
   };
 
-  const handleInstallationComplete = (success: boolean) => {
-    if (success) {
-      setUpdateResult({
-        success: true,
-        message: 'All devices updated successfully',
-        deviceUpdates: firmwareDevices.map((device) => ({
-          device,
-          success: true,
-        })),
-      });
+  const handleInstallationComplete = (result: UpdateResult) => {
+    setUpdateResult(result);
+    if (result.success) {
       setTimeout(() => {
         setFirmwareStep(3);
       }, 1000);

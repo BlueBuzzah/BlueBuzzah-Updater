@@ -18,6 +18,7 @@ interface SettingsStore {
   settings: AdvancedSettings;
   isLoaded: boolean;
   isSyncing: boolean;
+  loadError: string | null;
 
   // Actions
   setSettings: (settings: Partial<AdvancedSettings>) => void;
@@ -41,6 +42,7 @@ export const useSettingsStore = create<SettingsStore>()(
       settings: defaultSettings,
       isLoaded: false,
       isSyncing: false,
+      loadError: null,
 
       /**
        * Update settings and sync to backend.
@@ -71,12 +73,14 @@ export const useSettingsStore = create<SettingsStore>()(
        */
       loadFromBackend: async () => {
         try {
+          set({ loadError: null });
           const settings = await invoke<AdvancedSettings>('get_advanced_settings');
           set({ settings, isLoaded: true });
         } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
           console.error('[SettingsStore] Failed to load settings from backend:', error);
           // Use localStorage fallback if backend fails
-          set({ isLoaded: true });
+          set({ isLoaded: true, loadError: message });
         }
       },
 
@@ -102,7 +106,7 @@ export const useSettingsStore = create<SettingsStore>()(
        * Reset settings to defaults and sync to backend.
        */
       reset: () => {
-        set({ settings: defaultSettings });
+        set({ settings: defaultSettings, loadError: null });
         get().syncToBackend();
       },
     }),

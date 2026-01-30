@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { render, screen, waitFor, cleanup } from '@testing-library/react';
 import { InstallationProgress } from './InstallationProgress';
 import { firmwareService } from '@/services/FirmwareService';
 import { deviceService } from '@/services/DeviceService';
@@ -16,6 +16,7 @@ vi.mock('@/services/DeviceService', () => ({
   deviceService: {
     validateDevices: vi.fn(),
     deployFirmware: vi.fn(),
+    cancelFlash: vi.fn().mockResolvedValue(undefined),
   },
 }));
 
@@ -46,7 +47,13 @@ describe('InstallationProgress', () => {
 
   beforeEach(() => {
     vi.resetAllMocks();
+    // Re-apply cancelFlash default after reset (cleanup calls it on unmount)
+    vi.mocked(deviceService.cancelFlash).mockResolvedValue(undefined);
     mockLogs.length = 0; // Clear logs between tests
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   describe('Rendering', () => {
@@ -176,7 +183,9 @@ describe('InstallationProgress', () => {
 
       // Verify installation completed successfully by checking callback
       await waitFor(() => {
-        expect(mockOnComplete).toHaveBeenCalledWith(true);
+        expect(mockOnComplete).toHaveBeenCalledWith(
+          expect.objectContaining({ success: true })
+        );
       }, { timeout: 3000 });
     });
   });
@@ -343,7 +352,9 @@ describe('InstallationProgress', () => {
 
       // Verify error triggers onComplete(false)
       await waitFor(() => {
-        expect(mockOnComplete).toHaveBeenCalledWith(false);
+        expect(mockOnComplete).toHaveBeenCalledWith(
+          expect.objectContaining({ success: false })
+        );
       }, { timeout: 3000 });
     });
 
@@ -363,7 +374,9 @@ describe('InstallationProgress', () => {
 
       // Error is logged and completion callback called
       await waitFor(() => {
-        expect(mockOnComplete).toHaveBeenCalledWith(false);
+        expect(mockOnComplete).toHaveBeenCalledWith(
+          expect.objectContaining({ success: false })
+        );
       }, { timeout: 3000 });
     });
 
@@ -401,7 +414,9 @@ describe('InstallationProgress', () => {
       );
 
       await waitFor(() => {
-        expect(mockOnComplete).toHaveBeenCalledWith(false);
+        expect(mockOnComplete).toHaveBeenCalledWith(
+          expect.objectContaining({ success: false })
+        );
       }, { timeout: 3000 });
     });
   });
@@ -484,7 +499,9 @@ describe('InstallationProgress', () => {
       );
 
       await waitFor(() => {
-        expect(mockOnComplete).toHaveBeenCalledWith(true);
+        expect(mockOnComplete).toHaveBeenCalledWith(
+          expect.objectContaining({ success: true })
+        );
       });
     });
 
@@ -537,6 +554,82 @@ describe('InstallationProgress', () => {
       );
 
       expect(screen.getByText('0%')).toBeInTheDocument();
+    });
+  });
+
+  describe('Device Path Mutation', () => {
+    it('does not mutate original device objects on path rename', async () => {
+      const device = createMockDevice({ path: '/dev/cu.usbmodemOLD', label: 'Old Label', role: 'PRIMARY' });
+      const originalPath = device.path;
+      const originalLabel = device.label;
+
+      vi.mocked(deviceService.validateDevices).mockResolvedValue(
+        new Map([[device.path, { valid: true, errors: [], warnings: [] }]])
+      );
+      vi.mocked(firmwareService.downloadFirmware).mockResolvedValue(mockBundle);
+      vi.mocked(deviceService.deployFirmware).mockImplementation(
+        async (_device, _firmware, onProgress) => {
+          if (onProgress) {
+            // Simulate a path rename during progress
+            onProgress({
+              devicePath: device.path,
+              stage: 'preparing',
+              progress: 50,
+              message: 'Renaming...',
+              newDevicePath: '/dev/cu.usbmodemNEW',
+              newDeviceLabel: 'New Label',
+            });
+            onProgress({
+              devicePath: '/dev/cu.usbmodemNEW',
+              stage: 'complete',
+              progress: 100,
+              message: 'Done',
+            });
+          }
+        }
+      );
+
+      render(
+        <InstallationProgress
+          release={mockRelease}
+          devices={[device]}
+          onComplete={mockOnComplete}
+          onProgressUpdate={mockOnProgressUpdate}
+        />
+      );
+
+      await waitFor(() => {
+        expect(mockOnComplete).toHaveBeenCalledWith(
+          expect.objectContaining({ success: true })
+        );
+      });
+
+      // Original device object must not be mutated
+      expect(device.path).toBe(originalPath);
+      expect(device.label).toBe(originalLabel);
+    });
+  });
+
+  describe('Cleanup on Unmount', () => {
+    it('calls cancelFlash when component unmounts', async () => {
+      vi.mocked(deviceService.validateDevices).mockImplementation(
+        () => new Promise(() => {}) // Never resolves — keeps component busy
+      );
+      vi.mocked(deviceService.cancelFlash).mockResolvedValue(undefined);
+
+      const { unmount } = render(
+        <InstallationProgress
+          release={mockRelease}
+          devices={[mockDevice]}
+          onComplete={mockOnComplete}
+          onProgressUpdate={mockOnProgressUpdate}
+        />
+      );
+
+      // Unmount triggers cleanup
+      unmount();
+
+      expect(deviceService.cancelFlash).toHaveBeenCalledTimes(1);
     });
   });
 });

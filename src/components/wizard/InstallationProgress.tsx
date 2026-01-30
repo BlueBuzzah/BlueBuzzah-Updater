@@ -23,7 +23,7 @@ import { formatValidationErrors, getErrorGuidance } from '@/lib/error-messages';
 import { deviceService } from '@/services/DeviceService';
 import { firmwareService } from '@/services/FirmwareService';
 import { useWizardStore } from '@/stores/wizardStore';
-import { Device, FirmwareRelease, UpdateProgress } from '@/types';
+import { Device, DeviceUpdateResult, FirmwareRelease, UpdateProgress, UpdateResult } from '@/types';
 import {
 	AlertTriangle,
 	Ban,
@@ -43,7 +43,7 @@ import { useEffect, useRef, useState } from 'react';
 interface InstallationProgressProps {
   release: FirmwareRelease;
   devices: Device[];
-  onComplete: (success: boolean) => void;
+  onComplete: (result: UpdateResult) => void;
   onProgressUpdate: (devicePath: string, progress: UpdateProgress) => void;
 }
 
@@ -68,7 +68,10 @@ export function InstallationProgress({
   const [showStopConfirm, setShowStopConfirm] = useState(false);
   const [isCancelling, setIsCancelling] = useState(false);
   const hasStartedRef = useRef(false);
+  const cancelledRef = useRef(false);
   const completedDevices = useRef<Set<string>>(new Set());
+  const devicePathMap = useRef<Map<string, { path: string; label: string }>>(new Map());
+  const deviceResults = useRef<DeviceUpdateResult[]>([]);
 
   // Track retry attempts for auto-expanding logs
   const [retryCount, setRetryCount] = useState(0);
@@ -79,6 +82,11 @@ export function InstallationProgress({
     if (hasStartedRef.current) return;
     hasStartedRef.current = true;
     startInstallation();
+
+    return () => {
+      cancelledRef.current = true;
+      deviceService.cancelFlash().catch(() => {});
+    };
   }, []);
 
   const addLog = (message: string) => {
@@ -128,6 +136,10 @@ export function InstallationProgress({
     });
     setRetryCount(0);
     setIsCancelling(false);
+    cancelledRef.current = false;
+    deviceResults.current = deviceResults.current.filter(
+      (r) => completedDevices.current.has(r.device.path)
+    );
     addLog('--- Retrying failed devices ---');
     startInstallation(retryDevices);
   };
@@ -139,6 +151,7 @@ export function InstallationProgress({
   const confirmStop = async () => {
     setShowStopConfirm(false);
     setIsCancelling(true);
+    cancelledRef.current = true;
     addLog('Cancellation requested - stopping installation...');
     try {
       await deviceService.cancelFlash();
@@ -200,69 +213,124 @@ export function InstallationProgress({
       addLog(`Installing firmware on ${targetDevices.length} device(s)...`);
 
       for (const device of targetDevices) {
-        addLog(`Starting update for ${device.label} (${device.role})...`);
+        // Check cancellation before starting next device (H8 fix)
+        if (cancelledRef.current) {
+          addLog(`Skipping ${device.label} — installation cancelled`);
+          break;
+        }
 
-        await deviceService.deployFirmware(
-          device,
-          firmware,
-          // Progress callback - updates UI state
-          (progress) => {
-            // Check if device info was updated (volume renamed)
-            if (progress.newDeviceLabel && progress.newDevicePath) {
-              // Update wizard store with new device info
-              updateDeviceInfo(device.path, progress.newDeviceLabel, progress.newDevicePath);
+        // Track current path/label locally to avoid mutating the original device object (C8 fix)
+        let currentPath = device.path;
+        let currentLabel = device.label;
 
-              // Update local device references
-              setUpdatedDevices((prev) =>
-                prev.map((d) =>
-                  d.path === device.path
-                    ? { ...d, label: progress.newDeviceLabel!, path: progress.newDevicePath! }
-                    : d
-                )
-              );
+        addLog(`Starting update for ${currentLabel} (${device.role})...`);
 
-              // Update deviceProgress map with new path as key
-              setDeviceProgress((prev) => {
-                const next = new Map(prev);
-                const oldProgress = next.get(device.path);
-                if (oldProgress) {
-                  next.delete(device.path);
-                  next.set(progress.newDevicePath!, progress);
-                } else {
-                  next.set(progress.newDevicePath!, progress);
-                }
-                return next;
-              });
+        try {
+          await deviceService.deployFirmware(
+            device,
+            firmware,
+            // Progress callback - updates UI state
+            (progress) => {
+              // Check if device info was updated (volume renamed)
+              if (progress.newDeviceLabel && progress.newDevicePath) {
+                const originalPath = device.path;
 
-              // Update device reference for subsequent callbacks
-              device.path = progress.newDevicePath!;
-              device.label = progress.newDeviceLabel!;
+                // Track rename in map (instead of mutating device object)
+                devicePathMap.current.set(originalPath, {
+                  path: progress.newDevicePath!,
+                  label: progress.newDeviceLabel!,
+                });
 
-              addLog(`✓ Volume renamed to ${progress.newDeviceLabel}`);
-            } else {
-              setDeviceProgress((prev) => {
-                const next = new Map(prev);
-                next.set(device.path, progress);
-                return next;
-              });
+                // Update local tracking variables
+                currentPath = progress.newDevicePath!;
+                currentLabel = progress.newDeviceLabel!;
+
+                // Update wizard store with new device info
+                updateDeviceInfo(originalPath, progress.newDeviceLabel, progress.newDevicePath);
+
+                // Update local device references
+                setUpdatedDevices((prev) =>
+                  prev.map((d) =>
+                    d.path === originalPath
+                      ? { ...d, label: progress.newDeviceLabel!, path: progress.newDevicePath! }
+                      : d
+                  )
+                );
+
+                // Update deviceProgress map with new path as key
+                setDeviceProgress((prev) => {
+                  const next = new Map(prev);
+                  const oldProgress = next.get(originalPath);
+                  if (oldProgress) {
+                    next.delete(originalPath);
+                    next.set(progress.newDevicePath!, progress);
+                  } else {
+                    next.set(progress.newDevicePath!, progress);
+                  }
+                  return next;
+                });
+
+                addLog(`✓ Volume renamed to ${progress.newDeviceLabel}`);
+              } else {
+                setDeviceProgress((prev) => {
+                  const next = new Map(prev);
+                  next.set(currentPath, progress);
+                  return next;
+                });
+              }
+
+              onProgressUpdate(currentPath, progress);
+            },
+            // Log callback - goes directly to log panel
+            (logMessage) => {
+              addLog(`${currentLabel}: ${logMessage}`);
             }
+          );
 
-            onProgressUpdate(device.path, progress);
-          },
-          // Log callback - goes directly to log panel
-          (logMessage) => {
-            addLog(`${device.label}: ${logMessage}`);
+          // Track both original and renamed paths as completed
+          completedDevices.current.add(device.path);
+          if (currentPath !== device.path) {
+            completedDevices.current.add(currentPath);
           }
-        );
-
-        completedDevices.current.add(device.path);
-        addLog(`✓ Successfully updated ${device.label}`);
+          addLog(`✓ Successfully updated ${currentLabel}`);
+          deviceResults.current.push({ device, success: true });
+        } catch (deviceErr) {
+          const deviceErrorMessage =
+            typeof deviceErr === 'string'
+              ? deviceErr
+              : deviceErr instanceof Error
+                ? deviceErr.message
+                : JSON.stringify(deviceErr) || 'Unknown error occurred';
+          addLog(`✗ Error updating ${currentLabel}: ${deviceErrorMessage}`);
+          setShowLogs(true);
+          deviceResults.current.push({ device, success: false, error: deviceErrorMessage });
+          // Continue to next device instead of aborting
+        }
       }
 
-      // Stage 3: Complete
-      setStage('complete');
-      addLog('All devices updated successfully!');
-      onComplete(true);
+      // Stage 3: Complete (only if not cancelled)
+      if (!cancelledRef.current) {
+        const overallSuccess = deviceResults.current.every((r) => r.success);
+        setStage('complete');
+
+        if (overallSuccess) {
+          addLog('All devices updated successfully!');
+        } else {
+          const successCount = deviceResults.current.filter((r) => r.success).length;
+          const failCount = deviceResults.current.filter((r) => !r.success).length;
+          addLog(`Installation completed: ${successCount} succeeded, ${failCount} failed`);
+          setError(`${failCount} device(s) failed to update`);
+          setShowLogs(true);
+        }
+
+        onComplete({
+          success: overallSuccess,
+          message: overallSuccess
+            ? 'All devices updated successfully'
+            : 'Some devices failed to update',
+          deviceUpdates: deviceResults.current,
+        });
+      }
     } catch (err) {
       const errorMessage =
         typeof err === 'string'
@@ -273,7 +341,15 @@ export function InstallationProgress({
       setError(errorMessage);
       setShowLogs(true); // Auto-expand logs on error
       addLog(`✗ Error: ${errorMessage}`);
-      onComplete(false);
+      onComplete({
+        success: false,
+        message: errorMessage,
+        deviceUpdates: targetDevices.map((d) => ({
+          device: d,
+          success: false,
+          error: errorMessage,
+        })),
+      });
     }
   };
 

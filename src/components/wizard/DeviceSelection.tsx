@@ -18,7 +18,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { deviceService } from '@/services/DeviceService';
 import { Device, DeviceRole } from '@/types';
 import { AlertCircle, CheckCircle2, CircuitBoard, RefreshCw } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface DeviceSelectionProps {
   selectedDevices: Device[];
@@ -34,15 +34,21 @@ export function DeviceSelection({
   const [availableDevices, setAvailableDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);
   const { toast } = useToast();
+  const callIdRef = useRef(0);
 
   useEffect(() => {
     detectDevices();
   }, []);
 
   const detectDevices = async () => {
+    const currentCallId = ++callIdRef.current;
     try {
       setLoading(true);
       const devices = await deviceService.detectDevices();
+
+      // Discard stale responses from overlapping calls
+      if (currentCallId !== callIdRef.current) return;
+
       setAvailableDevices(devices);
 
       if (devices.length === 0) {
@@ -53,6 +59,9 @@ export function DeviceSelection({
         });
       }
     } catch (error) {
+      // Discard stale errors from overlapping calls
+      if (currentCallId !== callIdRef.current) return;
+
       toast({
         variant: 'destructive',
         title: 'Error',
@@ -62,7 +71,9 @@ export function DeviceSelection({
             : 'Failed to detect devices',
       });
     } finally {
-      setLoading(false);
+      if (currentCallId === callIdRef.current) {
+        setLoading(false);
+      }
     }
   };
 

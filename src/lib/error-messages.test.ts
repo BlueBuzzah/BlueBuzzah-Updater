@@ -56,6 +56,17 @@ describe('getErrorGuidance', () => {
     });
   });
 
+  describe('RATE_LIMITED pattern', () => {
+    it('matches "rate limit" errors', () => {
+      expect(getErrorGuidance('GitHub API rate limit exceeded')).toBe(ERROR_GUIDANCE.RATE_LIMITED);
+      expect(getErrorGuidance('Rate limit exceeded. Try again later.')).toBe(ERROR_GUIDANCE.RATE_LIMITED);
+    });
+
+    it('matches rate limit with wait time', () => {
+      expect(getErrorGuidance('GitHub API rate limit exceeded. Try again in 5 minutes.')).toBe(ERROR_GUIDANCE.RATE_LIMITED);
+    });
+  });
+
   describe('NETWORK_ERROR pattern', () => {
     it('matches "network" errors', () => {
       expect(getErrorGuidance('Network error occurred')).toBe(ERROR_GUIDANCE.NETWORK_ERROR);
