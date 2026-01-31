@@ -7,7 +7,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import { useToast } from '@/components/ui/use-toast';
+import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import { getProfileInfo } from '@/lib/therapy-profiles';
 import { useTherapyStore } from '@/stores/therapyStore';
 import type { Device, TherapyProfile, TherapyConfigResult } from '@/types';
@@ -35,7 +35,7 @@ export function TherapySuccess({
   onReset,
   onClose,
 }: TherapySuccessProps) {
-  const { toast } = useToast();
+  const { copyToClipboard } = useCopyToClipboard();
   const { logs } = useTherapyStore();
   const [showLogs, setShowLogs] = useState(false);
 
@@ -43,13 +43,8 @@ export function TherapySuccess({
   const successCount = result.deviceConfigs.filter((c) => c.success).length;
   const failCount = result.deviceConfigs.filter((c) => !c.success).length;
 
-  const exportLogs = () => {
-    const logsText = logs.join('\n');
-    navigator.clipboard.writeText(logsText);
-    toast({
-      title: 'Logs copied',
-      description: 'Configuration logs have been copied to clipboard',
-    });
+  const exportLogs = async () => {
+    await copyToClipboard(logs.join('\n'), 'Configuration logs');
   };
 
   return (

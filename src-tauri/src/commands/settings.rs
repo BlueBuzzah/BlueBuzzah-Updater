@@ -48,3 +48,11 @@ pub async fn save_advanced_settings(
 
     Ok(())
 }
+
+/// Get the current operating system platform.
+///
+/// Returns the OS identifier (e.g., "macos", "windows", "linux").
+#[tauri::command]
+pub async fn get_platform() -> String {
+    std::env::consts::OS.to_string()
+}

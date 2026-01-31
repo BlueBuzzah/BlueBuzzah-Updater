@@ -406,7 +406,7 @@ pub async fn set_device_profile(
     advanced_settings: Option<AdvancedSettings>,
     progress: Channel<ProfileProgressEvent>,
 ) -> Result<(), String> {
-    // Get device info to retrieve serial number
+    // Get device info and create identifier for tracking
     let device = tokio::task::spawn_blocking({
         let port = serial_port.clone();
         move || {
@@ -419,10 +419,14 @@ pub async fn set_device_profile(
     .map_err(|e| format!("Failed to find device: {}", e))?
     .ok_or_else(|| "Device not found".to_string())?;
 
-    let serial_number = device
-        .serial_number
-        .clone()
-        .ok_or_else(|| "Device has no serial number".to_string())?;
+    let device_identifier = DeviceIdentifier::from_device(&device);
+
+    // Log tracking method for diagnostics
+    if device_identifier.has_serial() {
+        eprintln!("[set_device_profile] Tracking device by serial number");
+    } else {
+        eprintln!("[set_device_profile] Device has no serial number - using VID/PID+port pattern");
+    }
 
     // Verify device is in application mode (not bootloader)
     if device.in_bootloader {
@@ -497,11 +501,11 @@ pub async fn set_device_profile(
             // Configure the profile (with or without advanced settings)
             let config_result = if pre_commands.is_empty() {
                 // No advanced settings - use original function with logging
-                let identifier = DeviceIdentifier::Serial(serial_number.clone());
+                let identifier = device_identifier.clone();
                 configure_device_with_settings(&serial_port, &profile, &[], &identifier, log)
             } else {
                 // Has advanced settings - use new function with logging
-                let identifier = DeviceIdentifier::Serial(serial_number.clone());
+                let identifier = device_identifier.clone();
                 configure_device_with_settings(
                     &serial_port,
                     &profile,

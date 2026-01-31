@@ -111,7 +111,8 @@ ${error.details}`;
         title: 'Copied',
         description: 'Error details copied to clipboard.',
       });
-    } catch {
+    } catch (err) {
+      console.warn('Clipboard write failed:', err);
       toast({
         variant: 'destructive',
         title: 'Copy Failed',

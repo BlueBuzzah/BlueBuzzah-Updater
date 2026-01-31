@@ -22,7 +22,8 @@ export const ERROR_GUIDANCE: Record<string, ErrorGuidance> = {
     description: 'Cannot write to the device due to permissions or write protection.',
     resolutionSteps: [
       'Check if the device has a physical write-protect switch',
-      'On macOS: Grant Full Disk Access in System Settings → Privacy & Security → Full Disk Access',
+      'macOS: Grant Full Disk Access in System Settings → Privacy & Security → Full Disk Access',
+      'Windows: Ensure no other application is accessing the device',
       'Ensure the device is not mounted as read-only',
       'Try ejecting and reconnecting the device',
     ],
@@ -41,6 +42,7 @@ export const ERROR_GUIDANCE: Record<string, ErrorGuidance> = {
     description: 'You do not have permission to access or modify the device.',
     resolutionSteps: [
       'macOS: System Settings → Privacy & Security → Full Disk Access → Add your Terminal or IDE',
+      'Windows: Try running the application as Administrator',
       'Ensure you have admin/root privileges if required',
       'Try running the application with elevated permissions',
     ],
@@ -349,4 +351,57 @@ export function formatValidationErrors(errors: string[]): string {
 export function formatValidationWarnings(warnings: string[]): string {
   if (warnings.length === 0) return '';
   return warnings.map((warn) => `⚠️ ${warn}`).join('\n');
+}
+
+/**
+ * Filter resolution steps by platform.
+ * Steps prefixed with "macOS:", "Windows:", or "Linux:" are only shown
+ * on the matching platform. The prefix is stripped for display.
+ * Steps without a platform prefix are shown on all platforms.
+ */
+function filterStepsByPlatform(steps: string[], platform: string): string[] {
+  const platformPrefixes: Record<string, string[]> = {
+    macos: ['macOS:', 'On macOS:'],
+    windows: ['Windows:', 'On Windows:'],
+    linux: ['Linux:', 'On Linux:'],
+  };
+
+  return steps
+    .filter((step) => {
+      // Check if step has ANY platform prefix
+      const allPrefixes = Object.values(platformPrefixes).flat();
+      const hasPrefix = allPrefixes.some((p) => step.startsWith(p));
+      if (!hasPrefix) return true; // Generic step — always include
+
+      // Step has a platform prefix — only include if it matches current platform
+      const matchingPrefixes = platformPrefixes[platform] || [];
+      return matchingPrefixes.some((p) => step.startsWith(p));
+    })
+    .map((step) => {
+      // Strip matching platform prefix for cleaner display
+      const matchingPrefixes = platformPrefixes[platform] || [];
+      for (const prefix of matchingPrefixes) {
+        if (step.startsWith(prefix)) {
+          return step.slice(prefix.length).trim();
+        }
+      }
+      return step;
+    });
+}
+
+/**
+ * Get error guidance with platform-specific resolution steps.
+ * If platform is not provided, returns all steps unfiltered.
+ */
+export function getErrorGuidanceForPlatform(
+  errorMessage: string,
+  platform?: string
+): ErrorGuidance | null {
+  const guidance = getErrorGuidance(errorMessage);
+  if (!guidance || !platform) return guidance;
+
+  return {
+    ...guidance,
+    resolutionSteps: filterStepsByPlatform(guidance.resolutionSteps, platform),
+  };
 }

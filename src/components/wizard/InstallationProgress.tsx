@@ -18,7 +18,7 @@ import {
 	CardTitle,
 } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import { useToast } from '@/components/ui/use-toast';
+import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import { formatValidationErrors, getErrorGuidance } from '@/lib/error-messages';
 import { deviceService } from '@/services/DeviceService';
 import { firmwareService } from '@/services/FirmwareService';
@@ -54,7 +54,7 @@ export function InstallationProgress({
   onProgressUpdate,
 }: InstallationProgressProps) {
   const { updateDeviceInfo, addLog: storeAddLog, logs } = useWizardStore();
-  const { toast } = useToast();
+  const { copyToClipboard } = useCopyToClipboard();
   const [stage, setStage] = useState<'validating' | 'downloading' | 'installing' | 'complete'>(
     'validating'
   );
@@ -111,13 +111,8 @@ export function InstallationProgress({
     }
   };
 
-  const exportLogs = () => {
-    const logsText = logs.join('\n');
-    navigator.clipboard.writeText(logsText);
-    toast({
-      title: 'Logs copied',
-      description: 'Installation logs have been copied to clipboard',
-    });
+  const exportLogs = async () => {
+    await copyToClipboard(logs.join('\n'), 'Installation logs');
   };
 
   const handleRetry = () => {

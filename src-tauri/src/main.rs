@@ -24,7 +24,7 @@ use commands::firmware::{
     verify_and_clean_cache,
     verify_cached_firmware,
 };
-use commands::settings::{get_advanced_settings, save_advanced_settings};
+use commands::settings::{get_advanced_settings, get_platform, save_advanced_settings};
 
 fn main() {
     tauri::Builder::default()
@@ -58,7 +58,8 @@ fn main() {
             verify_and_clean_cache,
             // Settings commands
             get_advanced_settings,
-            save_advanced_settings
+            save_advanced_settings,
+            get_platform
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

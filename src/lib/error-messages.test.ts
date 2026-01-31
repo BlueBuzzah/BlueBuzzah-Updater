@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   getErrorGuidance,
+  getErrorGuidanceForPlatform,
   formatValidationErrors,
   formatValidationWarnings,
   ERROR_GUIDANCE,
@@ -216,5 +217,47 @@ describe('ERROR_GUIDANCE structure', () => {
       expect(guidance.title.length).toBeGreaterThan(0);
       expect(guidance.description.length).toBeGreaterThan(0);
     });
+  });
+});
+
+describe('getErrorGuidanceForPlatform', () => {
+  it('returns null for unmatched errors', () => {
+    expect(getErrorGuidanceForPlatform('completely random error', 'macos')).toBeNull();
+  });
+
+  it('returns all steps when platform is undefined', () => {
+    const guidance = getErrorGuidanceForPlatform('Permission denied');
+    expect(guidance).not.toBeNull();
+    const hasMacStep = guidance!.resolutionSteps.some(s => s.includes('macOS:') || s.includes('System Settings'));
+    expect(hasMacStep).toBe(true);
+  });
+
+  it('filters out Windows steps on macOS', () => {
+    const guidance = getErrorGuidanceForPlatform('Permission denied', 'macos');
+    expect(guidance).not.toBeNull();
+    const hasWindowsStep = guidance!.resolutionSteps.some(s => s.startsWith('Windows:'));
+    expect(hasWindowsStep).toBe(false);
+  });
+
+  it('filters out macOS steps on Windows', () => {
+    const guidance = getErrorGuidanceForPlatform('Permission denied', 'windows');
+    expect(guidance).not.toBeNull();
+    const hasMacStep = guidance!.resolutionSteps.some(s => s.startsWith('macOS:'));
+    expect(hasMacStep).toBe(false);
+  });
+
+  it('strips platform prefix for matching platform', () => {
+    const guidance = getErrorGuidanceForPlatform('Permission denied', 'macos');
+    expect(guidance).not.toBeNull();
+    const macStep = guidance!.resolutionSteps.find(s => s.includes('System Settings'));
+    expect(macStep).toBeDefined();
+    expect(macStep).not.toMatch(/^macOS:/);
+  });
+
+  it('keeps generic steps on all platforms', () => {
+    const macGuidance = getErrorGuidanceForPlatform('Permission denied', 'macos');
+    const winGuidance = getErrorGuidanceForPlatform('Permission denied', 'windows');
+    expect(macGuidance!.resolutionSteps.some(s => s.includes('admin/root'))).toBe(true);
+    expect(winGuidance!.resolutionSteps.some(s => s.includes('admin/root'))).toBe(true);
   });
 });

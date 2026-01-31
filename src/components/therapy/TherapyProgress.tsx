@@ -8,7 +8,7 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import { useToast } from '@/components/ui/use-toast';
+import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import { getProfileInfo } from '@/lib/therapy-profiles';
 import { therapyService } from '@/services/TherapyService';
 import { useTherapyStore } from '@/stores/therapyStore';
@@ -39,7 +39,7 @@ export function TherapyProgress({
   onComplete,
   onProgressUpdate,
 }: TherapyProgressProps) {
-  const { toast } = useToast();
+  const { copyToClipboard } = useCopyToClipboard();
   const { addLog: storeAddLog, logs } = useTherapyStore();
   const [deviceProgress, setDeviceProgress] = useState<
     Map<string, TherapyConfigProgress>
@@ -56,13 +56,8 @@ export function TherapyProgress({
     storeAddLog(`[${new Date().toLocaleTimeString()}] ${message}`);
   };
 
-  const exportLogs = () => {
-    const logsText = logs.join('\n');
-    navigator.clipboard.writeText(logsText);
-    toast({
-      title: 'Logs copied',
-      description: 'Configuration logs have been copied to clipboard',
-    });
+  const exportLogs = async () => {
+    await copyToClipboard(logs.join('\n'), 'Configuration logs');
   };
 
   useEffect(() => {

@@ -87,10 +87,27 @@ impl DeviceIdentifier {
                 pid,
                 port_pattern,
             } => {
-                // Match by VID and device family (app/bootloader pair)
-                device.vid == *vid
-                    && is_same_device_family(device.pid, *pid)
-                    && device.port.contains(port_pattern)
+                if device.vid != *vid || !is_same_device_family(device.pid, *pid) {
+                    return false;
+                }
+                // Try port pattern match first (works on macOS/Linux)
+                if device.port.contains(port_pattern) {
+                    return true;
+                }
+                // On Windows, COM port numbers change after USB re-enumeration.
+                // Fall back to VID + device family match alone.
+                // NOTE: If multiple devices of the same family are connected
+                // without serial numbers, this may match the wrong device.
+                // This is an accepted trade-off since serial number tracking
+                // (DeviceIdentifier::Serial) is the preferred identification path.
+                #[cfg(target_os = "windows")]
+                {
+                    true
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    false
+                }
             }
         }
     }
@@ -537,5 +554,74 @@ mod tests {
         // Different device variants
         assert!(!is_same_device_family(0x8029, 0x002A));
         assert!(!is_same_device_family(0x8029, 0x0052));
+    }
+
+    #[test]
+    fn test_vid_pid_port_matches_with_port_change() {
+        // Simulates Windows re-enumeration: device tracked as COM3 appears on COM5
+        let identifier = DeviceIdentifier::VidPidPort {
+            vid: ADAFRUIT_VID,
+            pid: 0x8029,
+            port_pattern: "COM3".to_string(),
+        };
+
+        let device_different_port = Nrf52Device {
+            port: "COM5".to_string(),
+            vid: ADAFRUIT_VID,
+            pid: 0x0029, // Bootloader mode (same family)
+            serial_number: None,
+            in_bootloader: true,
+            product_name: None,
+            manufacturer: None,
+        };
+
+        // On Windows: should match by VID+family alone
+        // On other platforms: port pattern must match
+        #[cfg(target_os = "windows")]
+        assert!(identifier.matches(&device_different_port));
+        #[cfg(not(target_os = "windows"))]
+        assert!(!identifier.matches(&device_different_port));
+    }
+
+    #[test]
+    fn test_vid_pid_port_rejects_different_vid() {
+        let identifier = DeviceIdentifier::VidPidPort {
+            vid: ADAFRUIT_VID,
+            pid: 0x8029,
+            port_pattern: "COM3".to_string(),
+        };
+
+        let device_wrong_vid = Nrf52Device {
+            port: "COM3".to_string(),
+            vid: 0x1234, // Different VID
+            pid: 0x0029,
+            serial_number: None,
+            in_bootloader: true,
+            product_name: None,
+            manufacturer: None,
+        };
+
+        assert!(!identifier.matches(&device_wrong_vid));
+    }
+
+    #[test]
+    fn test_vid_pid_port_rejects_different_family() {
+        let identifier = DeviceIdentifier::VidPidPort {
+            vid: ADAFRUIT_VID,
+            pid: 0x8029, // Express variant (low byte 0x29)
+            port_pattern: "COM3".to_string(),
+        };
+
+        let device_wrong_family = Nrf52Device {
+            port: "COM3".to_string(),
+            vid: ADAFRUIT_VID,
+            pid: 0x002A, // Sense variant (low byte 0x2A) - different family
+            serial_number: None,
+            in_bootloader: true,
+            product_name: None,
+            manufacturer: None,
+        };
+
+        assert!(!identifier.matches(&device_wrong_family));
     }
 }

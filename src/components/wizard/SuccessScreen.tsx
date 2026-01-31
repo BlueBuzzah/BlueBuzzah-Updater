@@ -8,7 +8,7 @@ import {
 	CardTitle,
 } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
-import { useToast } from '@/components/ui/use-toast';
+import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import { useWizardStore } from '@/stores/wizardStore';
 import { Device, FirmwareRelease } from '@/types';
 import {
@@ -34,7 +34,7 @@ export function SuccessScreen({
   onReset,
   onClose,
 }: SuccessScreenProps) {
-  const { toast } = useToast();
+  const { copyToClipboard } = useCopyToClipboard();
   const { logs, updateResult } = useWizardStore();
   const [showLogs, setShowLogs] = useState(false);
 
@@ -43,13 +43,8 @@ export function SuccessScreen({
   const isPartialSuccess = failCount > 0 && successCount > 0;
   const isAllFailed = failCount > 0 && successCount === 0;
 
-  const exportLogs = () => {
-    const logsText = logs.join('\n');
-    navigator.clipboard.writeText(logsText);
-    toast({
-      title: 'Logs copied',
-      description: 'Installation logs have been copied to clipboard',
-    });
+  const exportLogs = async () => {
+    await copyToClipboard(logs.join('\n'), 'Installation logs');
   };
 
   return (

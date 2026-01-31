@@ -98,12 +98,36 @@ pub fn get_reboot_timeout() -> u64 {
     }
 }
 
+/// Get platform-specific settle delay before polling for device after reboot.
+///
+/// After a device reboots, we wait before starting to poll for it.
+/// Windows needs more time due to slower USB driver re-initialization.
+pub fn get_reboot_settle_delay() -> u64 {
+    #[cfg(target_os = "windows")]
+    {
+        3000 // Windows: 3 seconds
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        1500 // macOS: 1.5 seconds
+    }
+
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    {
+        REBOOT_SETTLE_DELAY_MS
+    }
+}
+
 /// Interval between port scans when waiting for bootloader.
 /// Reduced from 500ms to 250ms for faster device detection.
 pub const PORT_SCAN_INTERVAL: Duration = Duration::from_millis(250);
 
 /// Timeout waiting for device to reboot into application mode.
 pub const REBOOT_TIMEOUT_MS: u64 = 10_000;
+
+/// Default settle delay before polling for device after reboot (milliseconds).
+pub const REBOOT_SETTLE_DELAY_MS: u64 = 2000;
 
 /// Timeout for role configuration command.
 pub const ROLE_CONFIG_TIMEOUT_MS: u64 = 5000;
@@ -415,5 +439,11 @@ mod tests {
         assert!(is_compatible_device(ADAFRUIT_VID, 0x0029));
         assert!(!is_compatible_device(0x1234, 0x8029));
         assert!(!is_compatible_device(ADAFRUIT_VID, 0x1234));
+    }
+
+    #[test]
+    fn test_get_reboot_settle_delay() {
+        let delay = get_reboot_settle_delay();
+        assert!(delay >= 1000 && delay <= 5000);
     }
 }

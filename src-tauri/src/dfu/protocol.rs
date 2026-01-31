@@ -13,12 +13,12 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 
 use super::config::{
-    calculate_erase_wait_time, get_bootloader_timeout, get_reboot_timeout, ACK_TIMEOUT_MS,
-    CONFIG_RETRY_DELAY_MS, FIRMWARE_TRANSFER_TIMEOUT_SECS, FLASH_PAGE_WRITE_TIME_MS,
-    FRAMES_PER_FLASH_PAGE, MAX_CONFIG_RETRIES, MAX_PACKET_RETRIES, PROFILE_CONFIG_TIMEOUT_MS,
-    PROFILE_GENTLE_COMMAND, PROFILE_HYBRID_COMMAND, PROFILE_NOISY_COMMAND,
-    PROFILE_REGULAR_COMMAND, RETRY_BASE_DELAY_MS, ROLE_CONFIG_TIMEOUT_MS, ROLE_PRIMARY_COMMAND,
-    ROLE_SECONDARY_COMMAND,
+    calculate_erase_wait_time, get_bootloader_timeout, get_reboot_settle_delay, get_reboot_timeout,
+    ACK_TIMEOUT_MS, CONFIG_RETRY_DELAY_MS, FIRMWARE_TRANSFER_TIMEOUT_SECS,
+    FLASH_PAGE_WRITE_TIME_MS, FRAMES_PER_FLASH_PAGE, MAX_CONFIG_RETRIES, MAX_PACKET_RETRIES,
+    PROFILE_CONFIG_TIMEOUT_MS, PROFILE_GENTLE_COMMAND, PROFILE_HYBRID_COMMAND,
+    PROFILE_NOISY_COMMAND, PROFILE_REGULAR_COMMAND, RETRY_BASE_DELAY_MS, ROLE_CONFIG_TIMEOUT_MS,
+    ROLE_PRIMARY_COMMAND, ROLE_SECONDARY_COMMAND,
 };
 use super::device::{
     get_device_by_port, wait_for_application_by_serial, wait_for_application_flexible,
@@ -549,7 +549,7 @@ where
 
     // Step 9: Wait for device to reboot into application mode
     on_progress(DfuStage::WaitingForReboot);
-    std::thread::sleep(Duration::from_millis(2000)); // Give device time to boot
+    std::thread::sleep(Duration::from_millis(get_reboot_settle_delay())); // Give device time to boot
     let app_device = wait_for_application_flexible(&device_identifier, get_reboot_timeout())?;
 
     // Step 10: Configure device role
@@ -639,7 +639,7 @@ fn configure_device_role(port_name: &str, role: &str, serial_number: &str) -> Df
                 drop(transport);
 
                 // Wait for device to reboot and reappear
-                std::thread::sleep(Duration::from_millis(2000));
+                std::thread::sleep(Duration::from_millis(get_reboot_settle_delay()));
                 wait_for_application_by_serial(serial_number, get_reboot_timeout())?;
 
                 return Ok(());
@@ -678,16 +678,22 @@ fn configure_device_role_flexible(
     identifier: &DeviceIdentifier,
 ) -> DfuResult<()> {
     let mut last_error: Option<DfuError> = None;
+    let mut current_port = port_name.to_string();
 
     for attempt in 0..=MAX_CONFIG_RETRIES {
-        // On retry, wait for device to stabilize
+        // On retry, wait for device to stabilize and update port
         if attempt > 0 {
             std::thread::sleep(Duration::from_millis(CONFIG_RETRY_DELAY_MS));
-            // Re-wait for device to be available
-            let _ = wait_for_application_flexible(identifier, 5000);
+            // Re-wait for device and capture updated port
+            if let Ok(device) = wait_for_application_flexible(identifier, 5000) {
+                if device.port != current_port {
+                    eprintln!("[configure_device_role] Device reappeared on new port: {}", device.port);
+                }
+                current_port = device.port;
+            }
         }
 
-        match configure_device_role_flexible_inner(port_name, role, identifier) {
+        match configure_device_role_flexible_inner(&current_port, role, identifier) {
             Ok(()) => return Ok(()),
             Err(e) if e.is_retriable() && attempt < MAX_CONFIG_RETRIES => {
                 last_error = Some(e);
@@ -755,7 +761,7 @@ fn configure_device_role_flexible_inner(
                 drop(transport);
 
                 // Wait for device to reboot and reappear
-                std::thread::sleep(Duration::from_millis(2000));
+                std::thread::sleep(Duration::from_millis(get_reboot_settle_delay()));
                 wait_for_application_flexible(identifier, get_reboot_timeout())?;
 
                 return Ok(());
@@ -946,7 +952,7 @@ pub fn configure_device_profile_flexible<L: Fn(&str)>(
 
                 // Wait for device to reboot and reappear
                 log("Waiting for device to reboot...");
-                std::thread::sleep(Duration::from_millis(2000));
+                std::thread::sleep(Duration::from_millis(get_reboot_settle_delay()));
                 wait_for_application_flexible(identifier, get_reboot_timeout())?;
                 log("Device reappeared after reboot");
 
@@ -1088,21 +1094,25 @@ pub fn configure_device_with_settings<L: Fn(&str) + Clone>(
     log: L,
 ) -> DfuResult<()> {
     let mut last_error: Option<DfuError> = None;
+    let mut current_port = port_name.to_string();
 
     for attempt in 0..=MAX_CONFIG_RETRIES {
-        // On retry, wait for device to stabilize
+        // On retry, wait for device to stabilize and update port
         if attempt > 0 {
             log(&format!(
                 "Profile configuration retry {}/{}",
                 attempt, MAX_CONFIG_RETRIES
             ));
             std::thread::sleep(Duration::from_millis(CONFIG_RETRY_DELAY_MS));
-            // Re-wait for device to be available
-            let _ = wait_for_application_flexible(identifier, 5000);
+            // Re-wait for device and capture updated port
+            if let Ok(device) = wait_for_application_flexible(identifier, 5000) {
+                log(&format!("Device reappeared on port: {}", device.port));
+                current_port = device.port;
+            }
         }
 
         match configure_device_with_settings_inner(
-            port_name,
+            &current_port,
             profile,
             pre_profile_commands,
             identifier,
@@ -1204,7 +1214,7 @@ fn configure_device_with_settings_inner<L: Fn(&str)>(
                 drop(transport);
 
                 log("Waiting for device to reboot...");
-                std::thread::sleep(Duration::from_millis(2000));
+                std::thread::sleep(Duration::from_millis(get_reboot_settle_delay()));
                 wait_for_application_flexible(identifier, get_reboot_timeout())?;
                 log("Device reappeared after reboot");
 

@@ -116,9 +116,11 @@ impl SerialTransport {
 
                     // Check for transient errors that may resolve after driver initialization:
                     // - "not functioning": Windows driver not ready after USB re-enumeration
+                    // - "device not configured": macOS transient state during USB re-enumeration
                     // - "resource temporarily unavailable": Device briefly unavailable
                     // - "interrupted": Operation interrupted, may succeed on retry
                     let is_transient = err_str.contains("not functioning")
+                        || err_str.contains("device not configured")
                         || err_str.contains("temporarily unavailable")
                         || err_str.contains("interrupted");
 
