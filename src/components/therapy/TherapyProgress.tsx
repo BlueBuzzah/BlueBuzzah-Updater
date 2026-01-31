@@ -65,10 +65,6 @@ export function TherapyProgress({
     if (hasStartedRef.current) return;
     hasStartedRef.current = true;
     startConfiguration();
-
-    return () => {
-      cancelledRef.current = true;
-    };
   }, []);
 
   const startConfiguration = async () => {

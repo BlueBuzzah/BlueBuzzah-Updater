@@ -84,7 +84,7 @@ export function InstallationProgress({
     startInstallation();
 
     return () => {
-      cancelledRef.current = true;
+      // Only cancel the Rust-side DFU operation on unmount.
       deviceService.cancelFlash().catch(() => {});
     };
   }, []);
