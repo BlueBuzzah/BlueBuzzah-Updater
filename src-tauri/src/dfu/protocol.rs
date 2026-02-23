@@ -861,7 +861,12 @@ fn drain_boot_output(transport: &mut SerialTransport) -> DfuResult<bool> {
 /// Note: For flexible device tracking, use `configure_device_profile_flexible()` instead.
 #[allow(dead_code)]
 pub fn configure_device_profile(port_name: &str, profile: &str, serial_number: &str) -> DfuResult<()> {
-    let identifier = DeviceIdentifier::Serial(serial_number.to_string());
+    let identifier = DeviceIdentifier::Serial {
+        serial: serial_number.to_string(),
+        vid: super::config::ADAFRUIT_VID,
+        pid: 0x8029,
+        port_pattern: String::new(),
+    };
     configure_device_profile_flexible(port_name, profile, &identifier, |_| {})
 }
 

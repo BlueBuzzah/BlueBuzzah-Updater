@@ -50,7 +50,14 @@ impl Nrf52Device {
 #[derive(Debug, Clone)]
 pub enum DeviceIdentifier {
     /// Track by USB serial number (preferred method).
-    Serial(String),
+    /// Also stores VID/PID/port for fallback to VidPidPort matching if serial changes
+    /// (e.g., first-time DFU from factory firmware).
+    Serial {
+        serial: String,
+        vid: u16,
+        pid: u16,
+        port_pattern: String,
+    },
     /// Track by VID/PID and port pattern (fallback for devices without serial).
     VidPidPort {
         vid: u16,
@@ -64,10 +71,15 @@ impl DeviceIdentifier {
     ///
     /// Prefers serial number tracking if available, falls back to VID/PID+port pattern.
     pub fn from_device(device: &Nrf52Device) -> Self {
+        let pattern = extract_port_pattern(&device.port);
         if let Some(ref serial) = device.serial_number {
-            DeviceIdentifier::Serial(serial.clone())
+            DeviceIdentifier::Serial {
+                serial: serial.clone(),
+                vid: device.vid,
+                pid: device.pid,
+                port_pattern: pattern,
+            }
         } else {
-            let pattern = extract_port_pattern(&device.port);
             DeviceIdentifier::VidPidPort {
                 vid: device.vid,
                 pid: device.pid,
@@ -79,7 +91,7 @@ impl DeviceIdentifier {
     /// Check if this identifier matches a given device.
     pub fn matches(&self, device: &Nrf52Device) -> bool {
         match self {
-            DeviceIdentifier::Serial(serial) => {
+            DeviceIdentifier::Serial { serial, .. } => {
                 device.serial_number.as_deref() == Some(serial.as_str())
             }
             DeviceIdentifier::VidPidPort {
@@ -114,7 +126,23 @@ impl DeviceIdentifier {
 
     /// Check if this identifier uses serial number tracking.
     pub fn has_serial(&self) -> bool {
-        matches!(self, DeviceIdentifier::Serial(_))
+        matches!(self, DeviceIdentifier::Serial { .. })
+    }
+
+    /// Create a VidPidPort fallback identifier from a Serial identifier.
+    /// Used when USB serial number may have changed (e.g., first-time DFU).
+    /// Returns None if already a VidPidPort identifier.
+    pub fn to_vid_pid_fallback(&self) -> Option<Self> {
+        match self {
+            DeviceIdentifier::Serial {
+                vid, pid, port_pattern, ..
+            } => Some(DeviceIdentifier::VidPidPort {
+                vid: *vid,
+                pid: *pid,
+                port_pattern: port_pattern.clone(),
+            }),
+            DeviceIdentifier::VidPidPort { .. } => None,
+        }
     }
 }
 
@@ -327,6 +355,37 @@ pub fn wait_for_bootloader_flexible(
         std::thread::sleep(PORT_SCAN_INTERVAL);
     }
 
+    // Phase 2: If serial tracking timed out, retry with VidPidPort fallback.
+    // This handles the case where USB serial number changes after first-time DFU.
+    if let Some(fallback) = identifier.to_vid_pid_fallback() {
+        eprintln!(
+            "[DFU] Serial tracking timed out after {}ms, attempting VidPidPort fallback",
+            timeout_ms
+        );
+        let fallback_timeout = Duration::from_millis(timeout_ms);
+        let fallback_start = Instant::now();
+        consecutive_detections = 0;
+
+        while fallback_start.elapsed() < fallback_timeout {
+            if let Some(device) = find_nrf52_devices()
+                .into_iter()
+                .find(|d| d.in_bootloader && fallback.matches(d))
+            {
+                consecutive_detections += 1;
+                if consecutive_detections >= REQUIRED_CONSECUTIVE {
+                    eprintln!(
+                        "[DFU] VidPidPort fallback found device on port {}",
+                        device.port
+                    );
+                    return Ok(device);
+                }
+            } else {
+                consecutive_detections = 0;
+            }
+            std::thread::sleep(PORT_SCAN_INTERVAL);
+        }
+    }
+
     Err(DfuError::BootloaderTimeout { timeout_ms })
 }
 
@@ -363,6 +422,37 @@ pub fn wait_for_application_flexible(
             consecutive_detections = 0;
         }
         std::thread::sleep(PORT_SCAN_INTERVAL);
+    }
+
+    // Phase 2: If serial tracking timed out, retry with VidPidPort fallback.
+    // This handles the case where USB serial number changes after first-time DFU.
+    if let Some(fallback) = identifier.to_vid_pid_fallback() {
+        eprintln!(
+            "[DFU] Serial tracking timed out after {}ms, attempting VidPidPort fallback",
+            timeout_ms
+        );
+        let fallback_timeout = Duration::from_millis(timeout_ms);
+        let fallback_start = Instant::now();
+        consecutive_detections = 0;
+
+        while fallback_start.elapsed() < fallback_timeout {
+            if let Some(device) = find_nrf52_devices()
+                .into_iter()
+                .find(|d| !d.in_bootloader && fallback.matches(d))
+            {
+                consecutive_detections += 1;
+                if consecutive_detections >= REQUIRED_CONSECUTIVE {
+                    eprintln!(
+                        "[DFU] VidPidPort fallback found device on port {}",
+                        device.port
+                    );
+                    return Ok(device);
+                }
+            } else {
+                consecutive_detections = 0;
+            }
+            std::thread::sleep(PORT_SCAN_INTERVAL);
+        }
     }
 
     Err(DfuError::BootloaderTimeout { timeout_ms })
@@ -435,7 +525,12 @@ mod tests {
 
         let identifier = DeviceIdentifier::from_device(&device);
         assert!(identifier.has_serial());
-        assert!(matches!(identifier, DeviceIdentifier::Serial(s) if s == "ABC123"));
+        assert!(matches!(
+            identifier,
+            DeviceIdentifier::Serial { ref serial, vid, pid, ref port_pattern }
+                if serial == "ABC123" && vid == ADAFRUIT_VID && pid == 0x8029
+                   && port_pattern == "usbmodem123"
+        ));
     }
 
     #[test]
@@ -461,7 +556,12 @@ mod tests {
 
     #[test]
     fn test_device_identifier_matches_serial() {
-        let identifier = DeviceIdentifier::Serial("ABC123".to_string());
+        let identifier = DeviceIdentifier::Serial {
+            serial: "ABC123".to_string(),
+            vid: ADAFRUIT_VID,
+            pid: 0x8029,
+            port_pattern: "usbmodem142".to_string(),
+        };
 
         let device_match = Nrf52Device {
             port: "/dev/cu.usbmodem9999".to_string(),
@@ -623,5 +723,54 @@ mod tests {
         };
 
         assert!(!identifier.matches(&device_wrong_family));
+    }
+
+    #[test]
+    fn test_device_identifier_serial_stores_fallback_info() {
+        let device = Nrf52Device {
+            port: "COM19".to_string(),
+            vid: ADAFRUIT_VID,
+            pid: 0x8029,
+            serial_number: Some("FACTORY123".to_string()),
+            in_bootloader: false,
+            product_name: None,
+            manufacturer: None,
+        };
+        let identifier = DeviceIdentifier::from_device(&device);
+        assert!(identifier.has_serial());
+        let fallback = identifier.to_vid_pid_fallback();
+        assert!(fallback.is_some());
+        assert!(!fallback.unwrap().has_serial());
+    }
+
+    #[test]
+    fn test_vid_pid_fallback_matches_changed_serial() {
+        let identifier = DeviceIdentifier::Serial {
+            serial: "FACTORY123".to_string(),
+            vid: ADAFRUIT_VID,
+            pid: 0x8029,
+            port_pattern: "COM19".to_string(),
+        };
+        let fallback = identifier.to_vid_pid_fallback().unwrap();
+        let device = Nrf52Device {
+            port: "COM19".to_string(),
+            vid: ADAFRUIT_VID,
+            pid: 0x8029,
+            serial_number: Some("BLUEBUZZAH456".to_string()),
+            in_bootloader: false,
+            product_name: None,
+            manufacturer: None,
+        };
+        assert!(fallback.matches(&device));
+    }
+
+    #[test]
+    fn test_vid_pid_fallback_from_vid_pid_port_returns_none() {
+        let identifier = DeviceIdentifier::VidPidPort {
+            vid: ADAFRUIT_VID,
+            pid: 0x8029,
+            port_pattern: "COM19".to_string(),
+        };
+        assert!(identifier.to_vid_pid_fallback().is_none());
     }
 }
