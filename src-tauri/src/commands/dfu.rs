@@ -9,6 +9,12 @@ use std::thread;
 use std::time::Duration;
 use tauri::ipc::Channel;
 
+use crate::dfu::{
+    configure_device_with_settings, find_nrf52_devices, upload_firmware, DeviceIdentifier,
+    DfuStage, Nrf52Device,
+};
+use crate::settings::AdvancedSettings;
+
 /// Maximum number of operation-level retries for complete DFU failure.
 /// This catches high-level failures like bootloader entry timeout or device disconnect.
 /// Increased from 1 to 2 (3 total attempts) for better reliability on Windows.
@@ -61,25 +67,44 @@ fn is_operation_retriable(error: &str) -> bool {
 /// Re-scan for a device that may have moved to a different port after USB re-enumeration.
 ///
 /// On retry, the original COM port may no longer be valid. This function scans all
-/// connected devices and finds one matching the Adafruit VID with a compatible PID.
-/// If the original port is still valid, it is preferred.
-fn find_device_port_for_retry(original_port: &str) -> Option<String> {
-    let devices = find_nrf52_devices();
+/// connected devices and tries to find the specific device by serial number first,
+/// then falls back to port match, then any single compatible device.
+///
+/// Polls briefly (3 attempts, 500ms apart) in case the device is still re-enumerating.
+fn find_device_port_for_retry(
+    original_port: &str,
+    serial_number: Option<&str>,
+) -> Option<String> {
+    // Poll briefly in case device is still re-enumerating
+    for _ in 0..3 {
+        let devices = find_nrf52_devices();
 
-    // Prefer the original port if device is still there
-    if let Some(device) = devices.iter().find(|d| d.port == original_port) {
-        return Some(device.port.clone());
+        // Prefer the original port if device is still there
+        if let Some(device) = devices.iter().find(|d| d.port == original_port) {
+            return Some(device.port.clone());
+        }
+
+        // Try matching by serial number (most reliable identifier)
+        if let Some(serial) = serial_number {
+            if let Some(device) = devices
+                .iter()
+                .find(|d| d.serial_number.as_deref() == Some(serial))
+            {
+                return Some(device.port.clone());
+            }
+        }
+
+        // Last resort: only if there's exactly one device, use it
+        // (avoids picking wrong device when multiple are connected)
+        if devices.len() == 1 {
+            return Some(devices.into_iter().next().unwrap().port);
+        }
+
+        std::thread::sleep(std::time::Duration::from_millis(500));
     }
 
-    // Otherwise, find any compatible device (application or bootloader mode)
-    devices.into_iter().next().map(|d| d.port)
+    None
 }
-
-use crate::dfu::{
-    configure_device_with_settings, find_nrf52_devices, upload_firmware, DeviceIdentifier,
-    DfuStage, Nrf52Device,
-};
-use crate::settings::AdvancedSettings;
 
 /// Device information for the frontend.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -223,6 +248,12 @@ pub async fn flash_dfu_firmware(
     // Reset cancellation flag at start of new operation
     DFU_CANCELLED.store(false, Ordering::SeqCst);
 
+    // Capture device serial number for retry re-scan (before the loop)
+    let device_serial: Option<String> = find_nrf52_devices()
+        .into_iter()
+        .find(|d| d.port == serial_port)
+        .and_then(|d| d.serial_number);
+
     for attempt in 0..=MAX_OPERATION_RETRIES {
         // Check for cancellation before each attempt
         if is_dfu_cancelled() {
@@ -245,7 +276,7 @@ pub async fn flash_dfu_firmware(
                 ),
             });
 
-            match find_device_port_for_retry(&serial_port) {
+            match find_device_port_for_retry(&serial_port, device_serial.as_deref()) {
                 Some(port) => {
                     if port != serial_port {
                         let _ = progress.send(DfuProgressEvent {
@@ -306,6 +337,10 @@ pub async fn flash_dfu_firmware(
                 // Wait before retry to allow device to stabilize
                 tokio::time::sleep(Duration::from_secs(delay_secs)).await;
 
+                // Check if cancelled during sleep before resetting
+                if is_dfu_cancelled() {
+                    return Err("Operation cancelled by user".to_string());
+                }
                 // Reset cancellation flag for retry
                 DFU_CANCELLED.store(false, Ordering::SeqCst);
             }
