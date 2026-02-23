@@ -91,8 +91,9 @@ impl DeviceIdentifier {
     /// Check if this identifier matches a given device.
     pub fn matches(&self, device: &Nrf52Device) -> bool {
         match self {
-            DeviceIdentifier::Serial { serial, .. } => {
-                device.serial_number.as_deref() == Some(serial.as_str())
+            DeviceIdentifier::Serial { serial, vid, .. } => {
+                device.vid == *vid
+                    && device.serial_number.as_deref() == Some(serial.as_str())
             }
             DeviceIdentifier::VidPidPort {
                 vid,
@@ -156,7 +157,7 @@ fn extract_port_pattern(port: &str) -> String {
     // but the base "usbmodem142" stays consistent for the same device
     if let Some(idx) = port.rfind("usbmodem") {
         let start = idx;
-        // Take "usbmodem" + first 3 digits (12 chars total)
+        // Take "usbmodem" (8 chars) + first 3 digits = 11 chars total
         let end = (start + 11).min(port.len());
         return port[start..end].to_string();
     }
@@ -358,11 +359,13 @@ pub fn wait_for_bootloader_flexible(
     // Phase 2: If serial tracking timed out, retry with VidPidPort fallback.
     // This handles the case where USB serial number changes after first-time DFU.
     if let Some(fallback) = identifier.to_vid_pid_fallback() {
+        let elapsed_ms = start.elapsed().as_millis() as u64;
+        let fallback_budget_ms = timeout_ms.saturating_sub(elapsed_ms).max(5_000);
         eprintln!(
-            "[DFU] Serial tracking timed out after {}ms, attempting VidPidPort fallback",
-            timeout_ms
+            "[DFU] Serial tracking timed out after {}ms, attempting VidPidPort fallback (budget: {}ms)",
+            elapsed_ms, fallback_budget_ms
         );
-        let fallback_timeout = Duration::from_millis(timeout_ms);
+        let fallback_timeout = Duration::from_millis(fallback_budget_ms);
         let fallback_start = Instant::now();
         consecutive_detections = 0;
 
@@ -427,11 +430,13 @@ pub fn wait_for_application_flexible(
     // Phase 2: If serial tracking timed out, retry with VidPidPort fallback.
     // This handles the case where USB serial number changes after first-time DFU.
     if let Some(fallback) = identifier.to_vid_pid_fallback() {
+        let elapsed_ms = start.elapsed().as_millis() as u64;
+        let fallback_budget_ms = timeout_ms.saturating_sub(elapsed_ms).max(5_000);
         eprintln!(
-            "[DFU] Serial tracking timed out after {}ms, attempting VidPidPort fallback",
-            timeout_ms
+            "[DFU] Serial tracking timed out after {}ms, attempting VidPidPort fallback (budget: {}ms)",
+            elapsed_ms, fallback_budget_ms
         );
-        let fallback_timeout = Duration::from_millis(timeout_ms);
+        let fallback_timeout = Duration::from_millis(fallback_budget_ms);
         let fallback_start = Instant::now();
         consecutive_detections = 0;
 
