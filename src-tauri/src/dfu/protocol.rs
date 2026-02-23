@@ -546,11 +546,20 @@ where
 
     // Close serial port to allow device to reboot
     drop(protocol);
+    on_progress(DfuStage::Log {
+        message: "Transfer complete, waiting for device to reboot...".to_string(),
+    });
 
     // Step 9: Wait for device to reboot into application mode
     on_progress(DfuStage::WaitingForReboot);
     std::thread::sleep(Duration::from_millis(get_reboot_settle_delay())); // Give device time to boot
+    on_progress(DfuStage::Log {
+        message: format!("Scanning for device in application mode (timeout: {}ms)...", get_reboot_timeout()),
+    });
     let app_device = wait_for_application_flexible(&device_identifier, get_reboot_timeout())?;
+    on_progress(DfuStage::Log {
+        message: format!("Device found on port {}", app_device.port),
+    });
 
     // Step 10: Configure device role
     // Note: This will cause another reboot as the device restarts after role change
