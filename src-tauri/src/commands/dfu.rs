@@ -194,33 +194,37 @@ pub async fn detect_dfu_devices() -> Result<Vec<DfuDevice>, String> {
         // Poll briefly to allow for Windows USB driver initialization on
         // first-time device connections. Returns once device count stabilizes.
         let raw_devices = {
-            let mut last_count = 0usize;
-            let mut stable_iterations = 0u32;
             let max_iterations = 8; // 8 * 500ms = 4 seconds max
-            let required_stable = 2; // Need 2 consecutive same-count scans
-            let mut final_devices = None;
+            let required_stable: u32 = 2; // Need 2 consecutive same-count scans
 
-            for _ in 0..max_iterations {
+            // Perform initial scan to seed comparison — avoids mandatory
+            // delay when a device is already connected.
+            let mut last_devices = find_nrf52_devices();
+            let mut last_count = last_devices.len();
+            let mut stable_iterations: u32 = if last_count > 0 { 1 } else { 0 };
+
+            let mut i = 0;
+            loop {
+                if stable_iterations >= required_stable || i >= max_iterations {
+                    // Device count stabilized or timeout — return what we have
+                    break last_devices;
+                }
+
+                std::thread::sleep(std::time::Duration::from_millis(500));
+
                 let devices = find_nrf52_devices();
                 let current_count = devices.len();
 
                 if current_count > 0 && current_count == last_count {
                     stable_iterations += 1;
-                    if stable_iterations >= required_stable {
-                        // Device count stabilized — return results
-                        final_devices = Some(devices);
-                        break;
-                    }
                 } else {
-                    stable_iterations = 0;
+                    stable_iterations = if current_count > 0 { 1 } else { 0 };
                 }
 
                 last_count = current_count;
-                std::thread::sleep(std::time::Duration::from_millis(500));
+                last_devices = devices;
+                i += 1;
             }
-
-            // Timeout — return whatever we have (may be empty, which is fine)
-            final_devices.unwrap_or_else(find_nrf52_devices)
         };
 
         let mut devices: Vec<DfuDevice> = raw_devices
