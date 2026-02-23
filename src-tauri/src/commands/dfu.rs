@@ -184,11 +184,46 @@ impl From<DfuStage> for DfuProgressEvent {
 ///
 /// Returns a list of devices that can be updated via DFU.
 /// Devices with duplicate labels are automatically numbered (e.g., "Device #1", "Device #2").
+///
+/// Polls briefly to allow for Windows USB driver initialization on first-time
+/// device connections. Returns once device count stabilizes or timeout is reached.
 #[tauri::command]
 pub async fn detect_dfu_devices() -> Result<Vec<DfuDevice>, String> {
     // Run device detection in a blocking task
     let devices = tokio::task::spawn_blocking(|| {
-        let mut devices: Vec<DfuDevice> = find_nrf52_devices()
+        // Poll briefly to allow for Windows USB driver initialization on
+        // first-time device connections. Returns once device count stabilizes.
+        let raw_devices = {
+            let mut last_count = 0usize;
+            let mut stable_iterations = 0u32;
+            let max_iterations = 8; // 8 * 500ms = 4 seconds max
+            let required_stable = 2; // Need 2 consecutive same-count scans
+            let mut final_devices = None;
+
+            for _ in 0..max_iterations {
+                let devices = find_nrf52_devices();
+                let current_count = devices.len();
+
+                if current_count > 0 && current_count == last_count {
+                    stable_iterations += 1;
+                    if stable_iterations >= required_stable {
+                        // Device count stabilized — return results
+                        final_devices = Some(devices);
+                        break;
+                    }
+                } else {
+                    stable_iterations = 0;
+                }
+
+                last_count = current_count;
+                std::thread::sleep(std::time::Duration::from_millis(500));
+            }
+
+            // Timeout — return whatever we have (may be empty, which is fine)
+            final_devices.unwrap_or_else(find_nrf52_devices)
+        };
+
+        let mut devices: Vec<DfuDevice> = raw_devices
             .into_iter()
             .map(DfuDevice::from)
             .collect();
