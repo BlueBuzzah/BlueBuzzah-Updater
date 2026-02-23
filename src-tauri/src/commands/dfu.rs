@@ -58,6 +58,23 @@ fn is_operation_retriable(error: &str) -> bool {
         || e.contains("temporarily unavailable")
 }
 
+/// Re-scan for a device that may have moved to a different port after USB re-enumeration.
+///
+/// On retry, the original COM port may no longer be valid. This function scans all
+/// connected devices and finds one matching the Adafruit VID with a compatible PID.
+/// If the original port is still valid, it is preferred.
+fn find_device_port_for_retry(original_port: &str) -> Option<String> {
+    let devices = find_nrf52_devices();
+
+    // Prefer the original port if device is still there
+    if let Some(device) = devices.iter().find(|d| d.port == original_port) {
+        return Some(device.port.clone());
+    }
+
+    // Otherwise, find any compatible device (application or bootloader mode)
+    devices.into_iter().next().map(|d| d.port)
+}
+
 use crate::dfu::{
     configure_device_with_settings, find_nrf52_devices, upload_firmware, DeviceIdentifier,
     DfuStage, Nrf52Device,
@@ -212,8 +229,10 @@ pub async fn flash_dfu_firmware(
             return Err("Operation cancelled by user".to_string());
         }
 
-        // Report retry attempt to frontend (except for first attempt)
-        if attempt > 0 {
+        // On retry, re-scan for the device in case it moved to a different port
+        let port_to_use = if attempt == 0 {
+            serial_port.clone()
+        } else {
             let _ = progress.send(DfuProgressEvent {
                 stage: "retrying".to_string(),
                 sent: None,
@@ -225,10 +244,39 @@ pub async fn flash_dfu_firmware(
                     MAX_OPERATION_RETRIES + 1
                 ),
             });
-        }
+
+            match find_device_port_for_retry(&serial_port) {
+                Some(port) => {
+                    if port != serial_port {
+                        let _ = progress.send(DfuProgressEvent {
+                            stage: "log".to_string(),
+                            sent: None,
+                            total: None,
+                            percent: -1.0,
+                            message: format!(
+                                "Device re-enumerated from {} to {}",
+                                serial_port, port
+                            ),
+                        });
+                    }
+                    port
+                }
+                None => {
+                    let _ = progress.send(DfuProgressEvent {
+                        stage: "log".to_string(),
+                        sent: None,
+                        total: None,
+                        percent: -1.0,
+                        message: "Device not found during re-scan, using original port"
+                            .to_string(),
+                    });
+                    serial_port.clone()
+                }
+            }
+        };
 
         let result = flash_dfu_firmware_inner(
-            serial_port.clone(),
+            port_to_use,
             firmware_path.clone(),
             device_role.clone(),
             progress.clone(),
