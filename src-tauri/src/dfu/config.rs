@@ -168,6 +168,34 @@ pub const MAX_CONFIG_RETRIES: u32 = 2;
 /// Delay between config retries (ms).
 pub const CONFIG_RETRY_DELAY_MS: u64 = 1000;
 
+// ============================================================================
+// Port Open Configuration
+// ============================================================================
+
+/// Maximum retries when opening a serial port to handle transient USB driver issues.
+/// Higher count for first-time device connections on Windows where the USB CDC ACM
+/// driver takes longer to initialize.
+pub const MAX_PORT_OPEN_RETRIES: u32 = 15;
+
+/// Retries for the 1200 baud touch open (fewer since touch is time-sensitive).
+pub const MAX_TOUCH_OPEN_RETRIES: u32 = 8;
+
+/// Maximum time to wait for a single serial port open attempt (milliseconds).
+///
+/// On Windows, `CreateFile` for COM ports can block for 10-30+ seconds when the
+/// USB CDC ACM driver is initializing for a first-time device connection.
+/// This timeout caps each individual open attempt so retries can proceed quickly.
+///
+/// Only used on Windows; other platforms open ports nearly instantly.
+pub const PORT_OPEN_TIMEOUT_MS: u64 = 3000;
+
+/// Base delay between port open retries (ms).
+/// Uses exponential backoff: 200ms, 400ms, 800ms, 1000ms (capped).
+pub const PORT_OPEN_BASE_DELAY_MS: u64 = 200;
+
+/// Maximum delay between port open retries (ms).
+pub const PORT_OPEN_MAX_DELAY_MS: u64 = 1000;
+
 /// Get platform-specific wait multiplier for touch retries.
 ///
 /// On retry attempts, we use progressively longer waits to allow

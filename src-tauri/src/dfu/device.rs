@@ -323,8 +323,10 @@ pub fn wait_for_application_by_serial(serial: &str, timeout_ms: u64) -> DfuResul
 
 /// Wait for a device to appear in bootloader mode using flexible tracking.
 ///
-/// This function supports both serial number and VID/PID+port pattern tracking,
-/// making it work with devices that don't have a serial number.
+/// Checks both serial number AND VidPidPort matching on every poll iteration,
+/// rather than running serial tracking to timeout before trying VidPidPort.
+/// This eliminates the 20-second waste when serial numbers change during
+/// first-time DFU (factory firmware → BlueBuzzah bootloader).
 ///
 /// # Arguments
 /// * `identifier` - Device identifier (serial or VID/PID+port)
@@ -340,53 +342,60 @@ pub fn wait_for_bootloader_flexible(
     let timeout = Duration::from_millis(timeout_ms);
     let start = Instant::now();
     let mut consecutive_detections: u32 = 0;
+    let mut last_matched_port: Option<String> = None;
+
+    // Pre-compute the VidPidPort fallback identifier (if applicable).
+    // For Serial identifiers, this creates a VidPidPort fallback.
+    // For VidPidPort identifiers, this returns None (no fallback needed).
+    let fallback = identifier.to_vid_pid_fallback();
 
     while start.elapsed() < timeout {
-        if let Some(device) = find_nrf52_devices()
-            .into_iter()
-            .find(|d| d.in_bootloader && identifier.matches(d))
-        {
-            consecutive_detections += 1;
+        let devices = find_nrf52_devices();
+
+        // Try to find a matching bootloader device using ANY available strategy
+        let matched = devices.into_iter().find(|d| {
+            if !d.in_bootloader {
+                return false;
+            }
+            // Primary match: direct identifier (serial or VidPidPort)
+            if identifier.matches(d) {
+                return true;
+            }
+            // Fallback match: VidPidPort (for serial number changes during first-time DFU)
+            if let Some(ref fb) = fallback {
+                return fb.matches(d);
+            }
+            false
+        });
+
+        if let Some(device) = matched {
+            // Require consecutive detections on the SAME port for stability
+            let same_port = last_matched_port
+                .as_ref()
+                .map_or(true, |p| p == &device.port);
+
+            if same_port {
+                consecutive_detections += 1;
+            } else {
+                consecutive_detections = 1;
+            }
+            last_matched_port = Some(device.port.clone());
+
             if consecutive_detections >= REQUIRED_CONSECUTIVE {
+                if !identifier.matches(&device) {
+                    eprintln!(
+                        "[DFU] Device found via VidPidPort fallback on port {} \
+                         (serial number likely changed during first-time DFU)",
+                        device.port
+                    );
+                }
                 return Ok(device);
             }
         } else {
             consecutive_detections = 0;
+            last_matched_port = None;
         }
         std::thread::sleep(PORT_SCAN_INTERVAL);
-    }
-
-    // Phase 2: If serial tracking timed out, retry with VidPidPort fallback.
-    // This handles the case where USB serial number changes after first-time DFU.
-    if let Some(fallback) = identifier.to_vid_pid_fallback() {
-        let elapsed_ms = start.elapsed().as_millis() as u64;
-        let fallback_budget_ms = timeout_ms.saturating_sub(elapsed_ms).max(5_000);
-        eprintln!(
-            "[DFU] Serial tracking timed out after {}ms, attempting VidPidPort fallback (budget: {}ms)",
-            elapsed_ms, fallback_budget_ms
-        );
-        let fallback_timeout = Duration::from_millis(fallback_budget_ms);
-        let fallback_start = Instant::now();
-        consecutive_detections = 0;
-
-        while fallback_start.elapsed() < fallback_timeout {
-            if let Some(device) = find_nrf52_devices()
-                .into_iter()
-                .find(|d| d.in_bootloader && fallback.matches(d))
-            {
-                consecutive_detections += 1;
-                if consecutive_detections >= REQUIRED_CONSECUTIVE {
-                    eprintln!(
-                        "[DFU] VidPidPort fallback found device on port {}",
-                        device.port
-                    );
-                    return Ok(device);
-                }
-            } else {
-                consecutive_detections = 0;
-            }
-            std::thread::sleep(PORT_SCAN_INTERVAL);
-        }
     }
 
     Err(DfuError::BootloaderTimeout { timeout_ms })
@@ -394,8 +403,8 @@ pub fn wait_for_bootloader_flexible(
 
 /// Wait for a device to appear in application mode using flexible tracking.
 ///
-/// This function supports both serial number and VID/PID+port pattern tracking,
-/// making it work with devices that don't have a serial number.
+/// Checks both serial number AND VidPidPort matching on every poll iteration.
+/// See `wait_for_bootloader_flexible` for rationale.
 ///
 /// # Arguments
 /// * `identifier` - Device identifier (serial or VID/PID+port)
@@ -411,53 +420,53 @@ pub fn wait_for_application_flexible(
     let timeout = Duration::from_millis(timeout_ms);
     let start = Instant::now();
     let mut consecutive_detections: u32 = 0;
+    let mut last_matched_port: Option<String> = None;
+
+    let fallback = identifier.to_vid_pid_fallback();
 
     while start.elapsed() < timeout {
-        if let Some(device) = find_nrf52_devices()
-            .into_iter()
-            .find(|d| !d.in_bootloader && identifier.matches(d))
-        {
-            consecutive_detections += 1;
+        let devices = find_nrf52_devices();
+
+        let matched = devices.into_iter().find(|d| {
+            if d.in_bootloader {
+                return false;
+            }
+            if identifier.matches(d) {
+                return true;
+            }
+            if let Some(ref fb) = fallback {
+                return fb.matches(d);
+            }
+            false
+        });
+
+        if let Some(device) = matched {
+            let same_port = last_matched_port
+                .as_ref()
+                .map_or(true, |p| p == &device.port);
+
+            if same_port {
+                consecutive_detections += 1;
+            } else {
+                consecutive_detections = 1;
+            }
+            last_matched_port = Some(device.port.clone());
+
             if consecutive_detections >= REQUIRED_CONSECUTIVE {
+                if !identifier.matches(&device) {
+                    eprintln!(
+                        "[DFU] Device found via VidPidPort fallback on port {} \
+                         (serial number likely changed after DFU)",
+                        device.port
+                    );
+                }
                 return Ok(device);
             }
         } else {
             consecutive_detections = 0;
+            last_matched_port = None;
         }
         std::thread::sleep(PORT_SCAN_INTERVAL);
-    }
-
-    // Phase 2: If serial tracking timed out, retry with VidPidPort fallback.
-    // This handles the case where USB serial number changes after first-time DFU.
-    if let Some(fallback) = identifier.to_vid_pid_fallback() {
-        let elapsed_ms = start.elapsed().as_millis() as u64;
-        let fallback_budget_ms = timeout_ms.saturating_sub(elapsed_ms).max(5_000);
-        eprintln!(
-            "[DFU] Serial tracking timed out after {}ms, attempting VidPidPort fallback (budget: {}ms)",
-            elapsed_ms, fallback_budget_ms
-        );
-        let fallback_timeout = Duration::from_millis(fallback_budget_ms);
-        let fallback_start = Instant::now();
-        consecutive_detections = 0;
-
-        while fallback_start.elapsed() < fallback_timeout {
-            if let Some(device) = find_nrf52_devices()
-                .into_iter()
-                .find(|d| !d.in_bootloader && fallback.matches(d))
-            {
-                consecutive_detections += 1;
-                if consecutive_detections >= REQUIRED_CONSECUTIVE {
-                    eprintln!(
-                        "[DFU] VidPidPort fallback found device on port {}",
-                        device.port
-                    );
-                    return Ok(device);
-                }
-            } else {
-                consecutive_detections = 0;
-            }
-            std::thread::sleep(PORT_SCAN_INTERVAL);
-        }
     }
 
     Err(DfuError::BootloaderTimeout { timeout_ms })

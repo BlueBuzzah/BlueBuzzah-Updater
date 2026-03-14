@@ -8,20 +8,13 @@ use std::time::Duration;
 
 use serialport::SerialPort;
 
+#[allow(unused_imports)]
 use super::config::{
     get_touch_wait_multiplier, DFU_BAUD_RATE, MAX_BOOTLOADER_RESET_RETRIES,
-    MAX_TOUCH_RETRIES, SERIAL_READ_TIMEOUT, TOUCH_RETRY_DELAY_MS,
-    BOOTLOADER_RESET_RETRY_DELAY_MS,
+    MAX_PORT_OPEN_RETRIES, MAX_TOUCH_OPEN_RETRIES, MAX_TOUCH_RETRIES,
+    PORT_OPEN_BASE_DELAY_MS, PORT_OPEN_MAX_DELAY_MS, PORT_OPEN_TIMEOUT_MS,
+    SERIAL_READ_TIMEOUT, TOUCH_RETRY_DELAY_MS, BOOTLOADER_RESET_RETRY_DELAY_MS,
 };
-
-/// Maximum retries when opening a serial port to handle transient USB driver issues.
-const MAX_PORT_OPEN_RETRIES: u32 = 10;
-
-/// Delay between port open retries (ms).
-const PORT_OPEN_RETRY_DELAY_MS: u64 = 200;
-
-/// Fewer retries for the 1200 baud touch open (speed over resilience here).
-const MAX_TOUCH_OPEN_RETRIES: u32 = 5;
 use super::error::{DfuError, DfuResult};
 
 /// Trait for DFU transport operations.
@@ -88,7 +81,6 @@ impl SerialTransport {
             baud_rate,
             Some(SERIAL_READ_TIMEOUT),
             MAX_PORT_OPEN_RETRIES,
-            PORT_OPEN_RETRY_DELAY_MS,
             port_name,
         )?;
 
@@ -150,7 +142,6 @@ impl SerialTransport {
             1200,
             Some(Duration::from_millis(100)),
             MAX_TOUCH_OPEN_RETRIES,
-            PORT_OPEN_RETRY_DELAY_MS,
             normalized_port,
         )?;
 
@@ -218,7 +209,6 @@ impl SerialTransport {
             DFU_BAUD_RATE,
             Some(Duration::from_millis(100)),
             MAX_TOUCH_OPEN_RETRIES,
-            PORT_OPEN_RETRY_DELAY_MS,
             normalized_port,
         )?;
 
@@ -342,6 +332,64 @@ fn is_transient_port_error(err_str: &str) -> bool {
         || err_str.contains("file not found")
 }
 
+/// Open a serial port with a timeout to prevent blocking on Windows.
+///
+/// On Windows, `CreateFile` for COM ports can block for 10-30+ seconds when the
+/// USB CDC ACM driver is initializing (especially for first-time device connections).
+/// This function wraps the open call in a thread with a timeout.
+///
+/// On non-Windows platforms, this calls `serialport::new().open()` directly since
+/// port opens are non-blocking.
+fn open_port_with_timeout(
+    port_name: &str,
+    baud_rate: u32,
+    read_timeout: Duration,
+) -> Result<Box<dyn SerialPort>, serialport::Error> {
+    #[cfg(target_os = "windows")]
+    {
+        use std::sync::mpsc;
+
+        let name = port_name.to_string();
+        let (tx, rx) = mpsc::channel();
+
+        // Spawn a thread to perform the potentially blocking open.
+        // If the open blocks past our timeout, the thread is orphaned but will
+        // eventually complete when the OS-level CreateFile returns. At most
+        // MAX_PORT_OPEN_RETRIES threads can be orphaned per open_port_with_retry call.
+        let _handle = std::thread::spawn(move || {
+            let result = serialport::new(&name, baud_rate)
+                .timeout(read_timeout)
+                .data_bits(serialport::DataBits::Eight)
+                .parity(serialport::Parity::None)
+                .stop_bits(serialport::StopBits::One)
+                .flow_control(serialport::FlowControl::None)
+                .open();
+            let _ = tx.send(result);
+        });
+
+        match rx.recv_timeout(Duration::from_millis(PORT_OPEN_TIMEOUT_MS)) {
+            Ok(result) => result,
+            Err(_) => {
+                Err(serialport::Error::new(
+                    serialport::ErrorKind::Io(std::io::ErrorKind::TimedOut),
+                    "Port open timed out (Windows driver initialization delay)",
+                ))
+            }
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        serialport::new(port_name, baud_rate)
+            .timeout(read_timeout)
+            .data_bits(serialport::DataBits::Eight)
+            .parity(serialport::Parity::None)
+            .stop_bits(serialport::StopBits::One)
+            .flow_control(serialport::FlowControl::None)
+            .open()
+    }
+}
+
 /// Open a serial port with retry logic for transient USB driver errors.
 ///
 /// After USB re-enumeration, the device may appear in port enumeration before
@@ -349,33 +397,54 @@ fn is_transient_port_error(err_str: &str) -> bool {
 /// Windows where ERROR_FILE_NOT_FOUND occurs transiently during CDC ACM
 /// driver initialization.
 ///
+/// Uses exponential backoff between retries and a per-attempt timeout on Windows
+/// to prevent blocking on slow driver initialization.
+///
+/// Worst-case timing (Windows): 15 retries × (3s timeout + 1s delay) = ~60s.
+/// Typical timing: 1-3 retries, completing in under 5 seconds.
+///
 /// Returns the raw `Box<dyn SerialPort>` — callers handle DTR/clear themselves.
 fn open_port_with_retry(
     normalized_name: &str,
     baud_rate: u32,
     timeout: Option<Duration>,
     max_retries: u32,
-    retry_delay_ms: u64,
     display_port: &str,
 ) -> DfuResult<Box<dyn SerialPort>> {
     let read_timeout = timeout.unwrap_or(SERIAL_READ_TIMEOUT);
     let mut last_error: Option<serialport::Error> = None;
 
     for attempt in 0..max_retries {
-        match serialport::new(normalized_name, baud_rate)
-            .timeout(read_timeout)
-            .data_bits(serialport::DataBits::Eight)
-            .parity(serialport::Parity::None)
-            .stop_bits(serialport::StopBits::One)
-            .flow_control(serialport::FlowControl::None)
-            .open()
-        {
-            Ok(port) => return Ok(port),
+        match open_port_with_timeout(normalized_name, baud_rate, read_timeout) {
+            Ok(port) => {
+                if attempt > 0 {
+                    eprintln!(
+                        "[DFU] Port {} opened successfully on attempt {}/{}",
+                        display_port, attempt + 1, max_retries
+                    );
+                }
+                return Ok(port);
+            }
             Err(e) => {
                 let err_str = e.to_string().to_lowercase();
 
-                if is_transient_port_error(&err_str) && attempt < max_retries - 1 {
-                    std::thread::sleep(Duration::from_millis(retry_delay_ms));
+                // Check if error is transient (includes timeout from our wrapper)
+                let is_transient = is_transient_port_error(&err_str)
+                    || err_str.contains("timed out");
+
+                if is_transient && attempt < max_retries - 1 {
+                    // Exponential backoff: 200, 400, 800, 1000, 1000, ...
+                    let delay = std::cmp::min(
+                        PORT_OPEN_BASE_DELAY_MS * (1u64 << (attempt.min(3) as u64)),
+                        PORT_OPEN_MAX_DELAY_MS,
+                    );
+                    if attempt >= 2 {
+                        eprintln!(
+                            "[DFU] Port {} open attempt {}/{} failed ({}), retrying in {}ms...",
+                            display_port, attempt + 1, max_retries, err_str, delay
+                        );
+                    }
+                    std::thread::sleep(Duration::from_millis(delay));
                     last_error = Some(e);
                     continue;
                 }

@@ -313,9 +313,28 @@ pub async fn flash_dfu_firmware(
             return Err("Operation cancelled by user".to_string());
         }
 
-        // On retry, re-scan for the device in case it moved to a different port
+        // Verify device port before each attempt (even the first).
+        // In multi-device sessions, a previous device's USB re-enumeration
+        // may have caused COM port reassignment on Windows.
         let port_to_use = if attempt == 0 {
-            serial_port.clone()
+            match find_device_port_for_retry(&serial_port, device_serial.as_deref()) {
+                Some(port) => {
+                    if port != serial_port {
+                        let _ = progress.send(DfuProgressEvent {
+                            stage: "log".to_string(),
+                            sent: None,
+                            total: None,
+                            percent: -1.0,
+                            message: format!(
+                                "Device re-enumerated from {} to {}",
+                                serial_port, port
+                            ),
+                        });
+                    }
+                    port
+                }
+                None => serial_port.clone(), // Fall back to original port
+            }
         } else {
             let _ = progress.send(DfuProgressEvent {
                 stage: "retrying".to_string(),
