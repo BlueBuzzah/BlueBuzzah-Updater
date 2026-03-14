@@ -56,6 +56,8 @@ fn is_operation_retriable(error: &str) -> bool {
         // Windows driver transient issues
         || e.contains("not functioning")
         || e.contains("access denied")
+        || e.contains("cannot find") // Windows ERROR_FILE_NOT_FOUND during USB init
+        || e.contains("file not found")
         // macOS transient issues
         || e.contains("device not configured")
         // Generic transient issues
@@ -75,8 +77,20 @@ fn find_device_port_for_retry(
     original_port: &str,
     serial_number: Option<&str>,
 ) -> Option<String> {
-    // Poll briefly in case device is still re-enumerating
-    for _ in 0..3 {
+    // Platform-aware polling budget: Windows USB driver re-enumeration is slower
+    // and needs more time, especially with multiple devices on the same host controller.
+    #[cfg(target_os = "windows")]
+    const RETRY_POLLS: u32 = 6;
+    #[cfg(target_os = "windows")]
+    const POLL_DELAY_MS: u64 = 750;
+
+    #[cfg(not(target_os = "windows"))]
+    const RETRY_POLLS: u32 = 3;
+    #[cfg(not(target_os = "windows"))]
+    const POLL_DELAY_MS: u64 = 500;
+
+    // Poll in case device is still re-enumerating
+    for _ in 0..RETRY_POLLS {
         let devices = find_nrf52_devices();
 
         // Prefer the original port if device is still there
@@ -100,7 +114,7 @@ fn find_device_port_for_retry(
             return Some(devices.into_iter().next().unwrap().port);
         }
 
-        std::thread::sleep(std::time::Duration::from_millis(500));
+        std::thread::sleep(std::time::Duration::from_millis(POLL_DELAY_MS));
     }
 
     None

@@ -13,6 +13,15 @@ use super::config::{
     MAX_TOUCH_RETRIES, SERIAL_READ_TIMEOUT, TOUCH_RETRY_DELAY_MS,
     BOOTLOADER_RESET_RETRY_DELAY_MS,
 };
+
+/// Maximum retries when opening a serial port to handle transient USB driver issues.
+const MAX_PORT_OPEN_RETRIES: u32 = 10;
+
+/// Delay between port open retries (ms).
+const PORT_OPEN_RETRY_DELAY_MS: u64 = 200;
+
+/// Fewer retries for the 1200 baud touch open (speed over resilience here).
+const MAX_TOUCH_OPEN_RETRIES: u32 = 5;
 use super::error::{DfuError, DfuResult};
 
 /// Trait for DFU transport operations.
@@ -72,89 +81,33 @@ impl SerialTransport {
     /// especially important on Windows where devices appear in port enumeration
     /// before the driver is fully ready, but benefits all platforms.
     pub fn open_with_baud(port_name: &str, baud_rate: u32) -> DfuResult<Self> {
-        // Normalize port name for cross-platform compatibility
         let normalized_name = normalize_port_name(port_name);
 
-        // Retry port open to handle transient connectivity failures.
-        // After USB re-enumeration, the device may appear in port enumeration
-        // before the driver is fully ready for communication.
-        const MAX_OPEN_RETRIES: u32 = 10;
-        const RETRY_DELAY_MS: u64 = 200;
+        let mut port = open_port_with_retry(
+            &normalized_name,
+            baud_rate,
+            Some(SERIAL_READ_TIMEOUT),
+            MAX_PORT_OPEN_RETRIES,
+            PORT_OPEN_RETRY_DELAY_MS,
+            port_name,
+        )?;
 
-        let mut last_error: Option<serialport::Error> = None;
-
-        for attempt in 0..MAX_OPEN_RETRIES {
-            match serialport::new(&normalized_name, baud_rate)
-                .timeout(SERIAL_READ_TIMEOUT)
-                .data_bits(serialport::DataBits::Eight)
-                .parity(serialport::Parity::None)
-                .stop_bits(serialport::StopBits::One)
-                .flow_control(serialport::FlowControl::None)
-                .open()
-            {
-                Ok(mut port) => {
-                    // Success - proceed with DTR toggle to reset connection state.
-                    // This ensures the bootloader is ready to receive commands.
-                    if let Err(e) = port.write_data_terminal_ready(false) {
-                        eprintln!("[DFU] Warning: DTR toggle (false) failed during port open: {}", e);
-                    }
-                    std::thread::sleep(Duration::from_millis(50));
-                    if let Err(e) = port.write_data_terminal_ready(true) {
-                        eprintln!("[DFU] Warning: DTR toggle (true) failed during port open: {}", e);
-                    }
-
-                    // Allow port to stabilize after DTR toggle
-                    std::thread::sleep(Duration::from_millis(100));
-
-                    // Clear any pending input data from previous sessions
-                    port.clear(serialport::ClearBuffer::Input).ok();
-
-                    return Ok(Self { port });
-                }
-                Err(e) => {
-                    let err_str = e.to_string().to_lowercase();
-
-                    // Check for transient errors that may resolve after driver initialization:
-                    // - "not functioning": Windows driver not ready after USB re-enumeration
-                    // - "device not configured": macOS transient state during USB re-enumeration
-                    // - "resource temporarily unavailable": Device briefly unavailable
-                    // - "interrupted": Operation interrupted, may succeed on retry
-                    let is_transient = err_str.contains("not functioning")
-                        || err_str.contains("device not configured")
-                        || err_str.contains("temporarily unavailable")
-                        || err_str.contains("interrupted");
-
-                    if is_transient && attempt < MAX_OPEN_RETRIES - 1 {
-                        std::thread::sleep(Duration::from_millis(RETRY_DELAY_MS));
-                        last_error = Some(e);
-                        continue;
-                    }
-
-                    // Convert to appropriate error type
-                    return Err(match e.kind() {
-                        serialport::ErrorKind::Io(std::io::ErrorKind::PermissionDenied) => {
-                            DfuError::PortPermissionDenied {
-                                port: port_name.to_string(),
-                            }
-                        }
-                        serialport::ErrorKind::Io(std::io::ErrorKind::NotFound) => {
-                            DfuError::NoDeviceFound
-                        }
-                        _ if err_str.contains("busy") || err_str.contains("in use") => {
-                            DfuError::PortBusy {
-                                port: port_name.to_string(),
-                            }
-                        }
-                        _ => DfuError::Serial(e),
-                    });
-                }
-            }
+        // DTR toggle to reset connection state — ensures bootloader is ready
+        if let Err(e) = port.write_data_terminal_ready(false) {
+            eprintln!("[DFU] Warning: DTR toggle (false) failed during port open: {}", e);
+        }
+        std::thread::sleep(Duration::from_millis(50));
+        if let Err(e) = port.write_data_terminal_ready(true) {
+            eprintln!("[DFU] Warning: DTR toggle (true) failed during port open: {}", e);
         }
 
-        // All retries exhausted - return the last error
-        Err(DfuError::Serial(
-            last_error.expect("last_error should be set after retry loop"),
-        ))
+        // Allow port to stabilize after DTR toggle
+        std::thread::sleep(Duration::from_millis(100));
+
+        // Clear any pending input data from previous sessions
+        port.clear(serialport::ClearBuffer::Input).ok();
+
+        Ok(Self { port })
     }
 
     /// Perform a 1200 baud touch to trigger bootloader mode with retry logic.
@@ -192,10 +145,14 @@ impl SerialTransport {
 
     /// Single attempt at 1200 baud touch with configurable wait time.
     fn touch_reset_once(normalized_port: &str, attempt: u32) -> DfuResult<()> {
-        let mut port = serialport::new(normalized_port, 1200)
-            .timeout(Duration::from_millis(100))
-            .open()
-            .map_err(DfuError::Serial)?;
+        let mut port = open_port_with_retry(
+            normalized_port,
+            1200,
+            Some(Duration::from_millis(100)),
+            MAX_TOUCH_OPEN_RETRIES,
+            PORT_OPEN_RETRY_DELAY_MS,
+            normalized_port,
+        )?;
 
         // Set DTR=True immediately after opening
         port.write_data_terminal_ready(true).map_err(DfuError::Serial)?;
@@ -256,10 +213,14 @@ impl SerialTransport {
 
     /// Single attempt at bootloader reset.
     fn reset_bootloader_once(normalized_port: &str) -> DfuResult<()> {
-        let mut port = serialport::new(normalized_port, DFU_BAUD_RATE)
-            .timeout(Duration::from_millis(100))
-            .open()
-            .map_err(DfuError::Serial)?;
+        let mut port = open_port_with_retry(
+            normalized_port,
+            DFU_BAUD_RATE,
+            Some(Duration::from_millis(100)),
+            MAX_TOUCH_OPEN_RETRIES,
+            PORT_OPEN_RETRY_DELAY_MS,
+            normalized_port,
+        )?;
 
         // Toggle DTR to reset the bootloader state
         if let Err(e) = port.write_data_terminal_ready(false) {
@@ -357,6 +318,93 @@ impl DfuTransport for SerialTransport {
             }
         }
     }
+}
+
+/// Check if a serial port error is transient and may resolve on retry.
+///
+/// Transient errors include:
+/// - "not functioning": Windows driver not ready after USB re-enumeration
+/// - "device not configured": macOS transient state during USB re-enumeration
+/// - "temporarily unavailable": Device briefly unavailable
+/// - "interrupted": Operation interrupted, may succeed on retry
+/// - "cannot find" / "file not found": Windows ERROR_FILE_NOT_FOUND during USB
+///   CDC ACM driver initialization — the port appears in SetupDi enumeration
+///   before CreateFileW can access it
+fn is_transient_port_error(err_str: &str) -> bool {
+    err_str.contains("not functioning")
+        || err_str.contains("device not configured")
+        || err_str.contains("temporarily unavailable")
+        || err_str.contains("interrupted")
+        // Windows-specific: ERROR_FILE_NOT_FOUND during USB driver initialization.
+        // The port is listed by available_ports() (SetupDi API) but CreateFileW
+        // cannot yet open it. This resolves within a few hundred milliseconds.
+        || err_str.contains("cannot find")
+        || err_str.contains("file not found")
+}
+
+/// Open a serial port with retry logic for transient USB driver errors.
+///
+/// After USB re-enumeration, the device may appear in port enumeration before
+/// the driver is fully ready for communication. This is especially common on
+/// Windows where ERROR_FILE_NOT_FOUND occurs transiently during CDC ACM
+/// driver initialization.
+///
+/// Returns the raw `Box<dyn SerialPort>` — callers handle DTR/clear themselves.
+fn open_port_with_retry(
+    normalized_name: &str,
+    baud_rate: u32,
+    timeout: Option<Duration>,
+    max_retries: u32,
+    retry_delay_ms: u64,
+    display_port: &str,
+) -> DfuResult<Box<dyn SerialPort>> {
+    let read_timeout = timeout.unwrap_or(SERIAL_READ_TIMEOUT);
+    let mut last_error: Option<serialport::Error> = None;
+
+    for attempt in 0..max_retries {
+        match serialport::new(normalized_name, baud_rate)
+            .timeout(read_timeout)
+            .data_bits(serialport::DataBits::Eight)
+            .parity(serialport::Parity::None)
+            .stop_bits(serialport::StopBits::One)
+            .flow_control(serialport::FlowControl::None)
+            .open()
+        {
+            Ok(port) => return Ok(port),
+            Err(e) => {
+                let err_str = e.to_string().to_lowercase();
+
+                if is_transient_port_error(&err_str) && attempt < max_retries - 1 {
+                    std::thread::sleep(Duration::from_millis(retry_delay_ms));
+                    last_error = Some(e);
+                    continue;
+                }
+
+                // Convert to appropriate error type
+                return Err(match e.kind() {
+                    serialport::ErrorKind::Io(std::io::ErrorKind::PermissionDenied) => {
+                        DfuError::PortPermissionDenied {
+                            port: display_port.to_string(),
+                        }
+                    }
+                    serialport::ErrorKind::Io(std::io::ErrorKind::NotFound) => {
+                        DfuError::NoDeviceFound
+                    }
+                    _ if err_str.contains("busy") || err_str.contains("in use") => {
+                        DfuError::PortBusy {
+                            port: display_port.to_string(),
+                        }
+                    }
+                    _ => DfuError::Serial(e),
+                });
+            }
+        }
+    }
+
+    // All retries exhausted
+    Err(DfuError::Serial(
+        last_error.expect("last_error should be set after retry loop"),
+    ))
 }
 
 /// Normalize a port name for cross-platform compatibility.

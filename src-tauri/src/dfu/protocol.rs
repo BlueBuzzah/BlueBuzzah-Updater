@@ -451,6 +451,12 @@ where
         bootloader_device.port
     } else {
         // Device is in application mode - use 1200 baud touch to enter bootloader
+        // On Windows, add a brief delay between the port enumeration scan
+        // (get_device_by_port above) and the touch_reset open to let the USB
+        // CDC ACM driver settle after SetupDi API queries.
+        #[cfg(target_os = "windows")]
+        std::thread::sleep(Duration::from_millis(200));
+
         SerialTransport::touch_reset(port_name)?;
 
         on_progress(DfuStage::WaitingForBootloader);
