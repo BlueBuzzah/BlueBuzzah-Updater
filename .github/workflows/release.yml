@@ -228,11 +228,16 @@ jobs:
           rm -f certificate.p12
           rm -rf ./private_keys
 
-  # Windows build with updater artifacts
+  # Windows build with Azure Trusted Signing + updater artifacts
   build-windows:
     permissions:
       contents: write
+      id-token: write   # required for Azure OIDC federated auth (Trusted Signing)
     runs-on: windows-latest
+    # Bind to the `release` environment so the Azure OIDC subject claim is
+    # `repo:<owner>/<repo>:environment:release` — matched by the
+    # Trusted Signing app registration's Environment-scoped federated credential.
+    environment: release
     env:
       CARGO_INCREMENTAL: 0
       CARGO_TERM_COLOR: always
@@ -286,6 +291,52 @@ jobs:
 
       - name: Build Tauri app
         run: npm run tauri:build:ci
+
+      # Azure OIDC login — mints a federated token from GitHub's OIDC provider and
+      # exports the Azure SDK env vars so DefaultAzureCredential (used by the
+      # Trusted Signing action) can authenticate without a client secret.
+      - name: Azure OIDC login
+        uses: azure/login@v2
+        with:
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          allow-no-subscriptions: true
+
+      # Authenticode-sign the NSIS installer .exe with Azure Trusted Signing.
+      # Must happen before the updater archive is rebuilt so the .exe inside
+      # the .nsis.zip (delivered to existing users via the updater) is also signed.
+      - name: Sign NSIS installer (Azure Trusted Signing)
+        uses: azure/trusted-signing-action@v0.5.1
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          endpoint: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_TRUSTED_SIGNING_PROFILE }}
+          files-folder: ${{ github.workspace }}\src-tauri\target\release\bundle\nsis
+          files-folder-filter: exe
+          files-folder-recurse: false
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      # Tauri built the .nsis.zip from the unsigned .exe. Replace it with one
+      # built from the now-signed .exe, and drop the stale Tauri updater
+      # signature so the next step regenerates it from the new archive.
+      - name: Rebuild updater archive with signed installer
+        shell: pwsh
+        run: |
+          $bundleDir = "src-tauri/target/release/bundle/nsis"
+          $exe = Get-ChildItem -Path $bundleDir -Filter "*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $exe) {
+            Write-Host "ERROR: No installer .exe found in $bundleDir"
+            exit 1
+          }
+          $zipPath = Join-Path $bundleDir "$($exe.BaseName).nsis.zip"
+          Get-ChildItem -Path $bundleDir -Filter "*.nsis.zip" -ErrorAction SilentlyContinue | Remove-Item -Force
+          Get-ChildItem -Path $bundleDir -Filter "*.nsis.zip.sig" -ErrorAction SilentlyContinue | Remove-Item -Force
+          Compress-Archive -Path $exe.FullName -DestinationPath $zipPath -Force
+          Write-Host "Rebuilt updater archive: $zipPath"
 
       - name: Rename artifacts for cleaner download names
         run: |
