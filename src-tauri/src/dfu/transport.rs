@@ -254,7 +254,10 @@ impl DfuTransport for SerialTransport {
         match self.port.read(buffer) {
             Ok(n) => Ok(n),
             Err(e) if e.kind() == std::io::ErrorKind::TimedOut => Ok(0),
-            Err(e) => Err(DfuError::Io(e)),
+            Err(e) => {
+                eprintln!("[DFU] [read] os_code_hint={:?} kind={:?} msg={}", e.raw_os_error(), e.kind(), e);
+                Err(DfuError::Io(e))
+            }
         }
     }
 
@@ -314,8 +317,13 @@ impl DfuTransport for SerialTransport {
 ///
 /// `serialport::Error`'s Display drops the numeric OS error (e.g. Windows
 /// ERROR_SEM_TIMEOUT = 121). This recovers it for field diagnostics.
+///
+/// Note: `os_code_hint` is a best-effort value captured from the thread's last
+/// OS error (`std::io::Error::last_os_error()`). It reflects the most recent
+/// OS-level error on the calling thread at the time of capture, which may not
+/// be the exact error that caused the serialport failure.
 fn describe_serial_error(context: &str, err: &serialport::Error) -> String {
-    let os_code = match &err.kind() {
+    let os_code_hint = match &err.kind() {
         serialport::ErrorKind::Io(_) => std::io::Error::last_os_error()
             .raw_os_error()
             .map(|c| c.to_string())
@@ -323,7 +331,7 @@ fn describe_serial_error(context: &str, err: &serialport::Error) -> String {
         _ => "n/a".to_string(),
     };
     format!(
-        "[{context}] kind={:?} os_code={os_code} msg={}",
+        "[{context}] kind={:?} os_code_hint={os_code_hint} msg={}",
         err.kind(),
         err
     )

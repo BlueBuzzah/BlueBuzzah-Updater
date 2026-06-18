@@ -745,6 +745,13 @@ mod tests {
     }
 
     #[test]
+    fn role_config_failed_display_is_not_operation_retriable() {
+        // Locks the Display("Failed to configure device role: ...") -> guard contract.
+        let err = crate::dfu::DfuError::RoleConfigFailed { reason: "semaphore timeout".to_string() };
+        assert!(!is_operation_retriable(&err.to_string()));
+    }
+
+    #[test]
     fn genuine_bootloader_timeout_still_retriable() {
         // Regression guard: real flash-phase failures must still retry.
         assert!(is_operation_retriable("Bootloader not found within 30000ms"));

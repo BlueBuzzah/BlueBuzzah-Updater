@@ -574,8 +574,9 @@ where
     on_progress(DfuStage::ConfiguringRole);
     let role_started = std::time::Instant::now();
     let role_result = configure_device_role_flexible(&app_device.port, device_role, &device_identifier)
-        .map_err(|e| DfuError::RoleConfigFailed {
-            reason: e.to_string(),
+        .map_err(|e| match e {
+            DfuError::RoleConfigFailed { .. } => e,
+            other => DfuError::RoleConfigFailed { reason: other.to_string() },
         });
     on_progress(DfuStage::Log {
         message: format!(
