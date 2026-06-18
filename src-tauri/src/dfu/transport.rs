@@ -349,6 +349,10 @@ fn is_transient_port_error(err_str: &str) -> bool {
         // cannot yet open it. This resolves within a few hundred milliseconds.
         || err_str.contains("cannot find")
         || err_str.contains("file not found")
+        // Windows ERROR_SEM_TIMEOUT (121): the USB CDC pipe is not yet bound /
+        // is being torn down during re-enumeration. Resolves on retry.
+        || err_str.contains("semaphore timeout")
+        || err_str.contains("timeout period has expired")
 }
 
 /// Open a serial port with a timeout to prevent blocking on Windows.
@@ -535,6 +539,12 @@ mod tests {
         assert!(out.contains("role-config open"), "missing context: {out}");
         assert!(out.contains("semaphore timeout period has expired"), "missing msg: {out}");
         assert!(out.contains("kind="), "missing kind: {out}");
+    }
+
+    #[test]
+    fn semaphore_timeout_is_transient_port_error() {
+        // Windows ERROR_SEM_TIMEOUT surfaces as this exact message.
+        assert!(is_transient_port_error("the semaphore timeout period has expired"));
     }
 
     #[test]
