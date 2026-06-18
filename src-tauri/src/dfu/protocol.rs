@@ -21,8 +21,8 @@ use super::config::{
     ROLE_PRIMARY_COMMAND, ROLE_SECONDARY_COMMAND,
 };
 use super::device::{
-    get_device_by_port, wait_for_application_by_serial, wait_for_application_flexible,
-    wait_for_bootloader_flexible, DeviceIdentifier,
+    get_device_by_port, snapshot_ports, wait_for_application_by_serial,
+    wait_for_application_flexible, wait_for_bootloader_flexible, DeviceIdentifier,
 };
 use super::error::{DfuError, DfuResult};
 use super::firmware_reader::read_firmware_zip;
@@ -558,19 +558,35 @@ where
 
     // Step 9: Wait for device to reboot into application mode
     on_progress(DfuStage::WaitingForReboot);
-    std::thread::sleep(Duration::from_millis(get_reboot_settle_delay())); // Give device time to boot
+    std::thread::sleep(Duration::from_millis(get_reboot_settle_delay()));
+    on_progress(DfuStage::Log {
+        message: format!("Post-reboot port snapshot: {}", snapshot_ports()),
+    });
     on_progress(DfuStage::Log {
         message: format!("Scanning for device in application mode (timeout: {}ms)...", get_reboot_timeout()),
     });
     let app_device = wait_for_application_flexible(&device_identifier, get_reboot_timeout())?;
     on_progress(DfuStage::Log {
-        message: format!("Device found on port {}", app_device.port),
+        message: format!("Device found on port {} | snapshot: {}", app_device.port, snapshot_ports()),
     });
 
-    // Step 10: Configure device role
-    // Note: This will cause another reboot as the device restarts after role change
+    // Step 10: Configure device role (instrumented)
     on_progress(DfuStage::ConfiguringRole);
-    configure_device_role_flexible(&app_device.port, device_role, &device_identifier)?;
+    let role_started = std::time::Instant::now();
+    let role_result = configure_device_role_flexible(&app_device.port, device_role, &device_identifier)
+        .map_err(|e| match e {
+            DfuError::RoleConfigFailed { .. } => e,
+            other => DfuError::RoleConfigFailed { reason: other.to_string() },
+        });
+    on_progress(DfuStage::Log {
+        message: format!(
+            "Role config finished in {}ms (ok={}) | snapshot: {}",
+            role_started.elapsed().as_millis(),
+            role_result.is_ok(),
+            snapshot_ports()
+        ),
+    });
+    role_result?;
 
     on_progress(DfuStage::Complete);
     Ok(())

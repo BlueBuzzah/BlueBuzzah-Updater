@@ -236,6 +236,30 @@ pub fn find_nrf52_devices() -> Vec<Nrf52Device> {
     devices
 }
 
+/// One-line snapshot of all compatible devices currently enumerated.
+///
+/// Diagnostic only — used to capture the COM/serial/mode landscape at the
+/// moment of a post-reboot port open, where Windows re-enumeration races live.
+pub fn snapshot_ports() -> String {
+    let devices = find_nrf52_devices();
+    if devices.is_empty() {
+        return "none".to_string();
+    }
+    devices
+        .iter()
+        .map(|d| {
+            format!(
+                "{}(pid=0x{:04X},serial={},boot={})",
+                d.port,
+                d.pid,
+                d.serial_number.as_deref().unwrap_or("?"),
+                d.in_bootloader
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// Get device info for a specific port.
 ///
 /// Returns the device connected to the specified port, if any.
@@ -786,5 +810,12 @@ mod tests {
             port_pattern: "COM19".to_string(),
         };
         assert!(identifier.to_vid_pid_fallback().is_none());
+    }
+
+    #[test]
+    fn snapshot_ports_returns_string_without_panicking() {
+        // No device attached in CI: must return a string (possibly "none"), never panic.
+        let s = snapshot_ports();
+        assert!(!s.is_empty());
     }
 }

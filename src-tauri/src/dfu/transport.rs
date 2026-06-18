@@ -254,7 +254,10 @@ impl DfuTransport for SerialTransport {
         match self.port.read(buffer) {
             Ok(n) => Ok(n),
             Err(e) if e.kind() == std::io::ErrorKind::TimedOut => Ok(0),
-            Err(e) => Err(DfuError::Io(e)),
+            Err(e) => {
+                eprintln!("[DFU] [read] os_code_hint={:?} kind={:?} msg={}", e.raw_os_error(), e.kind(), e);
+                Err(DfuError::Io(e))
+            }
         }
     }
 
@@ -310,6 +313,30 @@ impl DfuTransport for SerialTransport {
     }
 }
 
+/// Build a one-line diagnostic for a serial error, preserving the raw OS code.
+///
+/// `serialport::Error`'s Display drops the numeric OS error (e.g. Windows
+/// ERROR_SEM_TIMEOUT = 121). This recovers it for field diagnostics.
+///
+/// Note: `os_code_hint` is a best-effort value captured from the thread's last
+/// OS error (`std::io::Error::last_os_error()`). It reflects the most recent
+/// OS-level error on the calling thread at the time of capture, which may not
+/// be the exact error that caused the serialport failure.
+fn describe_serial_error(context: &str, err: &serialport::Error) -> String {
+    let os_code_hint = match &err.kind() {
+        serialport::ErrorKind::Io(_) => std::io::Error::last_os_error()
+            .raw_os_error()
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| "?".to_string()),
+        _ => "n/a".to_string(),
+    };
+    format!(
+        "[{context}] kind={:?} os_code_hint={os_code_hint} msg={}",
+        err.kind(),
+        err
+    )
+}
+
 /// Check if a serial port error is transient and may resolve on retry.
 ///
 /// Transient errors include:
@@ -330,6 +357,10 @@ fn is_transient_port_error(err_str: &str) -> bool {
         // cannot yet open it. This resolves within a few hundred milliseconds.
         || err_str.contains("cannot find")
         || err_str.contains("file not found")
+        // Windows ERROR_SEM_TIMEOUT (121): the USB CDC pipe is not yet bound /
+        // is being torn down during re-enumeration. Resolves on retry.
+        || err_str.contains("semaphore timeout")
+        || err_str.contains("timeout period has expired")
 }
 
 /// Open a serial port with a timeout to prevent blocking on Windows.
@@ -426,6 +457,7 @@ fn open_port_with_retry(
                 return Ok(port);
             }
             Err(e) => {
+                eprintln!("[DFU] {}", describe_serial_error(&format!("open {display_port} attempt {}/{}", attempt + 1, max_retries), &e));
                 let err_str = e.to_string().to_lowercase();
 
                 // Check if error is transient (includes timeout from our wrapper)
@@ -504,6 +536,24 @@ fn normalize_port_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn describe_serial_error_includes_context_and_message() {
+        let err = serialport::Error::new(
+            serialport::ErrorKind::Io(std::io::ErrorKind::TimedOut),
+            "The semaphore timeout period has expired",
+        );
+        let out = describe_serial_error("role-config open", &err);
+        assert!(out.contains("role-config open"), "missing context: {out}");
+        assert!(out.contains("semaphore timeout period has expired"), "missing msg: {out}");
+        assert!(out.contains("kind="), "missing kind: {out}");
+    }
+
+    #[test]
+    fn semaphore_timeout_is_transient_port_error() {
+        // Windows ERROR_SEM_TIMEOUT surfaces as this exact message.
+        assert!(is_transient_port_error("the semaphore timeout period has expired"));
+    }
 
     #[test]
     fn test_normalize_port_name_passthrough() {

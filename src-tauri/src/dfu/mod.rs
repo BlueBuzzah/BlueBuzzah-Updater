@@ -57,6 +57,10 @@ pub use device_pub::*;
 // Protocol
 pub use protocol::{configure_device_with_settings, upload_firmware, DfuStage};
 
+// Error types — re-exported for use in tests outside this module
+#[cfg(test)]
+pub use error::DfuError;
+
 // Firmware reading
 pub use firmware_reader::read_firmware_zip;
 

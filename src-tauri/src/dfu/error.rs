@@ -149,6 +149,8 @@ impl DfuError {
                     || msg.contains("temporarily unavailable")
                     || msg.contains("interrupted")
                     || msg.contains("timed out")
+                    || msg.contains("semaphore timeout")
+                    || msg.contains("timeout period has expired")
                     || msg.contains("resource busy")
                     // macOS transient issues
                     || msg.contains("device not configured")
@@ -253,6 +255,15 @@ mod tests {
             port: "/dev/cu.usbmodem1234".into(),
         };
         assert!(err.is_retriable(), "PortBusy should be retriable as it is a transient condition");
+    }
+
+    #[test]
+    fn semaphore_timeout_serial_error_is_retriable() {
+        let err = DfuError::Serial(serialport::Error::new(
+            serialport::ErrorKind::Io(std::io::ErrorKind::TimedOut),
+            "The semaphore timeout period has expired",
+        ));
+        assert!(err.is_retriable(), "ERROR_SEM_TIMEOUT must be treated as transient");
     }
 
     #[test]
