@@ -1,4 +1,3 @@
-use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
 use tauri::Manager;
@@ -6,12 +5,6 @@ use crate::cache::{CacheManager, CachedFirmwareMetadata, FirmwareCacheIndex};
 use chrono;
 use std::time::Duration;
 use tauri_plugin_http::reqwest;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FirmwareInfo {
-    pub version: String,
-    pub path: String,
-}
 
 #[tauri::command]
 pub async fn download_firmware(

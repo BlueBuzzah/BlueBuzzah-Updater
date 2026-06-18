@@ -396,7 +396,7 @@ pub fn wait_for_bootloader_flexible(
             // Require consecutive detections on the SAME port for stability
             let same_port = last_matched_port
                 .as_ref()
-                .map_or(true, |p| p == &device.port);
+                .is_none_or(|p| p == &device.port);
 
             if same_port {
                 consecutive_detections += 1;
@@ -467,7 +467,7 @@ pub fn wait_for_application_flexible(
         if let Some(device) = matched {
             let same_port = last_matched_port
                 .as_ref()
-                .map_or(true, |p| p == &device.port);
+                .is_none_or(|p| p == &device.port);
 
             if same_port {
                 consecutive_detections += 1;
