@@ -302,6 +302,16 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           allow-no-subscriptions: true
 
+      # The Trusted Signing action installs its module from PSGallery, which is
+      # not registered on recent windows-latest images. Register it first.
+      - name: Ensure PSGallery is registered
+        shell: pwsh
+        run: |
+          if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) {
+            Register-PSRepository -Default
+          }
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+
       # Authenticode-sign the NSIS installer .exe with Azure Trusted Signing.
       # Must happen before the updater archive is rebuilt so the .exe inside
       # the .nsis.zip (delivered to existing users via the updater) is also signed.
