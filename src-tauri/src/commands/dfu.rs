@@ -47,6 +47,15 @@ pub fn is_dfu_cancelled() -> bool {
 /// Extended to catch more Windows-specific transient errors.
 fn is_operation_retriable(error: &str) -> bool {
     let e = error.to_lowercase();
+
+    // Role-configuration failures occur AFTER a successful firmware transfer.
+    // Re-running the operation would needlessly re-erase + re-flash a device
+    // that is already updated. These are recovered by role-config's own retry,
+    // not by a full operation retry.
+    if e.contains("failed to configure device role") {
+        return false;
+    }
+
     e.contains("timeout")
         || e.contains("bootloader")
         || e.contains("disconnected")
@@ -726,6 +735,20 @@ pub struct FirmwareInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn role_config_failure_does_not_trigger_reflash() {
+        // A role-config-phase failure means the flash already succeeded.
+        // It must NOT be operation-retriable (which would re-erase + re-transfer).
+        let msg = "Failed to configure device role: Serial port error: The semaphore timeout period has expired";
+        assert!(!is_operation_retriable(msg), "role-config failure must not re-flash");
+    }
+
+    #[test]
+    fn genuine_bootloader_timeout_still_retriable() {
+        // Regression guard: real flash-phase failures must still retry.
+        assert!(is_operation_retriable("Bootloader not found within 30000ms"));
+    }
 
     #[test]
     fn test_dfu_progress_event_from_stage() {

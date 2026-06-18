@@ -573,7 +573,10 @@ where
     // Step 10: Configure device role (instrumented)
     on_progress(DfuStage::ConfiguringRole);
     let role_started = std::time::Instant::now();
-    let role_result = configure_device_role_flexible(&app_device.port, device_role, &device_identifier);
+    let role_result = configure_device_role_flexible(&app_device.port, device_role, &device_identifier)
+        .map_err(|e| DfuError::RoleConfigFailed {
+            reason: e.to_string(),
+        });
     on_progress(DfuStage::Log {
         message: format!(
             "Role config finished in {}ms (ok={}) | snapshot: {}",
