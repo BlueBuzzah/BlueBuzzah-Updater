@@ -51,7 +51,7 @@ extract_firmware(zip_path, dest)
 
 - **VID**: `0x239A` (Adafruit)
 - **App PIDs**: `0x8029` (Feather nRF52840)
-- **Bootloader PIDs**: `0x0029`, `0x0052`
+- **Bootloader PIDs**: `0x0029`, `0x002A`
 - **macOS**: Filters `tty.*` ports, uses `cu.*` only
 - **Windows**: Handles COM ports > 9 with `\\.\` prefix
 
