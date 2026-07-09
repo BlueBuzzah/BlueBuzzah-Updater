@@ -1,143 +1,76 @@
-# BlueBuzzah Updater - Claude Code Reference
+# BlueBuzzah Updater
 
-## Project Overview
+Tauri 2.0 desktop app that flashes BlueBuzzah firmware to Adafruit Feather nRF52840 gloves over serial (Nordic Secure DFU), then configures device role and therapy profile post-flash.
 
-Tauri 2.0 desktop app for DFU firmware flashing to Adafruit Feather nRF52840 devices. 4-step wizard: Firmware Selection → Device Selection → Installation → Success.
-
-## Tech Stack
-
-**Frontend**: React 18 + TypeScript + Vite | Zustand | shadcn/ui (dark theme) | Tailwind | Lucide
+**Frontend**: React 18 + TypeScript + Vite | Zustand, shadcn/ui, Tailwind, Lucide
 **Backend**: Rust + Tauri 2.0 | Nordic DFU protocol over serial
-**Target Hardware**: Adafruit Feather nRF52840 Express (VID: 0x239A)
+
+## Quick Reference
+
+| Task | Command |
+|------|---------|
+| Dev (hot reload) | `npm run tauri:dev` |
+| Frontend typecheck + build | `npm run build` |
+| Production build | `npm run tauri:build` (loads signing env via dotenv; CI uses `tauri:build:ci`) |
+| Frontend tests | `npm test` (Vitest + Testing Library) |
+| One frontend test file | `npx vitest run src/services/DeviceService.test.ts` |
+| Rust tests | `npm run tauri:test` |
+| One Rust test | `cd src-tauri && cargo test <test_name>` |
 
 ## Architecture
 
-### Frontend Services
+Frontend flow: `src/components/wizard/` (FirmwareSelection → DeviceSelection → InstallationProgress → SuccessScreen) → Zustand stores (`src/stores/`: `wizardStore`, `therapyStore`, `settingsStore`, `updaterStore`) → services (`src/services/`: `DeviceService`, `FirmwareService`, `TherapyService`, `UpdaterService`, each implementing an `I*Repository` interface) → Rust via `invoke()` + `Channel` progress events.
 
-- `src/services/FirmwareService.ts`: GitHub API, firmware download/cache
-- `src/services/DeviceService.ts`: Device detection, DFU flashing, progress tracking
-- `src/stores/wizardStore.ts`: Wizard state (Zustand)
+| Rust module (`src-tauri/src/`) | Purpose |
+|--------------------------------|---------|
+| `dfu/protocol.rs` | DFU state machine — `upload_firmware()`, `configure_device_role_flexible()`, `configure_device_with_settings()`, `drain_boot_output()` |
+| `dfu/transport.rs` | Serial transport, 1200-baud touch reset, port-open retry |
+| `dfu/device.rs` | Device detection; `DeviceIdentifier` tracks devices across re-enumeration (serial number preferred, VID/PID+port-pattern fallback) |
+| `dfu/slip.rs`, `dfu/packet.rs` | SLIP/HCI framing, CRC16 |
+| `dfu/firmware_reader.rs` | Nordic DFU zip parsing (`manifest.json`, `firmware.bin`/`.dat`) |
+| `dfu/config.rs` | VID/PIDs, opcodes, all timing/retry constants |
+| `dfu/error.rs` | `DfuError` taxonomy — `is_retriable()`, `is_operation_retriable()`, stable `error_code()` (DFU-0xx) |
+| `commands/` | Tauri command boundary (`dfu.rs`, `firmware.rs`, `settings.rs`); stringifies errors for frontend |
+| `cache.rs` | Per-version firmware cache with SHA256 verification |
+| `settings.rs` | `AdvancedSettings` persistence + pre-profile serial command generation |
 
-### Rust DFU Module (`src-tauri/src/dfu/`)
+**Flash flow** (`upload_firmware`): read DFU zip → touch reset (1200 baud, DTR toggle) → `wait_for_bootloader_flexible` (2 consecutive detections) → HCI DFU: start → erase wait (`wait_with_drain`) → init packet → chunked firmware with flash-page pacing → validate → reboot → `wait_for_application_flexible` → send `SET_ROLE:...` over app-mode serial.
 
-| File | Purpose |
-|------|---------|
-| `config.rs` | USB VID/PID, protocol constants, HCI flags |
-| `error.rs` | `DfuError` enum with thiserror |
-| `slip.rs` | SLIP encoding/decoding, streaming decoder |
-| `packet.rs` | HCI packet builder with CRC16-CCITT |
-| `firmware_reader.rs` | Firmware zip parsing (manifest.json, .bin, .dat) |
-| `transport.rs` | Serial port abstraction, 1200 baud touch |
-| `device.rs` | nRF52840 detection by VID/PID |
-| `protocol.rs` | DFU state machine, role configuration |
+**Concurrency**: `DFU_IN_PROGRESS`/`DFU_CANCELLED` atomics + RAII `DfuGuard` in `commands/dfu.rs`. A dropped frontend `Channel` sets `DFU_CANCELLED` (reverse cancellation path).
 
-### Tauri Commands
+## Hardware Constants (`dfu/config.rs`)
 
-```rust
-// src-tauri/src/commands/dfu.rs
-detect_dfu_devices()           // Returns Vec<DfuDevice>
-flash_dfu_firmware(            // Flashes firmware with progress channel
-  serial_port, firmware_path,
-  device_role, progress: Channel
-)
+- VID `0x239A` (Adafruit); app PIDs `0x8029`/`0x802A`; bootloader PIDs `0x0029`/`0x002A`
+- DFU protocol at 115200 baud; bootloader entry via 1200-baud touch
 
-// src-tauri/src/commands/firmware.rs
-download_firmware(url, version)
-get_cached_firmware()
-extract_firmware(zip_path, dest)
-```
+## Cross-Repo Contract (must match BlueBuzzah-Firmware)
 
-## Device Detection
+- Serial commands: `SET_ROLE:PRIMARY|SECONDARY`, `SET_PROFILE:REGULAR|NOISY|HYBRID|GENTLE`, advanced-setting commands from `settings.rs::to_pre_profile_commands()`
+- Response markers parsed by `protocol.rs`: `[CONFIG]`, `[ERROR]`, `[SETTING]`, `"Role set to"`, `"Profile set to"` — hardcoded in firmware `main.cpp` serial output; rewording either side breaks the other
+- Boot markers in `drain_boot_output`: `[READY]`, `[INIT]`, `[BOOT]`, `BlueBuzzah`
+- Firmware distribution: `FirmwareService.ts` fetches `https://api.github.com/repos/BlueBuzzah/BlueBuzzah-Firmware/releases`; first `.zip` asset = Nordic DFU package. 60 req/hr unauthenticated.
 
-- **VID**: `0x239A` (Adafruit)
-- **App PIDs**: `0x8029` (Feather nRF52840)
-- **Bootloader PIDs**: `0x0029`, `0x002A`
-- **macOS**: Filters `tty.*` ports, uses `cu.*` only
-- **Windows**: Handles COM ports > 9 with `\\.\` prefix
+## Gotchas
 
-## DFU Installation Flow
+- **Windows semaphore timeout**: `"The semaphore timeout period has expired"` (ERROR_SEM_TIMEOUT) means CDC pipes aren't bound yet post-reboot — transient, must stay classified retriable in `transport.rs::is_transient_port_error`, `error.rs::is_retriable`, and `commands/dfu.rs::is_operation_retriable`.
+- **Role-config failure must never re-flash**: role config runs *after* a successful transfer; `is_operation_retriable` deliberately excludes it (it has its own inner retry). Regression = pointless full re-flash of a good device.
+- **Windows COM renumbering**: port numbers change across DFU reboots — always track devices via `DeviceIdentifier`, never a stored port string. Windows also gets longer touch waits and more re-detection polls (`#[cfg(target_os = "windows")]` throughout).
+- **macOS duplicate ports**: devices appear as both `cu.*` and `tty.*`; `find_nrf52_devices` filters `tty.*` — bypassing it double-counts devices.
+- **macOS stale port**: `wait_with_drain` keep-alives the port during the long flash-erase wait; removing it causes macOS-only flakiness.
+- **Boot noise**: firmware boot logs can contain `ERROR` text; always `drain_boot_output` before sending a command or responses get misparsed.
+- **`[SETTING]` ack timeout = success**: `send_setting_command` treats no-ack as success for backward compat with older firmware.
 
-1. **Bootloader Entry**: 1200 baud touch triggers bootloader mode
-2. **Wait for Device**: Poll for bootloader PID (device re-enumerates)
-3. **Send Init Packet**: `firmware.dat` with device info
-4. **Transfer Firmware**: `firmware.bin` in 512-byte chunks via SLIP/HCI
-5. **Validate**: Device verifies CRC
-6. **Configure Role**: Send `SET_ROLE:PRIMARY\n` or `SET_ROLE:SECONDARY\n`
-7. **Activate**: Device reboots into new firmware
+## Conventions
 
-## Device Roles
+- Rust retry naming: public retrying fn wraps `*_inner`; single attempt = `*_once`; re-enumeration-tolerant = `*_flexible`
+- Tests colocated: `*.test.ts(x)` beside source (global Tauri mocks in `src/test/setup.ts`, factories in `src/test/factories.ts`); Rust `#[cfg(test)]` at file bottom
+- Strict TypeScript (no `any`); shadcn/ui components exclusively; Tailwind only (no inline styles)
+- Blue for success states (brand); loading states for all async ops; errors via toast or destructive card (`src/lib/error-messages.ts` maps DFU errors to user guidance)
 
-- **PRIMARY**: Coordinator - `SET_ROLE:PRIMARY\n`
-- **SECONDARY**: Listener - `SET_ROLE:SECONDARY\n`
-- Sent via serial after firmware validation, before activation
+## Docs
 
-## Design System
-
-| Element | Value |
-|---------|-------|
-| Primary | `#35B6F2` (blue) - buttons, progress, success |
-| Secondary | `#05212D` (dark navy) - cards |
-| Background | `#0a0a0a` |
-| **Success color** | **Blue only** - never green |
-
-## Key Constraints
-
-1. Dark theme only
-2. Linear wizard (no step skipping)
-3. GitHub releases only (no manual upload)
-4. Auto-detection only (no manual port entry)
-5. Single firmware version per session
-6. Up to 2 devices simultaneously
-
-## Commands
-
-```bash
-npm run tauri:dev      # Dev with hot reload
-npm run tauri:build    # Production build
-npm run build          # Frontend TypeScript check
-npm test               # Frontend tests (272)
-cargo test             # Rust tests (88)
-```
-
-## File Structure
-
-```
-src/
-├── services/          # FirmwareService, DeviceService
-├── stores/            # wizardStore (Zustand)
-├── components/wizard/ # FirmwareSelection, DeviceSelection, etc.
-├── types/index.ts     # Device, DfuProgress, UpdateProgress
-└── lib/error-messages.ts  # Error guidance with DFU patterns
-
-src-tauri/src/
-├── dfu/               # Nordic DFU implementation
-├── commands/          # dfu.rs, firmware.rs
-├── cache.rs           # Firmware cache management
-└── main.rs            # Tauri app entry
-```
-
-## Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| No devices | Check USB data cable, try different port |
-| Device not detected | Press reset twice quickly for DFU mode |
-| 4 devices shown (macOS) | Fixed - filters `tty.*` ports |
-| Permission denied | Grant terminal Full Disk Access |
-| Build errors | `cargo clean`, clear `node_modules` |
-
-## GitHub Integration
-
-- Repo: `BlueBuzzah/BlueBuzzah-Firmware`
-- Asset: First `.zip` in release assets
-- Rate limit: 60 req/hr unauthenticated
-
-## Development Rules
-
-1. Use shadcn/ui components exclusively
-2. Repository pattern for services
-3. Strict TypeScript (no `any`)
-4. Tailwind only (no inline styles)
-5. Blue for success states (brand consistency)
-6. Loading states for all async operations
-7. Error messages via toast or destructive card
+| Document | Purpose |
+|----------|---------|
+| `docs/TAURI_DFU_FLASH_GUIDE.MD` | DFU flashing implementation guide |
+| `docs/DESIGN_GUIDE.md` | UI/visual design guide |
+| `docs/superpowers/plans/` | TDD implementation plans (e.g. Windows re-enum/role-config resilience) |
