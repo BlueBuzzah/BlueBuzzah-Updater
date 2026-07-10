@@ -1,6 +1,7 @@
-//! Device detection for nRF52 devices.
+//! Device detection for supported BlueBuzzah hardware.
 //!
-//! Detects Adafruit Feather nRF52840 devices by USB VID/PID.
+//! Detects Adafruit Feather nRF52840 (v2) and Seeed XIAO ESP32-S3 /
+//! PentaBuzzer (v3) devices by USB VID/PID.
 //! Provides flexible device tracking via serial number or VID/PID+port pattern.
 
 use std::time::{Duration, Instant};
