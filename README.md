@@ -6,7 +6,14 @@
 [![Snyk Security](https://snyk.io/test/github/buzzahbuddy/bluebuzzah-firmware/badge.svg)](https://app.snyk.io/org/rbonestell/project/8b6e37e4-60b5-4772-a925-9dff00d8dce2)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 
-Device firmware updater for BlueBuzzah devices.
+Device firmware updater for BlueBuzzah devices. Supports both hardware revisions from a single app:
+
+| Hardware | Board | Flash protocol |
+| -------- | ----- | -------------- |
+| BlueBuzzah v2 | Adafruit Feather nRF52840 Express | Nordic Secure DFU over serial |
+| BlueBuzzah v3 (PentaBuzzer) | Seeed XIAO ESP32-S3 | esptool protocol via espflash |
+
+The correct firmware package and flash protocol are selected automatically based on the detected hardware.
 
 ## 🚀 Quick Start
 
@@ -45,16 +52,18 @@ npm run tauri:build
 
 - **Modern UI**: Beautiful dark-themed interface with BlueBuzzah brand colors (#35B6F2, #05212D)
 - **4-Step Wizard**: Intuitive workflow from firmware selection to successful installation
-- **GitHub Integration**: Automatically fetches latest firmware releases
-- **Auto-Detection**: Automatically detects connected CircuitPython devices
-- **Dual-Device Support**: Update up to 2 devices simultaneously with PRIMARY/SECONDARY roles
+- **GitHub Integration**: Automatically fetches latest firmware releases, with the right package per hardware revision
+- **Multi-Hardware Support**: Flashes both v2 (nRF52840) and v3 (ESP32-S3) devices with the matching protocol
+- **Auto-Detection**: Automatically detects connected devices over serial and identifies their hardware revision
+- **Dual-Device Support**: Update up to 2 devices of the same hardware revision simultaneously with PRIMARY/SECONDARY roles
+- **Firmware Cache**: Downloaded firmware is cached per version and board with SHA256 verification
 - **Real-time Progress**: Live progress tracking with detailed logging
 - **Cross-Platform**: Native support for macOS and Windows
 
 ## 🏗️ Architecture
 
 **Frontend:** React 18 + TypeScript + Zustand + shadcn/ui + Tailwind CSS
-**Backend:** Tauri 2.0 + Rust for native device detection and file operations
+**Backend:** Tauri 2.0 + Rust for device detection, firmware flashing (Nordic Secure DFU and espflash), and post-flash role configuration over serial
 
 ### Project Structure
 
@@ -82,14 +91,20 @@ mindmap
         Utilities, templates
     src-tauri/
       src/commands/
-        device.rs, firmware.rs
+        dfu.rs, firmware.rs, settings.rs
+      src/dfu/
+        Nordic Secure DFU - v2
+      src/esp/
+        espflash flashing - v3
+      src/cache.rs
+        Firmware cache
 ```
 
 ### Wizard Flow
 
 1. **Firmware Selection** → Browse GitHub releases and select version
-2. **Device Selection** → Auto-detect devices and assign roles (PRIMARY/SECONDARY)
-3. **Installation** → Real-time progress with file-by-file tracking
+2. **Device Selection** → Auto-detect devices (v2/v3) and assign roles (PRIMARY/SECONDARY)
+3. **Installation** → Flash firmware with real-time progress, then configure device role over serial
 4. **Complete** → Success screen with post-installation instructions
 
 ## 🎨 UI/UX
@@ -100,7 +115,7 @@ The application features a modern dark theme with BlueBuzzah brand colors:
 - **Dark Navy** (#05212D) - Cards, secondary surfaces
 - **Smooth animations** and **glow effects** for a polished user experience
 
-For complete design system documentation, see [DESIGN_GUIDE.md](DESIGN_GUIDE.md).
+For complete design system documentation, see [docs/DESIGN_GUIDE.md](docs/DESIGN_GUIDE.md).
 
 ## 📦 Technology Stack
 
@@ -111,13 +126,15 @@ For complete design system documentation, see [DESIGN_GUIDE.md](DESIGN_GUIDE.md)
 | **State Management** | Zustand                              |
 | **Icons**            | Lucide React                         |
 | **Backend**          | Tauri 2.0, Rust                      |
-| **Device Detection** | Native Rust implementations          |
+| **Flashing**         | Nordic Secure DFU (native Rust, v2), espflash (v3) |
+| **Device Detection** | serialport (VID/PID identification)  |
 | **HTTP Client**      | reqwest, native fetch                |
 
 ## 📚 Documentation
 
 - **[SETUP.md](SETUP.md)** - Complete setup guide, prerequisites, and troubleshooting
-- **[DESIGN_GUIDE.md](DESIGN_GUIDE.md)** - Complete design system, UI/UX patterns, and component guidelines
+- **[docs/DESIGN_GUIDE.md](docs/DESIGN_GUIDE.md)** - Complete design system, UI/UX patterns, and component guidelines
+- **[docs/TAURI_DFU_FLASH_GUIDE.MD](docs/TAURI_DFU_FLASH_GUIDE.MD)** - DFU flashing implementation guide
 
 ## 🔧 Development
 
@@ -127,11 +144,13 @@ For complete design system documentation, see [DESIGN_GUIDE.md](DESIGN_GUIDE.md)
 npm run tauri:dev      # Development mode with hot reload
 npm run tauri:build    # Production build (DMG for macOS, MSI for Windows)
 npm run dev            # Frontend only (no Tauri)
+npm test               # Frontend tests (Vitest)
+npm run tauri:test     # Rust tests
 ```
 
 ### Device Configuration
 
-The updater automatically generates role-specific `settings.json` files:
+After flashing, the updater configures each device's role over serial (`SET_ROLE:PRIMARY` / `SET_ROLE:SECONDARY`):
 
 - **PRIMARY**: Coordinator device, broadcasts to secondary
 - **SECONDARY**: Listener device, receives from primary
