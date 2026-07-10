@@ -1,4 +1,6 @@
 import {
+    BoardType,
+    FirmwareAsset,
     FirmwareBundle,
     FirmwareCacheIndex,
     FirmwareRelease,
@@ -6,9 +8,24 @@ import {
 } from '@/types';
 import { invoke } from '@tauri-apps/api/core';
 
+/** v2 (nRF52840) Nordic DFU package. */
+export const NRF_ASSET_PATTERN = /^BlueBuzzah-Firmware-(?!v3-)/;
+/** v3 (ESP32-S3 / PentaBuzzer) esptool image package. */
+export const V3_ASSET_PATTERN = /^BlueBuzzah-Firmware-v3-/;
+
+export function getAssetForBoard(
+  release: FirmwareRelease,
+  board: BoardType
+): FirmwareAsset | null {
+  const pattern = board === 'esp32s3' ? V3_ASSET_PATTERN : NRF_ASSET_PATTERN;
+  return (
+    release.assets.find((a) => pattern.test(a.name) && a.name.endsWith('.zip')) ?? null
+  );
+}
+
 export interface IFirmwareRepository {
   fetchReleases(): Promise<FirmwareRelease[]>;
-  downloadFirmware(release: FirmwareRelease): Promise<FirmwareBundle>;
+  downloadFirmware(release: FirmwareRelease, board?: BoardType): Promise<FirmwareBundle>;
   getCachedFirmware(version: string): Promise<string | null>;
   getCacheIndex(): Promise<FirmwareCacheIndex>;
   deleteCachedFirmware(version: string): Promise<void>;
@@ -121,7 +138,10 @@ export class FirmwareService implements IFirmwareRepository {
     }
   }
 
-  async downloadFirmware(release: FirmwareRelease): Promise<FirmwareBundle> {
+  async downloadFirmware(
+    release: FirmwareRelease,
+    board: BoardType = 'nrf52'
+  ): Promise<FirmwareBundle> {
     try {
       // Check if firmware is already cached
       const cachedPath = await this.getCachedFirmware(release.version);
@@ -133,13 +153,15 @@ export class FirmwareService implements IFirmwareRepository {
         };
       }
 
-      // Find the firmware zip asset
-      const firmwareAsset = release.assets.find((asset) =>
-        asset.name.endsWith('.zip')
-      );
+      // Find the firmware zip asset matching the target board
+      const firmwareAsset = getAssetForBoard(release, board);
 
       if (!firmwareAsset) {
-        throw new Error('No firmware zip file found in release assets');
+        throw new Error(
+          board === 'esp32s3'
+            ? 'This release has no v3 (PentaBuzzer) firmware asset. It may predate v3 support.'
+            : 'No v2 (nRF52840) firmware asset found in this release.'
+        );
       }
 
       // Download firmware using Tauri command with metadata
@@ -241,7 +263,10 @@ export class FirmwareService implements IFirmwareRepository {
       tagName: githubRelease.tag_name,
       releaseNotes: githubRelease.body || 'No release notes available',
       publishedAt: new Date(githubRelease.published_at),
-      downloadUrl: githubRelease.assets[0]?.browser_download_url || '',
+      downloadUrl:
+        githubRelease.assets.find(
+          (a) => NRF_ASSET_PATTERN.test(a.name) && a.name.endsWith('.zip')
+        )?.browser_download_url || '',
       assets: githubRelease.assets.map((asset) => ({
         name: asset.name,
         downloadUrl: asset.browser_download_url,

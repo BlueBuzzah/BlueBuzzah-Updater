@@ -1,4 +1,8 @@
 // Domain Models
+
+/** Hardware board family a firmware asset / device belongs to. */
+export type BoardType = 'nrf52' | 'esp32s3';
+
 export interface FirmwareRelease {
   version: string;
   tagName: string;

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
-import { FirmwareService } from './FirmwareService';
+import { FirmwareService, getAssetForBoard } from './FirmwareService';
 import {
   createMockGitHubRelease,
   createMockGitHubAsset,
@@ -8,8 +8,68 @@ import {
   createMockCachedMetadata,
 } from '@/test/factories';
 import { mockConsole } from '@/test/setup';
+import type { FirmwareRelease } from '@/types';
 
 // Note: Tauri API is mocked in test/setup.ts
+
+const makeRelease = (assetNames: string[]): FirmwareRelease => ({
+  version: '2.0.0',
+  tagName: 'v2.0.0',
+  releaseNotes: '',
+  publishedAt: new Date('2026-01-01'),
+  downloadUrl: '',
+  assets: assetNames.map((name) => ({
+    name,
+    downloadUrl: `https://example.com/${name}`,
+    size: 1024,
+  })),
+});
+
+describe('getAssetForBoard', () => {
+  it('selects the nRF asset for nrf52 when both assets are present', () => {
+    const release = makeRelease([
+      'BlueBuzzah-Firmware-v2.0.0-abc1234.zip',
+      'BlueBuzzah-Firmware-v3-v2.0.0-abc1234.zip',
+    ]);
+
+    const asset = getAssetForBoard(release, 'nrf52');
+
+    expect(asset?.name).toBe('BlueBuzzah-Firmware-v2.0.0-abc1234.zip');
+  });
+
+  it('never selects the v3 asset for nrf52', () => {
+    const release = makeRelease([
+      'BlueBuzzah-Firmware-v3-v2.0.0-abc1234.zip',
+    ]);
+
+    expect(getAssetForBoard(release, 'nrf52')).toBeNull();
+  });
+
+  it('selects the v3 asset for esp32s3 when both assets are present', () => {
+    const release = makeRelease([
+      'BlueBuzzah-Firmware-v3-v2.0.0-abc1234.zip',
+      'BlueBuzzah-Firmware-v2.0.0-abc1234.zip',
+    ]);
+
+    const asset = getAssetForBoard(release, 'esp32s3');
+
+    expect(asset?.name).toBe('BlueBuzzah-Firmware-v3-v2.0.0-abc1234.zip');
+  });
+
+  it('returns null for esp32s3 when the release predates v3 support', () => {
+    const release = makeRelease(['BlueBuzzah-Firmware-v1.9.0-def5678.zip']);
+
+    expect(getAssetForBoard(release, 'esp32s3')).toBeNull();
+  });
+
+  it('ignores non-zip assets', () => {
+    const release = makeRelease([
+      'BlueBuzzah-Firmware-v2.0.0-abc1234.zip.sha256',
+    ]);
+
+    expect(getAssetForBoard(release, 'nrf52')).toBeNull();
+  });
+});
 
 describe('FirmwareService', () => {
   let service: FirmwareService;
@@ -305,8 +365,8 @@ describe('FirmwareService', () => {
         publishedAt: new Date('2024-01-15'),
         assets: [
           {
-            name: 'firmware.zip',
-            downloadUrl: 'https://test.com/firmware.zip',
+            name: 'BlueBuzzah-Firmware-v1.0.0-abc1234.zip',
+            downloadUrl: 'https://test.com/BlueBuzzah-Firmware-v1.0.0-abc1234.zip',
             size: 1000,
           },
         ],
@@ -319,7 +379,7 @@ describe('FirmwareService', () => {
       await service.downloadFirmware(release);
 
       expect(invoke).toHaveBeenCalledWith('download_firmware', {
-        url: 'https://test.com/firmware.zip',
+        url: 'https://test.com/BlueBuzzah-Firmware-v1.0.0-abc1234.zip',
         version: '1.0.0',
         tagName: 'v1.0.0',
         publishedAt: expect.any(String),
@@ -328,7 +388,15 @@ describe('FirmwareService', () => {
     });
 
     it('returns local path on success', async () => {
-      const release = createMockRelease();
+      const release = createMockRelease({
+        assets: [
+          {
+            name: 'BlueBuzzah-Firmware-v1.0.0-abc1234.zip',
+            downloadUrl: 'https://test.com/BlueBuzzah-Firmware-v1.0.0-abc1234.zip',
+            size: 1000,
+          },
+        ],
+      });
 
       vi.mocked(invoke)
         .mockResolvedValueOnce(null) // get_cached_firmware
@@ -355,7 +423,15 @@ describe('FirmwareService', () => {
     });
 
     it('handles download failure', async () => {
-      const release = createMockRelease();
+      const release = createMockRelease({
+        assets: [
+          {
+            name: 'BlueBuzzah-Firmware-v1.0.0-abc1234.zip',
+            downloadUrl: 'https://test.com/BlueBuzzah-Firmware-v1.0.0-abc1234.zip',
+            size: 1000,
+          },
+        ],
+      });
 
       vi.mocked(invoke)
         .mockResolvedValueOnce(null) // get_cached_firmware
@@ -378,7 +454,7 @@ describe('FirmwareService', () => {
       vi.mocked(invoke).mockResolvedValueOnce(null); // get_cached_firmware
 
       await expect(service.downloadFirmware(release)).rejects.toThrow(
-        'No firmware zip file found'
+        'No v2 (nRF52840) firmware asset found in this release.'
       );
       expect(mockConsole.error).toHaveBeenCalledWith(
         'Failed to download firmware:',
@@ -387,7 +463,15 @@ describe('FirmwareService', () => {
     });
 
     it('handles network timeout', async () => {
-      const release = createMockRelease();
+      const release = createMockRelease({
+        assets: [
+          {
+            name: 'BlueBuzzah-Firmware-v1.0.0-abc1234.zip',
+            downloadUrl: 'https://test.com/BlueBuzzah-Firmware-v1.0.0-abc1234.zip',
+            size: 1000,
+          },
+        ],
+      });
 
       vi.mocked(invoke)
         .mockResolvedValueOnce(null) // get_cached_firmware
