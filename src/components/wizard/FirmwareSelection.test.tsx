@@ -4,13 +4,17 @@ import { FirmwareSelection } from './FirmwareSelection';
 import { firmwareService } from '@/services/FirmwareService';
 import { createMockRelease, createMockReleases } from '@/test/factories';
 
-// Mock the firmware service
-vi.mock('@/services/FirmwareService', () => ({
-  firmwareService: {
-    fetchReleases: vi.fn(),
-    deleteCachedFirmware: vi.fn(),
-  },
-}));
+// Mock the firmware service (keep the real getAssetForBoard helper)
+vi.mock('@/services/FirmwareService', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/services/FirmwareService')>();
+  return {
+    ...actual,
+    firmwareService: {
+      fetchReleases: vi.fn(),
+      deleteCachedFirmware: vi.fn(),
+    },
+  };
+});
 
 // Mock the toast hook
 vi.mock('@/components/ui/use-toast', () => ({
@@ -181,6 +185,24 @@ describe('FirmwareSelection', () => {
       await waitFor(() => {
         expect(screen.getByText('1 MB')).toBeInTheDocument();
       });
+    });
+
+    it('shows per-board download sizes when a release has both assets', async () => {
+      const mockRelease = createMockRelease({
+        version: '2.0.0',
+        assets: [
+          { name: 'BlueBuzzah-Firmware-v2.0.0-abc.zip', downloadUrl: 'u1', size: 200 * 1024 },
+          { name: 'BlueBuzzah-Firmware-v3-v2.0.0-abc.zip', downloadUrl: 'u2', size: 1024 * 1024 },
+        ],
+      });
+      vi.mocked(firmwareService.fetchReleases).mockResolvedValue([mockRelease]);
+
+      render(
+        <FirmwareSelection onSelect={mockOnSelect} />
+      );
+
+      expect(await screen.findByText(/v2: 200 KB/)).toBeInTheDocument();
+      expect(screen.getByText(/v3: 1 MB/)).toBeInTheDocument();
     });
   });
 
