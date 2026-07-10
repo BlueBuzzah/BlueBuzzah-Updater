@@ -42,6 +42,7 @@ export const createMockCachedMetadata = (
   overrides?: Partial<CachedFirmwareMetadata>
 ): CachedFirmwareMetadata => ({
   version: '1.0.0',
+  board: 'nrf52',
   tag_name: 'v1.0.0',
   sha256_hash: 'abc123def456',
   zip_path: '/cache/firmware/v1.0.0.zip',

@@ -13,6 +13,8 @@ export interface FirmwareRelease {
   sha256Hash?: string;
   isCached?: boolean;
   cachedMetadata?: CachedFirmwareMetadata;
+  /** All cached board entries for this version (one per cached board). */
+  cachedEntries?: CachedFirmwareMetadata[];
   isPrerelease?: boolean;
 }
 
@@ -24,6 +26,7 @@ export interface FirmwareAsset {
 
 export interface CachedFirmwareMetadata {
   version: string;
+  board: BoardType;
   tag_name: string;
   sha256_hash: string;
   zip_path: string;

@@ -1,5 +1,6 @@
 import {
     BoardType,
+    CachedFirmwareMetadata,
     FirmwareAsset,
     FirmwareBundle,
     FirmwareCacheIndex,
@@ -26,11 +27,11 @@ export function getAssetForBoard(
 export interface IFirmwareRepository {
   fetchReleases(): Promise<FirmwareRelease[]>;
   downloadFirmware(release: FirmwareRelease, board?: BoardType): Promise<FirmwareBundle>;
-  getCachedFirmware(version: string): Promise<string | null>;
+  getCachedFirmware(version: string, board: BoardType): Promise<string | null>;
   getCacheIndex(): Promise<FirmwareCacheIndex>;
-  deleteCachedFirmware(version: string): Promise<void>;
+  deleteCachedFirmware(version: string, board: BoardType): Promise<void>;
   clearAllCache(): Promise<void>;
-  verifyCachedFirmware(version: string): Promise<boolean>;
+  verifyCachedFirmware(version: string, board: BoardType): Promise<boolean>;
   verifyAndCleanCache(): Promise<string[]>;
 }
 
@@ -77,47 +78,56 @@ export class FirmwareService implements IFirmwareRepository {
       // Get cache index to mark cached releases
       const cacheIndex = await this.getCacheIndex();
 
+      // Group cached entries by version (a version may have multiple cached boards)
+      const cacheByVersion = new Map<string, CachedFirmwareMetadata[]>();
+      for (const meta of Object.values(cacheIndex)) {
+        const list = cacheByVersion.get(meta.version) ?? [];
+        list.push(meta);
+        cacheByVersion.set(meta.version, list);
+      }
+
       // Map GitHub releases and mark cached ones
       const githubVersions = new Set<string>();
       const firmwareReleases = releases.map((release) => {
         const transformed = this.transformRelease(release);
         githubVersions.add(transformed.version);
-        const cachedMetadata = cacheIndex[transformed.version];
+        const entries = cacheByVersion.get(transformed.version);
 
-        if (cachedMetadata) {
+        if (entries && entries.length > 0) {
           return {
             ...transformed,
             isCached: true,
-            cachedMetadata,
-            sha256Hash: cachedMetadata.sha256_hash,
+            cachedEntries: entries,
+            cachedMetadata: entries[0],
+            sha256Hash: entries[0].sha256_hash,
           };
         }
 
         return transformed;
       });
 
-      // Add cached-only releases (not in GitHub response)
-      for (const [version, cachedMetadata] of Object.entries(cacheIndex)) {
+      // Add cached-only releases (not in GitHub response) — one release per version
+      for (const [version, entries] of cacheByVersion.entries()) {
         if (!githubVersions.has(version)) {
+          const first = entries[0];
           // Create release from cached metadata
           const cachedRelease: FirmwareRelease = {
-            version: cachedMetadata.version,
-            tagName: cachedMetadata.tag_name,
-            releaseNotes: cachedMetadata.release_notes,
-            publishedAt: cachedMetadata.published_at
-              ? new Date(cachedMetadata.published_at)
-              : new Date(cachedMetadata.downloaded_at),
+            version,
+            tagName: first.tag_name,
+            releaseNotes: first.release_notes,
+            publishedAt: first.published_at
+              ? new Date(first.published_at)
+              : new Date(first.downloaded_at),
             downloadUrl: '', // No URL for cached-only
-            assets: [
-              {
-                name: `${version}.zip`,
-                downloadUrl: '',
-                size: cachedMetadata.file_size,
-              },
-            ],
+            assets: entries.map((m) => ({
+              name: `${version}${m.board === 'nrf52' ? '' : `-${m.board}`}.zip`,
+              downloadUrl: '',
+              size: m.file_size,
+            })),
             isCached: true,
-            cachedMetadata,
-            sha256Hash: cachedMetadata.sha256_hash,
+            cachedEntries: entries,
+            cachedMetadata: first,
+            sha256Hash: first.sha256_hash,
           };
 
           firmwareReleases.push(cachedRelease);
@@ -144,7 +154,7 @@ export class FirmwareService implements IFirmwareRepository {
   ): Promise<FirmwareBundle> {
     try {
       // Check if firmware is already cached
-      const cachedPath = await this.getCachedFirmware(release.version);
+      const cachedPath = await this.getCachedFirmware(release.version, board);
 
       if (cachedPath) {
         return {
@@ -168,6 +178,7 @@ export class FirmwareService implements IFirmwareRepository {
       const localPath = await invoke<string>('download_firmware', {
         url: firmwareAsset.downloadUrl,
         version: release.version,
+        board,
         tagName: release.tagName,
         publishedAt: release.publishedAt.toISOString(),
         releaseNotes: release.releaseNotes,
@@ -185,10 +196,11 @@ export class FirmwareService implements IFirmwareRepository {
     }
   }
 
-  async getCachedFirmware(version: string): Promise<string | null> {
+  async getCachedFirmware(version: string, board: BoardType): Promise<string | null> {
     try {
       const result = await invoke<string | null>('get_cached_firmware', {
         version,
+        board,
       });
       return result;
     } catch (error) {
@@ -207,9 +219,9 @@ export class FirmwareService implements IFirmwareRepository {
     }
   }
 
-  async deleteCachedFirmware(version: string): Promise<void> {
+  async deleteCachedFirmware(version: string, board: BoardType): Promise<void> {
     try {
-      await invoke('delete_cached_firmware', { version });
+      await invoke('delete_cached_firmware', { version, board });
     } catch (error) {
       console.error('Failed to delete cached firmware:', error);
       throw new Error(
@@ -229,10 +241,11 @@ export class FirmwareService implements IFirmwareRepository {
     }
   }
 
-  async verifyCachedFirmware(version: string): Promise<boolean> {
+  async verifyCachedFirmware(version: string, board: BoardType): Promise<boolean> {
     try {
       const result = await invoke<boolean>('verify_cached_firmware', {
         version,
+        board,
       });
       return result;
     } catch (error) {

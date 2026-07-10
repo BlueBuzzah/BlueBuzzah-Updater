@@ -99,7 +99,10 @@ export function FirmwareSelection({
 
     try {
       setIsDeleting(true);
-      await firmwareService.deleteCachedFirmware(releaseToDelete.version);
+      const entries = releaseToDelete.cachedEntries ?? [];
+      for (const entry of entries) {
+        await firmwareService.deleteCachedFirmware(entry.version, entry.board);
+      }
 
       toast({
         title: 'Cache deleted',

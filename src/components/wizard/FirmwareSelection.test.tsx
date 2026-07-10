@@ -110,6 +110,7 @@ describe('FirmwareSelection', () => {
         isCached: true,
         cachedMetadata: {
           version: '1.0.0',
+          board: 'nrf52',
           tag_name: 'v1.0.0',
           sha256_hash: 'abc123',
           zip_path: '/cache/1.0.0.zip',
@@ -368,6 +369,7 @@ describe('FirmwareSelection', () => {
         isCached: true,
         cachedMetadata: {
           version: '1.0.0',
+          board: 'nrf52',
           tag_name: 'v1.0.0',
           sha256_hash: 'abc123',
           zip_path: '/cache/1.0.0.zip',
@@ -398,6 +400,7 @@ describe('FirmwareSelection', () => {
         isCached: true,
         cachedMetadata: {
           version: '1.0.0',
+          board: 'nrf52',
           tag_name: 'v1.0.0',
           sha256_hash: 'abc123',
           zip_path: '/cache/1.0.0.zip',

@@ -331,6 +331,72 @@ describe('FirmwareService', () => {
       expect(releases.find((r) => r.version === '1.0.0')?.isCached).toBe(true);
     });
 
+    it('marks a release cached when any board entry exists and collects cachedEntries', async () => {
+      const mockGitHubRelease = createMockGitHubRelease({
+        name: '2.0.0',
+        tag_name: 'v2.0.0',
+        assets: [
+          createMockGitHubAsset({
+            name: 'BlueBuzzah-Firmware-v2.0.0-abc1234.zip',
+          }),
+          createMockGitHubAsset({
+            name: 'BlueBuzzah-Firmware-v3-v2.0.0-abc1234.zip',
+          }),
+        ],
+      });
+
+      const mockCacheIndex = {
+        '2.0.0::nrf52': createMockCachedMetadata({
+          version: '2.0.0',
+          board: 'nrf52',
+        }),
+        '2.0.0::esp32s3': createMockCachedMetadata({
+          version: '2.0.0',
+          board: 'esp32s3',
+        }),
+      };
+
+      vi.mocked(global.fetch).mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve([mockGitHubRelease]),
+      } as Response);
+
+      vi.mocked(invoke).mockResolvedValueOnce([]); // verify_and_clean_cache
+      vi.mocked(invoke).mockResolvedValueOnce(mockCacheIndex); // get_cache_index
+
+      const releases = await service.fetchReleases();
+
+      expect(releases[0].isCached).toBe(true);
+      expect(releases[0].cachedEntries).toHaveLength(2);
+    });
+
+    it('synthesizes one cached-only release per version across boards', async () => {
+      const mockCacheIndex = {
+        '2.0.0::nrf52': createMockCachedMetadata({
+          version: '2.0.0',
+          board: 'nrf52',
+        }),
+        '2.0.0::esp32s3': createMockCachedMetadata({
+          version: '2.0.0',
+          board: 'esp32s3',
+        }),
+      };
+
+      vi.mocked(global.fetch).mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve([]),
+      } as Response);
+
+      vi.mocked(invoke).mockResolvedValueOnce([]); // verify_and_clean_cache
+      vi.mocked(invoke).mockResolvedValueOnce(mockCacheIndex); // get_cache_index
+
+      const releases = await service.fetchReleases();
+
+      expect(releases).toHaveLength(1);
+      expect(releases[0].version).toBe('2.0.0');
+      expect(releases[0].cachedEntries).toHaveLength(2);
+    });
+
     it('uses release name as version, falls back to tag_name', async () => {
       const releaseWithName = createMockGitHubRelease({
         name: 'Release Name',
@@ -381,9 +447,44 @@ describe('FirmwareService', () => {
       expect(invoke).toHaveBeenCalledWith('download_firmware', {
         url: 'https://test.com/BlueBuzzah-Firmware-v1.0.0-abc1234.zip',
         version: '1.0.0',
+        board: 'nrf52',
         tagName: 'v1.0.0',
         publishedAt: expect.any(String),
         releaseNotes: 'Test notes',
+      });
+    });
+
+    it('passes board through to download_firmware invoke args', async () => {
+      const dualAssetRelease = createMockRelease({
+        version: '2.0.0',
+        tagName: 'v2.0.0',
+        assets: [
+          {
+            name: 'BlueBuzzah-Firmware-v2.0.0-abc1234.zip',
+            downloadUrl: 'https://example.com/BlueBuzzah-Firmware-v2.0.0-abc1234.zip',
+            size: 1000,
+          },
+          {
+            name: 'BlueBuzzah-Firmware-v3-v2.0.0-abc1234.zip',
+            downloadUrl: 'https://example.com/BlueBuzzah-Firmware-v3-v2.0.0-abc1234.zip',
+            size: 1000,
+          },
+        ],
+      });
+
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(null) // get_cached_firmware
+        .mockResolvedValueOnce('/tmp/fw.zip'); // download_firmware
+
+      await service.downloadFirmware(dualAssetRelease, 'esp32s3');
+
+      expect(invoke).toHaveBeenCalledWith('download_firmware', {
+        url: 'https://example.com/BlueBuzzah-Firmware-v3-v2.0.0-abc1234.zip',
+        version: '2.0.0',
+        board: 'esp32s3',
+        tagName: 'v2.0.0',
+        publishedAt: expect.any(String),
+        releaseNotes: expect.any(String),
       });
     });
 
@@ -491,16 +592,16 @@ describe('FirmwareService', () => {
     it('returns cached path when available', async () => {
       vi.mocked(invoke).mockResolvedValueOnce('/cache/firmware/v1.0.0');
 
-      const result = await service.getCachedFirmware('1.0.0');
+      const result = await service.getCachedFirmware('1.0.0', 'nrf52');
 
       expect(result).toBe('/cache/firmware/v1.0.0');
-      expect(invoke).toHaveBeenCalledWith('get_cached_firmware', { version: '1.0.0' });
+      expect(invoke).toHaveBeenCalledWith('get_cached_firmware', { version: '1.0.0', board: 'nrf52' });
     });
 
     it('returns null when not cached', async () => {
       vi.mocked(invoke).mockResolvedValueOnce(null);
 
-      const result = await service.getCachedFirmware('1.0.0');
+      const result = await service.getCachedFirmware('1.0.0', 'nrf52');
 
       expect(result).toBeNull();
     });
@@ -508,7 +609,7 @@ describe('FirmwareService', () => {
     it('returns null on cache read error', async () => {
       vi.mocked(invoke).mockRejectedValueOnce(new Error('Cache read failed'));
 
-      const result = await service.getCachedFirmware('1.0.0');
+      const result = await service.getCachedFirmware('1.0.0', 'nrf52');
 
       expect(result).toBeNull();
       expect(mockConsole.error).toHaveBeenCalledWith(
@@ -550,15 +651,15 @@ describe('FirmwareService', () => {
     it('calls delete_cached_firmware command', async () => {
       vi.mocked(invoke).mockResolvedValueOnce(undefined);
 
-      await service.deleteCachedFirmware('1.0.0');
+      await service.deleteCachedFirmware('1.0.0', 'nrf52');
 
-      expect(invoke).toHaveBeenCalledWith('delete_cached_firmware', { version: '1.0.0' });
+      expect(invoke).toHaveBeenCalledWith('delete_cached_firmware', { version: '1.0.0', board: 'nrf52' });
     });
 
     it('throws error on failure', async () => {
       vi.mocked(invoke).mockRejectedValueOnce(new Error('Delete failed'));
 
-      await expect(service.deleteCachedFirmware('1.0.0')).rejects.toThrow(
+      await expect(service.deleteCachedFirmware('1.0.0', 'nrf52')).rejects.toThrow(
         'Failed to delete cached firmware'
       );
       expect(mockConsole.error).toHaveBeenCalledWith(
@@ -592,16 +693,16 @@ describe('FirmwareService', () => {
     it('returns true when firmware is valid', async () => {
       vi.mocked(invoke).mockResolvedValueOnce(true);
 
-      const result = await service.verifyCachedFirmware('1.0.0');
+      const result = await service.verifyCachedFirmware('1.0.0', 'nrf52');
 
       expect(result).toBe(true);
-      expect(invoke).toHaveBeenCalledWith('verify_cached_firmware', { version: '1.0.0' });
+      expect(invoke).toHaveBeenCalledWith('verify_cached_firmware', { version: '1.0.0', board: 'nrf52' });
     });
 
     it('returns false when firmware is invalid', async () => {
       vi.mocked(invoke).mockResolvedValueOnce(false);
 
-      const result = await service.verifyCachedFirmware('1.0.0');
+      const result = await service.verifyCachedFirmware('1.0.0', 'nrf52');
 
       expect(result).toBe(false);
     });
@@ -609,7 +710,7 @@ describe('FirmwareService', () => {
     it('returns false on error', async () => {
       vi.mocked(invoke).mockRejectedValueOnce(new Error('Verify failed'));
 
-      const result = await service.verifyCachedFirmware('1.0.0');
+      const result = await service.verifyCachedFirmware('1.0.0', 'nrf52');
 
       expect(result).toBe(false);
       expect(mockConsole.error).toHaveBeenCalledWith(
