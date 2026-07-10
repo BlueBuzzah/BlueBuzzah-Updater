@@ -46,7 +46,7 @@ mod transport;
 // Only exports what's actually used by the Tauri commands
 
 // Device detection and tracking
-pub use device::{find_nrf52_devices, Nrf52Device};
+pub use device::{find_nrf52_devices, find_supported_devices, Nrf52Device};
 
 // Device identifier (for flexible tracking through reboots)
 pub mod device_pub {

@@ -10,8 +10,8 @@ use std::time::Duration;
 use tauri::ipc::Channel;
 
 use crate::dfu::{
-    configure_device_with_settings, find_nrf52_devices, upload_firmware, DeviceIdentifier,
-    DfuStage, Nrf52Device,
+    configure_device_with_settings, find_nrf52_devices, find_supported_devices, upload_firmware,
+    DeviceIdentifier, DfuStage, Nrf52Device,
 };
 use crate::settings::AdvancedSettings;
 
@@ -144,6 +144,8 @@ pub struct DfuDevice {
     pub in_bootloader: bool,
     /// Device serial number (if available).
     pub serial_number: Option<String>,
+    /// Board family: "nrf52" or "esp32s3".
+    pub board: String,
 }
 
 impl From<Nrf52Device> for DfuDevice {
@@ -155,6 +157,7 @@ impl From<Nrf52Device> for DfuDevice {
             pid: device.pid,
             in_bootloader: device.in_bootloader,
             serial_number: device.serial_number,
+            board: device.board.clone(),
         }
     }
 }
@@ -222,7 +225,7 @@ pub async fn detect_dfu_devices() -> Result<Vec<DfuDevice>, String> {
 
             // Perform initial scan to seed comparison — avoids mandatory
             // delay when a device is already connected.
-            let mut last_devices = find_nrf52_devices();
+            let mut last_devices = find_supported_devices();
             let mut last_count = last_devices.len();
             let mut stable_iterations: u32 = if last_count > 0 { 1 } else { 0 };
 
@@ -235,7 +238,7 @@ pub async fn detect_dfu_devices() -> Result<Vec<DfuDevice>, String> {
 
                 std::thread::sleep(std::time::Duration::from_millis(500));
 
-                let devices = find_nrf52_devices();
+                let devices = find_supported_devices();
                 let current_count = devices.len();
 
                 if current_count > 0 && current_count == last_count {
@@ -794,15 +797,17 @@ mod tests {
             pid: 0x8029,
             serial_number: Some("ABC123".to_string()),
             in_bootloader: false,
-            product_name: Some("Test Device".to_string()),
+            product_name: Some("Test Device".to_string()), // ignored: label is fixed per board
             manufacturer: None,
+            board: "nrf52".to_string(),
         };
 
         let dfu_device = DfuDevice::from(nrf_device);
 
         assert_eq!(dfu_device.port, "/dev/cu.usbmodem1234");
-        assert_eq!(dfu_device.label, "Test Device");
+        assert_eq!(dfu_device.label, "BlueBuzzah v2 (/dev/cu.usbmodem1234)");
         assert_eq!(dfu_device.vid, 0x239A);
         assert!(!dfu_device.in_bootloader);
+        assert_eq!(dfu_device.board, "nrf52");
     }
 }

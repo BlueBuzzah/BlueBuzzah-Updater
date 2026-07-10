@@ -8,7 +8,9 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use serialport::{available_ports, SerialPortType};
 
-use super::config::{is_bootloader_pid, is_compatible_device, PORT_SCAN_INTERVAL};
+use super::config::{
+    is_bootloader_pid, is_compatible_device, is_esp32s3_device, PORT_SCAN_INTERVAL,
+};
 use super::error::{DfuError, DfuResult};
 
 /// Information about a detected nRF52 device.
@@ -28,17 +30,22 @@ pub struct Nrf52Device {
     pub product_name: Option<String>,
     /// Manufacturer name (if available).
     pub manufacturer: Option<String>,
+    /// Board family: "nrf52" or "esp32s3".
+    pub board: String,
 }
 
 impl Nrf52Device {
     /// Get a display label for this device.
+    ///
+    /// Labels are fixed per hardware revision: 0x303A:0x1001 is
+    /// "BlueBuzzah v3", nRF52840 hardware is "BlueBuzzah v2".
     pub fn display_label(&self) -> String {
-        if let Some(ref name) = self.product_name {
-            name.clone()
+        if self.board == "esp32s3" {
+            format!("BlueBuzzah v3 ({})", self.port)
         } else if self.in_bootloader {
             format!("nRF52840 Bootloader ({})", self.port)
         } else {
-            format!("BlueBuzzah ({})", self.port)
+            format!("BlueBuzzah v2 ({})", self.port)
         }
     }
 }
@@ -194,15 +201,15 @@ fn is_same_device_family(pid1: u16, pid2: u16) -> bool {
     (pid1 & 0x00FF) == (pid2 & 0x00FF)
 }
 
-/// Find all connected nRF52 devices.
+/// Find all connected supported devices (nRF52 v2 and ESP32-S3 v3).
 ///
-/// Scans available serial ports and returns those matching
-/// Adafruit nRF52840 VID/PID combinations.
+/// Scans available serial ports and returns those matching Adafruit
+/// nRF52840 or Espressif ESP32-S3 (XIAO / PentaBuzzer) VID/PID combinations.
 ///
 /// On macOS, filters out `tty.*` ports to avoid duplicates (each device
 /// appears as both `cu.*` and `tty.*`). The `cu.*` variant is preferred
 /// as it doesn't block waiting for DCD.
-pub fn find_nrf52_devices() -> Vec<Nrf52Device> {
+pub fn find_supported_devices() -> Vec<Nrf52Device> {
     let mut devices = Vec::new();
 
     let ports = match available_ports() {
@@ -219,20 +226,35 @@ pub fn find_nrf52_devices() -> Vec<Nrf52Device> {
         }
 
         if let SerialPortType::UsbPort(usb_info) = &port.port_type {
-            if is_compatible_device(usb_info.vid, usb_info.pid) {
-                devices.push(Nrf52Device {
-                    port: port.port_name.clone(),
-                    vid: usb_info.vid,
-                    pid: usb_info.pid,
-                    serial_number: usb_info.serial_number.clone(),
-                    in_bootloader: is_bootloader_pid(usb_info.pid),
-                    product_name: usb_info.product.clone(),
-                    manufacturer: usb_info.manufacturer.clone(),
-                });
-            }
+            let (board, in_bootloader) = if is_compatible_device(usb_info.vid, usb_info.pid) {
+                ("nrf52", is_bootloader_pid(usb_info.pid))
+            } else if is_esp32s3_device(usb_info.vid, usb_info.pid) {
+                // USB-JTAG/Serial: same VID/PID in app and download mode.
+                ("esp32s3", false)
+            } else {
+                continue;
+            };
+
+            devices.push(Nrf52Device {
+                port: port.port_name.clone(),
+                vid: usb_info.vid,
+                pid: usb_info.pid,
+                serial_number: usb_info.serial_number.clone(),
+                in_bootloader,
+                product_name: usb_info.product.clone(),
+                manufacturer: usb_info.manufacturer.clone(),
+                board: board.to_string(),
+            });
         }
     }
 
+    devices
+}
+
+/// Find connected nRF52 devices only (Nordic DFU internals).
+pub fn find_nrf52_devices() -> Vec<Nrf52Device> {
+    let mut devices = find_supported_devices();
+    devices.retain(|d| d.board == "nrf52");
     devices
 }
 
@@ -241,7 +263,7 @@ pub fn find_nrf52_devices() -> Vec<Nrf52Device> {
 /// Diagnostic only — used to capture the COM/serial/mode landscape at the
 /// moment of a post-reboot port open, where Windows re-enumeration races live.
 pub fn snapshot_ports() -> String {
-    let devices = find_nrf52_devices();
+    let devices = find_supported_devices();
     if devices.is_empty() {
         return "none".to_string();
     }
@@ -265,7 +287,7 @@ pub fn snapshot_ports() -> String {
 /// Returns the device connected to the specified port, if any.
 /// Useful for checking device state before starting DFU.
 pub fn get_device_by_port(port_name: &str) -> Option<Nrf52Device> {
-    find_nrf52_devices()
+    find_supported_devices()
         .into_iter()
         .find(|d| d.port == port_name)
 }
@@ -292,7 +314,7 @@ pub fn wait_for_bootloader_by_serial(serial: &str, timeout_ms: u64) -> DfuResult
     let mut consecutive_detections: u32 = 0;
 
     while start.elapsed() < timeout {
-        if let Some(device) = find_nrf52_devices()
+        if let Some(device) = find_supported_devices()
             .into_iter()
             .find(|d| d.in_bootloader && d.serial_number.as_deref() == Some(serial))
         {
@@ -328,7 +350,7 @@ pub fn wait_for_application_by_serial(serial: &str, timeout_ms: u64) -> DfuResul
     let mut consecutive_detections: u32 = 0;
 
     while start.elapsed() < timeout {
-        if let Some(device) = find_nrf52_devices()
+        if let Some(device) = find_supported_devices()
             .into_iter()
             .find(|d| !d.in_bootloader && d.serial_number.as_deref() == Some(serial))
         {
@@ -374,7 +396,7 @@ pub fn wait_for_bootloader_flexible(
     let fallback = identifier.to_vid_pid_fallback();
 
     while start.elapsed() < timeout {
-        let devices = find_nrf52_devices();
+        let devices = find_supported_devices();
 
         // Try to find a matching bootloader device using ANY available strategy
         let matched = devices.into_iter().find(|d| {
@@ -449,7 +471,7 @@ pub fn wait_for_application_flexible(
     let fallback = identifier.to_vid_pid_fallback();
 
     while start.elapsed() < timeout {
-        let devices = find_nrf52_devices();
+        let devices = find_supported_devices();
 
         let matched = devices.into_iter().find(|d| {
             if d.in_bootloader {
@@ -502,7 +524,7 @@ mod tests {
     use super::super::config::ADAFRUIT_VID;
 
     #[test]
-    fn test_display_label_with_product_name() {
+    fn test_display_label_ignores_product_name() {
         let device = Nrf52Device {
             port: "/dev/cu.usbmodem1234".to_string(),
             vid: ADAFRUIT_VID,
@@ -511,9 +533,61 @@ mod tests {
             in_bootloader: false,
             product_name: Some("Adafruit Feather nRF52840".to_string()),
             manufacturer: None,
+            board: "nrf52".to_string(),
         };
 
-        assert_eq!(device.display_label(), "Adafruit Feather nRF52840");
+        assert_eq!(device.display_label(), "BlueBuzzah v2 (/dev/cu.usbmodem1234)");
+    }
+
+    #[test]
+    fn test_display_label_esp32s3() {
+        let device = Nrf52Device {
+            port: "/dev/cu.usbmodem101".to_string(),
+            vid: 0x303A,
+            pid: 0x1001,
+            serial_number: None,
+            in_bootloader: false,
+            product_name: Some("XIAO ESP32-S3".to_string()), // ignored: label is fixed per board
+            manufacturer: None,
+            board: "esp32s3".to_string(),
+        };
+        assert_eq!(device.display_label(), "BlueBuzzah v3 (/dev/cu.usbmodem101)");
+    }
+
+    #[test]
+    fn test_display_label_nrf52_app_mode() {
+        let device = Nrf52Device {
+            port: "/dev/cu.usbmodem5678".to_string(),
+            vid: ADAFRUIT_VID,
+            pid: 0x8029,
+            serial_number: None,
+            in_bootloader: false,
+            product_name: Some("Adafruit Feather nRF52840".to_string()), // ignored: label is fixed per board
+            manufacturer: None,
+            board: "nrf52".to_string(),
+        };
+        assert_eq!(device.display_label(), "BlueBuzzah v2 (/dev/cu.usbmodem5678)");
+    }
+
+    #[test]
+    fn test_identifier_matches_esp32s3_by_serial() {
+        let identifier = DeviceIdentifier::Serial {
+            serial: "ESP123".to_string(),
+            vid: 0x303A,
+            pid: 0x1001,
+            port_pattern: "usbmodem101".to_string(),
+        };
+        let device = Nrf52Device {
+            port: "/dev/cu.usbmodem105".to_string(),
+            vid: 0x303A,
+            pid: 0x1001,
+            serial_number: Some("ESP123".to_string()),
+            in_bootloader: false,
+            product_name: None,
+            manufacturer: None,
+            board: "esp32s3".to_string(),
+        };
+        assert!(identifier.matches(&device));
     }
 
     #[test]
@@ -526,6 +600,7 @@ mod tests {
             in_bootloader: true,
             product_name: None,
             manufacturer: None,
+            board: "nrf52".to_string(),
         };
 
         assert_eq!(device.display_label(), "nRF52840 Bootloader (COM3)");
@@ -541,11 +616,12 @@ mod tests {
             in_bootloader: false,
             product_name: None,
             manufacturer: None,
+            board: "nrf52".to_string(),
         };
 
         assert_eq!(
             device.display_label(),
-            "BlueBuzzah (/dev/cu.usbmodem5678)"
+            "BlueBuzzah v2 (/dev/cu.usbmodem5678)"
         );
     }
 
@@ -559,6 +635,7 @@ mod tests {
             in_bootloader: false,
             product_name: None,
             manufacturer: None,
+            board: "nrf52".to_string(),
         };
 
         let identifier = DeviceIdentifier::from_device(&device);
@@ -581,6 +658,7 @@ mod tests {
             in_bootloader: false,
             product_name: None,
             manufacturer: None,
+            board: "nrf52".to_string(),
         };
 
         let identifier = DeviceIdentifier::from_device(&device);
@@ -609,6 +687,7 @@ mod tests {
             in_bootloader: true,
             product_name: None,
             manufacturer: None,
+            board: "nrf52".to_string(),
         };
 
         let device_no_match = Nrf52Device {
@@ -619,6 +698,7 @@ mod tests {
             in_bootloader: true,
             product_name: None,
             manufacturer: None,
+            board: "nrf52".to_string(),
         };
 
         assert!(identifier.matches(&device_match));
@@ -642,6 +722,7 @@ mod tests {
             in_bootloader: true,
             product_name: None,
             manufacturer: None,
+            board: "nrf52".to_string(),
         };
 
         // Different device (different port pattern)
@@ -653,6 +734,7 @@ mod tests {
             in_bootloader: true,
             product_name: None,
             manufacturer: None,
+            board: "nrf52".to_string(),
         };
 
         assert!(identifier.matches(&device_bootloader));
@@ -711,6 +793,7 @@ mod tests {
             in_bootloader: true,
             product_name: None,
             manufacturer: None,
+            board: "nrf52".to_string(),
         };
 
         // On Windows: should match by VID+family alone
@@ -737,6 +820,7 @@ mod tests {
             in_bootloader: true,
             product_name: None,
             manufacturer: None,
+            board: "nrf52".to_string(),
         };
 
         assert!(!identifier.matches(&device_wrong_vid));
@@ -758,6 +842,7 @@ mod tests {
             in_bootloader: true,
             product_name: None,
             manufacturer: None,
+            board: "nrf52".to_string(),
         };
 
         assert!(!identifier.matches(&device_wrong_family));
@@ -773,6 +858,7 @@ mod tests {
             in_bootloader: false,
             product_name: None,
             manufacturer: None,
+            board: "nrf52".to_string(),
         };
         let identifier = DeviceIdentifier::from_device(&device);
         assert!(identifier.has_serial());
@@ -798,6 +884,7 @@ mod tests {
             in_bootloader: false,
             product_name: None,
             manufacturer: None,
+            board: "nrf52".to_string(),
         };
         assert!(fallback.matches(&device));
     }
