@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-library/react';
 import { DeviceSelection } from './DeviceSelection';
+import { Toaster } from '@/components/ui/toaster';
 import { deviceService } from '@/services/DeviceService';
 import { createMockDevice, createMockDevices } from '@/test/factories';
 
@@ -11,12 +12,8 @@ vi.mock('@/services/DeviceService', () => ({
   },
 }));
 
-// Mock the toast hook
-vi.mock('@/components/ui/use-toast', () => ({
-  useToast: () => ({
-    toast: vi.fn(),
-  }),
-}));
+// Note: real useToast/Toaster are used (not mocked) so tests can assert on
+// rendered toast content (see "Hardware Version" describe block below).
 
 describe('DeviceSelection', () => {
   const mockOnDevicesChange = vi.fn();
@@ -531,6 +528,59 @@ describe('DeviceSelection', () => {
       await waitFor(() => {
         expect(screen.getByText('Roles have been auto-assigned. You can change them if needed.')).toBeInTheDocument();
       });
+    });
+  });
+
+  describe('Hardware Version', () => {
+    const nrf52Device = createMockDevice({
+      path: 'COM3',
+      label: 'BlueBuzzah v2 (COM3)',
+      board: 'nrf52',
+    });
+    const esp32s3Device = createMockDevice({
+      path: 'COM4',
+      label: 'BlueBuzzah v3 (COM4)',
+      board: 'esp32s3',
+    });
+
+    it('shows a hardware-version badge per device', async () => {
+      vi.mocked(deviceService.detectDevices).mockResolvedValue([
+        nrf52Device,
+        esp32s3Device,
+      ]);
+
+      render(
+        <DeviceSelection selectedDevices={[]} onDevicesChange={vi.fn()} onRoleChange={vi.fn()} />
+      );
+
+      expect(await screen.findByText('nRF52840')).toBeInTheDocument();
+      expect(screen.getByText('ESP32-S3')).toBeInTheDocument();
+    });
+
+    it('blocks selecting a second device with a different hardware version', async () => {
+      vi.mocked(deviceService.detectDevices).mockResolvedValue([
+        nrf52Device,
+        esp32s3Device,
+      ]);
+      const onDevicesChange = vi.fn();
+
+      render(
+        <>
+          <DeviceSelection
+            selectedDevices={[nrf52Device]}
+            onDevicesChange={onDevicesChange}
+            onRoleChange={vi.fn()}
+          />
+          <Toaster />
+        </>
+      );
+
+      fireEvent.click(await screen.findByText('BlueBuzzah v3 (COM4)'));
+
+      expect(onDevicesChange).not.toHaveBeenCalled();
+      expect(
+        await screen.findByText(/same hardware version/i)
+      ).toBeInTheDocument();
     });
   });
 });

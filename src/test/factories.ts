@@ -80,6 +80,7 @@ export const createMockDevice = (overrides?: Partial<Device>): Device => ({
   isCircuitPy: false,
   vid: 0x239a,
   pid: 0x8029,
+  board: 'nrf52',
   inBootloader: false,
   serialNumber: 'ABC123',
   ...overrides,

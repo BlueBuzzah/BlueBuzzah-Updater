@@ -46,6 +46,7 @@ export interface Device {
   // DFU-specific fields
   vid?: number;           // USB Vendor ID
   pid?: number;           // USB Product ID
+  board: BoardType; // Hardware family: v2 = 'nrf52', v3 = 'esp32s3'
   inBootloader?: boolean; // Whether device is in bootloader mode
   serialNumber?: string;  // Device serial number
 }

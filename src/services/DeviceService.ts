@@ -87,6 +87,7 @@ export class DeviceService implements IDeviceRepository {
         pid: number;
         in_bootloader: boolean;
         serial_number: string | null;
+        board: string;
       }[]>('detect_dfu_devices');
 
       // Map to Device interface
@@ -98,6 +99,7 @@ export class DeviceService implements IDeviceRepository {
         pid: d.pid,
         inBootloader: d.in_bootloader,
         serialNumber: d.serial_number ?? undefined,
+        board: d.board === 'esp32s3' ? 'esp32s3' : 'nrf52',
       }));
     } catch (error) {
       console.error('Failed to detect devices:', error);

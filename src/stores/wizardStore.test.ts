@@ -17,6 +17,7 @@ const createMockDevice = (overrides?: Partial<Device>): Device => ({
   path: '/Volumes/CIRCUITPY',
   label: 'CIRCUITPY',
   isCircuitPy: true,
+  board: 'nrf52',
   ...overrides,
 });
 

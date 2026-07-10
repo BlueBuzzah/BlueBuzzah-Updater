@@ -84,6 +84,20 @@ export function DeviceSelection({
       // Deselect device
       onDevicesChange(selectedDevices.filter((d) => d.path !== device.path));
     } else {
+      // Batch flashing is single-board only: both devices must be the same
+      // hardware version (one download, one flasher per run).
+      if (
+        selectedDevices.length > 0 &&
+        selectedDevices[0].board !== device.board
+      ) {
+        toast({
+          variant: 'destructive',
+          title: 'Hardware version mismatch',
+          description:
+            'Both devices must be the same hardware version to flash together. Deselect the current device first.',
+        });
+        return;
+      }
       // Select device
       const newDevices = [...selectedDevices, device];
 
@@ -208,6 +222,9 @@ export function DeviceSelection({
                             S/N: {device.serialNumber}
                           </p>
                         )}
+                        <Badge variant="secondary" className="mt-1 text-[10px]">
+                          {device.board === 'esp32s3' ? 'ESP32-S3' : 'nRF52840'}
+                        </Badge>
                       </div>
                     </div>
                     {selected && (

@@ -50,6 +50,36 @@ describe('DeviceService', () => {
       expect(invoke).toHaveBeenCalledWith('detect_dfu_devices');
     });
 
+    it('maps backend board to Device.board', async () => {
+      const mockDevices = [
+        {
+          port: '/dev/cu.usbmodem1234',
+          label: 'BlueBuzzah v3 (/dev/cu.usbmodem1234)',
+          vid: 0x239a,
+          pid: 0x8029,
+          in_bootloader: false,
+          serial_number: 'ABC123',
+          board: 'esp32s3',
+        },
+        {
+          port: '/dev/cu.usbmodem5678',
+          label: 'BlueBuzzah v2 (/dev/cu.usbmodem5678)',
+          vid: 0x239a,
+          pid: 0x8029,
+          in_bootloader: false,
+          serial_number: 'DEF456',
+          board: 'nrf52',
+        },
+      ];
+
+      vi.mocked(invoke).mockResolvedValueOnce(mockDevices);
+
+      const devices = await service.detectDevices();
+
+      expect(devices[0].board).toBe('esp32s3');
+      expect(devices[1].board).toBe('nrf52');
+    });
+
     it('returns empty array when no devices', async () => {
       vi.mocked(invoke).mockResolvedValueOnce([]);
 
