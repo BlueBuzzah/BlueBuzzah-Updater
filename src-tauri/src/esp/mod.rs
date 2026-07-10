@@ -2,6 +2,8 @@
 //!
 //! Kept fully separate from the Nordic DFU path in `crate::dfu`.
 
+mod flasher;
 mod manifest;
 
-pub use manifest::{read_v3_zip, LoadedPart, V3Manifest, V3Package};
+pub use flasher::flash_v3;
+pub use manifest::read_v3_zip;

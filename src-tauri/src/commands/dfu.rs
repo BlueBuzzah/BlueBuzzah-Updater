@@ -497,6 +497,72 @@ async fn flash_dfu_firmware_inner(
     result.map_err(|e| format!("{}", e))
 }
 
+/// Flash a v3 (ESP32-S3 / PentaBuzzer) firmware package to a device.
+///
+/// # Arguments
+/// * `serial_port` - Serial port of the device
+/// * `firmware_path` - Path to the v3 firmware zip file
+/// * `device_role` - Role to configure ("PRIMARY" or "SECONDARY")
+/// * `progress` - Channel for progress updates
+///
+/// Unlike `flash_dfu_firmware`, this command has no built-in operation-level
+/// retry: the espflash bootloader connection is far more deterministic than
+/// the Nordic Secure DFU handshake, and a bad retry would re-erase/re-write
+/// flash that may already be partially correct.
+#[tauri::command]
+pub async fn flash_v3_firmware(
+    serial_port: String,
+    firmware_path: String,
+    device_role: String,
+    progress: Channel<DfuProgressEvent>,
+) -> Result<(), String> {
+    // Prevent concurrent flash operations (shared with the Nordic DFU path).
+    if DFU_IN_PROGRESS.swap(true, Ordering::SeqCst) {
+        return Err("A firmware installation is already in progress".into());
+    }
+    let _guard = DfuGuard;
+
+    // Reset cancellation flag at start of new operation
+    DFU_CANCELLED.store(false, Ordering::SeqCst);
+
+    // Create a channel for progress updates from the blocking thread
+    let (tx, rx) = mpsc::channel::<DfuStage>();
+
+    // Spawn a task to forward progress updates
+    let progress_channel = progress.clone();
+    let progress_task = thread::spawn(move || {
+        while let Ok(stage) = rx.recv() {
+            let event = DfuProgressEvent::from(stage);
+            if progress_channel.send(event).is_err() {
+                // Frontend disconnected — cancel the flash operation
+                eprintln!("[v3] Warning: progress channel disconnected, cancelling operation");
+                DFU_CANCELLED.store(true, Ordering::SeqCst);
+                break;
+            }
+        }
+    });
+
+    // Run the flash in a blocking task with cancellation support
+    let result = tokio::task::spawn_blocking(move || {
+        crate::esp::flash_v3(
+            &serial_port,
+            &firmware_path,
+            &device_role,
+            move |stage| {
+                let _ = tx.send(stage);
+            },
+            is_dfu_cancelled,
+        )
+    })
+    .await
+    .map_err(|e| format!("v3 flash panicked: {}", e))?;
+
+    // Wait for progress forwarding to complete
+    let _ = progress_task.join();
+
+    result
+}
+
 /// Check if a device is in bootloader mode.
 #[tauri::command]
 pub async fn is_device_in_bootloader(serial_port: String) -> Result<bool, String> {

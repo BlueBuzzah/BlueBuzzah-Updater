@@ -703,7 +703,7 @@ fn configure_device_role(port_name: &str, role: &str, serial_number: &str) -> Df
 ///
 /// Works with both serial number and VID/PID+port pattern tracking.
 /// Includes automatic retry for timing-related failures.
-fn configure_device_role_flexible(
+pub(crate) fn configure_device_role_flexible(
     port_name: &str,
     role: &str,
     identifier: &DeviceIdentifier,
