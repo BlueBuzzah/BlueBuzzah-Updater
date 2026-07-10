@@ -583,4 +583,75 @@ describe('DeviceSelection', () => {
       ).toBeInTheDocument();
     });
   });
+
+  describe('Stale Selection Pruning', () => {
+    // Note: the toast hook keeps a module-level memory state (not reset by
+    // React unmount/cleanup), so the "does not prune" test — which asserts a
+    // toast is ABSENT — must run before any test in this file produces a
+    // "Selection updated" toast, or it would see a stale toast left over
+    // from a previous test.
+    it('does not prune when the detected device matches path, board, and serial number exactly', async () => {
+      const selected = createMockDevice({
+        path: 'COM3',
+        board: 'nrf52',
+        serialNumber: 'ABC123',
+      });
+      const detected = createMockDevice({
+        path: 'COM3',
+        board: 'nrf52',
+        serialNumber: 'ABC123',
+      });
+      vi.mocked(deviceService.detectDevices).mockResolvedValue([detected]);
+      const onDevicesChange = vi.fn();
+
+      render(
+        <>
+          <DeviceSelection
+            selectedDevices={[selected]}
+            onDevicesChange={onDevicesChange}
+            onRoleChange={vi.fn()}
+          />
+          <Toaster />
+        </>
+      );
+
+      // Wait for detection to settle without relying on onDevicesChange being called.
+      await waitFor(() => {
+        expect(deviceService.detectDevices).toHaveBeenCalledTimes(1);
+      });
+
+      expect(screen.queryByText('Selection updated')).not.toBeInTheDocument();
+      expect(onDevicesChange).not.toHaveBeenCalled();
+    });
+
+    it('prunes a selection whose board no longer matches the device at the same path and shows a toast', async () => {
+      const selectedStale = createMockDevice({
+        path: 'COM3',
+        board: 'nrf52',
+        serialNumber: 'ABC123',
+      });
+      // Same path, but the detected device is now esp32s3 (e.g. Windows COM reuse).
+      const detected = createMockDevice({
+        path: 'COM3',
+        board: 'esp32s3',
+        serialNumber: 'ABC123',
+      });
+      vi.mocked(deviceService.detectDevices).mockResolvedValue([detected]);
+      const onDevicesChange = vi.fn();
+
+      render(
+        <>
+          <DeviceSelection
+            selectedDevices={[selectedStale]}
+            onDevicesChange={onDevicesChange}
+            onRoleChange={vi.fn()}
+          />
+          <Toaster />
+        </>
+      );
+
+      expect(await screen.findByText('Selection updated')).toBeInTheDocument();
+      expect(onDevicesChange).toHaveBeenCalledWith([]);
+    });
+  });
 });

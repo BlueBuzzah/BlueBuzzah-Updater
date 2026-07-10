@@ -397,6 +397,46 @@ describe('FirmwareService', () => {
       expect(releases[0].cachedEntries).toHaveLength(2);
     });
 
+    it('sorts cached entries deterministically with nrf52 first regardless of cache index order', async () => {
+      const mockGitHubRelease = createMockGitHubRelease({
+        name: '2.0.0',
+        tag_name: 'v2.0.0',
+        assets: [
+          createMockGitHubAsset({
+            name: 'BlueBuzzah-Firmware-v2.0.0-abc1234.zip',
+          }),
+          createMockGitHubAsset({
+            name: 'BlueBuzzah-Firmware-v3-v2.0.0-abc1234.zip',
+          }),
+        ],
+      });
+
+      // esp32s3 entry appears before nrf52 in the cache index for this version.
+      const mockCacheIndex = {
+        '2.0.0::esp32s3': createMockCachedMetadata({
+          version: '2.0.0',
+          board: 'esp32s3',
+        }),
+        '2.0.0::nrf52': createMockCachedMetadata({
+          version: '2.0.0',
+          board: 'nrf52',
+        }),
+      };
+
+      vi.mocked(global.fetch).mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve([mockGitHubRelease]),
+      } as Response);
+
+      vi.mocked(invoke).mockResolvedValueOnce([]); // verify_and_clean_cache
+      vi.mocked(invoke).mockResolvedValueOnce(mockCacheIndex); // get_cache_index
+
+      const releases = await service.fetchReleases();
+
+      expect(releases[0].cachedEntries?.[0].board).toBe('nrf52');
+      expect(releases[0].cachedMetadata?.board).toBe('nrf52');
+    });
+
     it('uses release name as version, falls back to tag_name', async () => {
       const releaseWithName = createMockGitHubRelease({
         name: 'Release Name',
@@ -563,6 +603,25 @@ describe('FirmwareService', () => {
         'Failed to download firmware:',
         expect.any(Error)
       );
+    });
+
+    it('throws a cache-specific error for cached-only releases with no cache entry for the requested board', async () => {
+      const cachedOnlyRelease = createMockRelease({
+        version: '3.0.0',
+        assets: [
+          {
+            name: `3.0.0.zip`,
+            downloadUrl: '',
+            size: 1000,
+          },
+        ],
+      });
+
+      vi.mocked(invoke).mockResolvedValueOnce(null); // get_cached_firmware -> no cache entry for esp32s3
+
+      await expect(
+        service.downloadFirmware(cachedOnlyRelease, 'esp32s3')
+      ).rejects.toThrow(/only available from the local cache/);
     });
 
     it('handles network timeout', async () => {
