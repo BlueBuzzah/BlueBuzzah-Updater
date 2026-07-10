@@ -65,7 +65,7 @@ Frontend flow: `src/components/wizard/` (FirmwareSelection → DeviceSelection �
 - **`[SETTING]` ack timeout = success**: `send_setting_command` treats no-ack as success for backward compat with older firmware.
 - **Format detection**: a firmware zip's `manifest.json` has `manifest_version` for v3 or a top-level `manifest` key for Nordic — never feed one reader the other's zip.
 - **Cache keying**: `cache.rs` keys entries `(version, board)` as `version::board`; nrf52 keeps legacy `{version}.zip` filenames on disk, other boards use `{version}-{board}.zip`.
-- **Batch flashing is single-board only**: flashing two v3 devices or one of each (v2 + v3) in the same run is unsupported — enforced by a UI guard in `DeviceSelection` and a defensive guard in `InstallationProgress`.
+- **Batch flashing is single-board only**: mixing hardware versions (one v2 + one v3) in the same run is unsupported — enforced by a UI guard in `DeviceSelection` and a defensive guard in `InstallationProgress`. Two devices of the same version flash fine.
 
 ## Conventions
 
