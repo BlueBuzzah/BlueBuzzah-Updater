@@ -136,7 +136,7 @@ pub fn read_v3_zip<P: AsRef<Path>>(path: P) -> Result<V3Package, String> {
             .map_err(|e| format!("failed to read part file \"{}\": {e}", meta.path))?;
 
         let actual_sha256 = format!("{:x}", Sha256::digest(&data));
-        if actual_sha256 != meta.sha256 {
+        if !actual_sha256.eq_ignore_ascii_case(&meta.sha256) {
             return Err(format!(
                 "SHA256 mismatch for part \"{}\": expected {}, got {actual_sha256}",
                 meta.path, meta.sha256
@@ -224,7 +224,17 @@ mod tests {
     fn rejects_wrong_board() {
         let dir = TempDir::new().unwrap();
         let path = make_v3_zip(&dir, |m| m["board"] = "some_other_board".into());
-        assert!(read_v3_zip(&path).is_err());
+        let err = read_v3_zip(&path).unwrap_err();
+        assert!(err.contains("some_other_board"), "error should name the found board: {err}");
+    }
+
+    #[test]
+    fn accepts_uppercase_sha256_in_manifest() {
+        let dir = TempDir::new().unwrap();
+        let path = make_v3_zip(&dir, |m| {
+            m["parts"][3]["sha256"] = sha_hex(b"fw").to_uppercase().into();
+        });
+        read_v3_zip(&path).unwrap();
     }
 
     #[test]
