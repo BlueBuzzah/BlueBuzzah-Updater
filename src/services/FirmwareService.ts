@@ -85,6 +85,14 @@ export class FirmwareService implements IFirmwareRepository {
         list.push(meta);
         cacheByVersion.set(meta.version, list);
       }
+      // The index is a Rust HashMap whose ordering changes between runs;
+      // sort so entries[0] (used for the cached badge/hash) is deterministic,
+      // nrf52 first.
+      for (const list of cacheByVersion.values()) {
+        list.sort((a, b) =>
+          a.board === b.board ? 0 : a.board === 'nrf52' ? -1 : 1
+        );
+      }
 
       // Map GitHub releases and mark cached ones
       const githubVersions = new Set<string>();
@@ -168,6 +176,17 @@ export class FirmwareService implements IFirmwareRepository {
       const firmwareAsset = getAssetForBoard(release, board);
 
       if (!firmwareAsset) {
+        // Cached-only releases synthesize assets with no download URL; their
+        // real cause is "not in the last GitHub fetch", not a missing asset.
+        const cachedOnly =
+          release.assets.length > 0 && release.assets.every((a) => !a.downloadUrl);
+        if (cachedOnly) {
+          throw new Error(
+            `This version is only available from the local cache, which has no ${
+              board === 'esp32s3' ? 'v3 (PentaBuzzer)' : 'v2 (nRF52840)'
+            } firmware for it. The release could not be found on GitHub.`
+          );
+        }
         throw new Error(
           board === 'esp32s3'
             ? 'This release has no v3 (PentaBuzzer) firmware asset. It may predate v3 support.'

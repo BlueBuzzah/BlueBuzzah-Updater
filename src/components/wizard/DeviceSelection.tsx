@@ -51,6 +51,26 @@ export function DeviceSelection({
 
       setAvailableDevices(devices);
 
+      // Prune selections that no longer match reality. A replug can reuse a
+      // path for different hardware (Windows COM reuse especially), and the
+      // stale Device object's board would otherwise drive the wrong flasher.
+      const stillValid = selectedDevices.filter((sel) =>
+        devices.some(
+          (d) =>
+            d.path === sel.path &&
+            d.board === sel.board &&
+            d.serialNumber === sel.serialNumber
+        )
+      );
+      if (stillValid.length !== selectedDevices.length) {
+        onDevicesChange(stillValid);
+        toast({
+          title: 'Selection updated',
+          description:
+            'A selected device was disconnected or changed and has been deselected.',
+        });
+      }
+
       if (devices.length === 0) {
         toast({
           title: 'No Devices Found',

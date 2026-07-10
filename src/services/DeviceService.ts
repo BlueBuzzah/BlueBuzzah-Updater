@@ -99,6 +99,9 @@ export class DeviceService implements IDeviceRepository {
         pid: d.pid,
         inBootloader: d.in_bootloader,
         serialNumber: d.serial_number ?? undefined,
+        // Unknown backend board strings intentionally fall back to 'nrf52'
+        // today; a THIRD board must make this an exhaustive mapping or it
+        // will be flashed with the wrong protocol.
         board: d.board === 'esp32s3' ? 'esp32s3' : 'nrf52',
       }));
     } catch (error) {

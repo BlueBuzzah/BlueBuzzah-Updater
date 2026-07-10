@@ -9,6 +9,7 @@ use std::time::Duration;
 
 use espflash::connection::{Connection, ResetAfterOperation, ResetBeforeOperation};
 use espflash::flasher::Flasher;
+use espflash::image_format::Segment;
 use espflash::target::{Chip, ProgressCallbacks};
 
 use super::read_v3_zip;
@@ -17,8 +18,11 @@ use crate::dfu::{
     get_reboot_timeout, wait_for_application_flexible, DeviceIdentifier, DfuStage,
 };
 
-/// `ProgressCallbacks` adapter that folds per-part progress into an overall
+/// `ProgressCallbacks` adapter that folds per-segment progress into an overall
 /// `DfuStage::Uploading { sent, total }` stream across the whole package.
+///
+/// One instance spans all segments of a `write_bins_to_flash()` call, so
+/// completed-segment bytes are accumulated in `finish()`.
 struct StageProgress<'a> {
     emit: &'a dyn Fn(DfuStage),
     total: usize,
@@ -48,7 +52,14 @@ impl ProgressCallbacks for StageProgress<'_> {
         // stays where it is until the next init()/update() call.
     }
 
-    fn finish(&mut self, _skipped: bool) {}
+    fn finish(&mut self, _skipped: bool) {
+        self.done_before_part += self.part_len;
+        self.part_len = 0;
+        (self.emit)(DfuStage::Uploading {
+            sent: self.done_before_part.min(self.total),
+            total: self.total,
+        });
+    }
 }
 
 /// Flash a v3 (ESP32-S3 / PentaBuzzer) firmware package to a device.
@@ -113,44 +124,84 @@ pub fn flash_v3<F: Fn(DfuStage), C: Fn() -> bool>(
 
     on_progress(DfuStage::Starting);
 
-    let total: usize = package.parts.iter().map(|p| p.data.len()).sum();
-    let mut done_before_part = 0usize;
+    if is_cancelled() {
+        // Connect already put the device in download mode; reset it back
+        // into whatever application is on flash before bailing.
+        let _ = flasher.connection().reset();
+        on_progress(DfuStage::Cancelled);
+        return Err("Cancelled".to_string());
+    }
+
+    // Pad each part to a 4-byte boundary (flash write granularity; 0xFF is
+    // erased-flash state). write_bins_to_flash() does not pad segments.
+    let padded: Vec<Vec<u8>> = package
+        .parts
+        .iter()
+        .map(|part| {
+            let mut data = part.data.clone();
+            let rem = data.len() % 4;
+            if rem != 0 {
+                data.extend(std::iter::repeat(0xFF).take(4 - rem));
+            }
+            data
+        })
+        .collect();
+    let segments: Vec<Segment> = package
+        .parts
+        .iter()
+        .zip(&padded)
+        .map(|(part, data)| Segment::new(part.offset, data))
+        .collect();
+    let total: usize = padded.iter().map(|d| d.len()).sum();
 
     for part in &package.parts {
-        if is_cancelled() {
-            on_progress(DfuStage::Cancelled);
-            return Err("Cancelled".to_string());
-        }
+        on_progress(DfuStage::Log {
+            message: format!(
+                "Writing \"{}\" at offset 0x{:X} ({} bytes)",
+                part.name,
+                part.offset,
+                part.data.len()
+            ),
+        });
+    }
 
-        let mut progress = StageProgress {
-            emit: &on_progress,
-            total,
-            done_before_part,
-            part_len: part.data.len(),
-        };
-
-        flasher
-            .write_bin_to_flash(part.offset, &part.data, &mut progress)
-            .map_err(|e| {
-                format!(
-                    "Failed to write \"{}\" at offset 0x{:X}: {}",
-                    part.name, part.offset, e
-                )
-            })?;
-
-        done_before_part += part.data.len();
+    // All parts go through ONE write_bins_to_flash() call. Per-part
+    // write_bin_to_flash() calls each finish(reboot: true), soft-resetting
+    // the chip back to the ROM bootloader between parts while the connection
+    // still assumes the RAM stub is running (ROM and stub response framing
+    // differ), which can desync the protocol on real hardware. A single call
+    // keeps one begin/finish cycle for the whole package. Mid-flash
+    // cancellation is intentionally unsupported; cancel is honored up to the
+    // check above.
+    let mut progress = StageProgress {
+        emit: &on_progress,
+        total,
+        done_before_part: 0,
+        part_len: 0,
+    };
+    if let Err(e) = flasher
+        .write_bins_to_flash(&segments, &mut progress)
+        .map_err(|e| format!("Failed to write firmware to flash: {}", e))
+    {
+        // Best effort: don't leave the device parked in the bootloader with a
+        // half-written image and no way out but a manual power cycle.
+        let _ = flasher.connection().reset();
+        return Err(e);
     }
 
     on_progress(DfuStage::Finalizing);
 
-    // The connection was opened with ResetAfterOperation::NoReset so each
-    // per-part write_bin_to_flash() call leaves the device in the bootloader
-    // instead of rebooting mid-package. Now that every part is written,
-    // trigger the real hard reset into the application unconditionally.
-    flasher
+    // The connection was opened with ResetAfterOperation::NoReset so the
+    // write above leaves the device in the bootloader instead of rebooting on
+    // its own. Trigger the real hard reset into the application, then drop
+    // the flasher so its exclusive serial handle is released before the
+    // role-configuration step reopens the port.
+    let reset_result = flasher
         .connection()
         .reset()
-        .map_err(|e| format!("Failed to reset device after flashing: {}", e))?;
+        .map_err(|e| format!("Failed to reset device after flashing: {}", e));
+    drop(flasher);
+    reset_result?;
 
     on_progress(DfuStage::WaitingForReboot);
     std::thread::sleep(Duration::from_millis(get_reboot_settle_delay()));
@@ -215,30 +266,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn stage_progress_reports_overall_percentage_across_parts() {
+    fn stage_progress_accumulates_across_segments_of_one_write() {
         let events: std::cell::RefCell<Vec<DfuStage>> = std::cell::RefCell::new(Vec::new());
         let emit = |stage: DfuStage| events.borrow_mut().push(stage);
 
-        {
-            let mut progress = StageProgress {
-                emit: &emit,
-                total: 100,
-                done_before_part: 0,
-                part_len: 40,
-            };
-            progress.init(0x0, 40);
-            progress.update(40);
-        }
-        {
-            let mut progress = StageProgress {
-                emit: &emit,
-                total: 100,
-                done_before_part: 40,
-                part_len: 60,
-            };
-            progress.init(0x10000, 60);
-            progress.update(60);
-        }
+        // One instance spans every segment of a write_bins_to_flash() call:
+        // init/update/finish fire per segment, finish() banks the bytes.
+        let mut progress = StageProgress {
+            emit: &emit,
+            total: 100,
+            done_before_part: 0,
+            part_len: 0,
+        };
+        progress.init(0x0, 40);
+        progress.update(40);
+        progress.finish(false);
+        progress.init(0x10000, 60);
+        progress.update(60);
+        progress.finish(false);
 
         let sent_values: Vec<usize> = events
             .borrow()
@@ -249,7 +294,7 @@ mod tests {
             })
             .collect();
 
-        assert_eq!(sent_values, vec![0, 40, 40, 100]);
+        assert_eq!(sent_values, vec![0, 40, 40, 40, 100, 100]);
     }
 
     #[test]

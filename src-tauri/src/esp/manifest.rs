@@ -13,6 +13,14 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 const EXPECTED_MANIFEST_VERSION: u32 = 1;
+
+/// Upper bound on manifest part count (real packages have 4).
+const MAX_PARTS: usize = 16;
+
+/// Upper bound on a single part's decompressed size. The largest ESP32-S3
+/// flash we ship is 8 MB, so 16 MiB is generous while still preventing a
+/// crafted zip from inflating to gigabytes in memory.
+const MAX_PART_BYTES: usize = 16 * 1024 * 1024;
 const EXPECTED_CHIP: &str = "esp32s3";
 const EXPECTED_BOARD: &str = "pentabuzzer_esp32s3";
 
@@ -124,16 +132,34 @@ pub fn read_v3_zip<P: AsRef<Path>>(path: P) -> Result<V3Package, String> {
         return Err("manifest.json has no parts".to_string());
     }
 
+    if manifest.parts.len() > MAX_PARTS {
+        return Err(format!(
+            "manifest.json lists {} parts (limit {MAX_PARTS})",
+            manifest.parts.len()
+        ));
+    }
+
     let mut parts = Vec::with_capacity(manifest.parts.len());
     for meta in &manifest.parts {
         let offset = parse_offset(&meta.offset)?;
 
         let mut data = Vec::new();
-        archive
+        // Bounded read: a crafted zip can DEFLATE-inflate a tiny entry to
+        // gigabytes; never allocate more than a real flash image could be.
+        let entry = archive
             .by_name(&meta.path)
-            .map_err(|_| format!("zip package is missing part file \"{}\"", meta.path))?
+            .map_err(|_| format!("zip package is missing part file \"{}\"", meta.path))?;
+        entry
+            .take(MAX_PART_BYTES as u64 + 1)
             .read_to_end(&mut data)
             .map_err(|e| format!("failed to read part file \"{}\": {e}", meta.path))?;
+        if data.len() > MAX_PART_BYTES {
+            return Err(format!(
+                "part file \"{}\" exceeds the {} MiB size limit",
+                meta.path,
+                MAX_PART_BYTES / (1024 * 1024)
+            ));
+        }
 
         let actual_sha256 = format!("{:x}", Sha256::digest(&data));
         if !actual_sha256.eq_ignore_ascii_case(&meta.sha256) {
@@ -151,6 +177,23 @@ pub fn read_v3_zip<P: AsRef<Path>>(path: P) -> Result<V3Package, String> {
     }
 
     parts.sort_by_key(|p| p.offset);
+
+    // Reject duplicate or overlapping flash regions before anything reaches
+    // the flasher — a package that would write the same address twice is
+    // malformed, and failing here beats failing mid-flash.
+    for pair in parts.windows(2) {
+        let end = pair[0].offset as u64 + pair[0].data.len() as u64;
+        if end > pair[1].offset as u64 {
+            return Err(format!(
+                "parts \"{}\" (0x{:X}+{}) and \"{}\" (0x{:X}) overlap",
+                pair[0].name,
+                pair[0].offset,
+                pair[0].data.len(),
+                pair[1].name,
+                pair[1].offset
+            ));
+        }
+    }
 
     Ok(V3Package { manifest, parts })
 }
@@ -260,6 +303,64 @@ mod tests {
         zf.finish().unwrap();
         let err = read_v3_zip(&path).unwrap_err();
         assert!(err.contains("not a v3"), "{err}");
+    }
+
+    #[test]
+    fn rejects_overlapping_parts() {
+        let dir = TempDir::new().unwrap();
+        // bootloader.bin is 4 bytes at 0x0 (ends at 0x4); move partitions.bin
+        // to 0x1 so the two regions collide.
+        let path = make_v3_zip(&dir, |m| {
+            m["parts"][1]["offset"] = "0x1".into();
+        });
+        let err = read_v3_zip(&path).unwrap_err();
+        assert!(err.contains("overlap"), "{err}");
+    }
+
+    #[test]
+    fn rejects_too_many_parts() {
+        let dir = TempDir::new().unwrap();
+        // Part-count check fires before part files are read, so dummy
+        // entries pointing at nonexistent files are fine here.
+        let path = make_v3_zip(&dir, |m| {
+            let parts = m["parts"].as_array_mut().unwrap();
+            for i in 0..20 {
+                parts.push(serde_json::json!({
+                    "path": format!("extra{i}.bin"),
+                    "offset": format!("0x{:X}", 0x100000 + i * 0x1000),
+                    "sha256": "00",
+                }));
+            }
+        });
+        let err = read_v3_zip(&path).unwrap_err();
+        assert!(err.contains("limit"), "{err}");
+    }
+
+    #[test]
+    fn rejects_oversized_part() {
+        let dir = TempDir::new().unwrap();
+        let big = vec![0u8; MAX_PART_BYTES + 1];
+        let manifest = serde_json::json!({
+            "manifest_version": 1,
+            "board": "pentabuzzer_esp32s3",
+            "chip": "esp32s3",
+            "flash": {"mode": "dio", "freq": "80m", "size": "8MB"},
+            "application_version": "2.0.0",
+            "parts": [{"path": "firmware.bin", "offset": "0x10000", "sha256": sha_hex(&big)}],
+        });
+
+        let path = dir.path().join("big-v3.zip");
+        let file = std::fs::File::create(&path).unwrap();
+        let mut zf = zip::ZipWriter::new(file);
+        let opts: zip::write::FileOptions = Default::default();
+        zf.start_file("manifest.json", opts).unwrap();
+        zf.write_all(manifest.to_string().as_bytes()).unwrap();
+        zf.start_file("firmware.bin", opts).unwrap();
+        zf.write_all(&big).unwrap();
+        zf.finish().unwrap();
+
+        let err = read_v3_zip(&path).unwrap_err();
+        assert!(err.contains("size limit"), "{err}");
     }
 
     #[test]

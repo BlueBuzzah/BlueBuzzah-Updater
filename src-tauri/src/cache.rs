@@ -89,7 +89,11 @@ impl CacheManager {
                     .collect();
                 for key in legacy {
                     if let Some(meta) = index.remove(&key) {
-                        index.insert(Self::cache_key(&meta.version, &meta.board), meta);
+                        // A board-keyed entry is newer-format and authoritative;
+                        // never let a stale legacy entry clobber it.
+                        index
+                            .entry(Self::cache_key(&meta.version, &meta.board))
+                            .or_insert(meta);
                     }
                 }
                 Ok(index)
@@ -524,6 +528,45 @@ mod tests {
             .get_entry("1.0.0", "esp32s3")
             .unwrap()
             .is_some());
+    }
+
+    #[test]
+    fn test_legacy_key_migration_does_not_clobber_board_keyed_entry() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_file = temp_dir.path().join("firmware_cache.json");
+
+        // Index containing BOTH a legacy bare-version key and an
+        // already-migrated board-keyed entry for the same (version, board).
+        let json = serde_json::json!({
+            "1.0.0": {
+                "version": "1.0.0",
+                "tag_name": "v1.0.0",
+                "sha256_hash": "stale",
+                "zip_path": "/old.zip",
+                "downloaded_at": "2023-01-01T00:00:00Z",
+                "file_size": 1,
+                "published_at": "",
+                "release_notes": ""
+            },
+            "1.0.0::nrf52": {
+                "version": "1.0.0",
+                "tag_name": "v1.0.0",
+                "sha256_hash": "fresh",
+                "zip_path": "/new.zip",
+                "downloaded_at": "2024-01-01T00:00:00Z",
+                "file_size": 2,
+                "published_at": "",
+                "release_notes": "",
+                "board": "nrf52"
+            }
+        });
+        fs::write(&cache_file, json.to_string()).unwrap();
+
+        let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
+        let index = cache_manager.load_index().unwrap();
+
+        assert_eq!(index.len(), 1);
+        assert_eq!(index.get("1.0.0::nrf52").unwrap().sha256_hash, "fresh");
     }
 
     #[test]

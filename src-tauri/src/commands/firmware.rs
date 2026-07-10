@@ -15,6 +15,25 @@ fn firmware_filename(version: &str, board: &str) -> String {
     }
 }
 
+/// Reject `version`/`board` values that could escape the firmware cache
+/// directory or corrupt cache keys. Both arrive over the IPC boundary; the
+/// bundled frontend only sends well-formed values, so this is defense in
+/// depth against a compromised webview or upstream release feed.
+fn validate_cache_params(version: &str, board: &str) -> Result<(), String> {
+    if !matches!(board, "nrf52" | "esp32s3") {
+        return Err(format!("Unknown board \"{}\"", board));
+    }
+    if version.is_empty()
+        || version.contains('/')
+        || version.contains('\\')
+        || version.contains("..")
+        || version.contains("::")
+    {
+        return Err(format!("Invalid firmware version \"{}\"", version));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn download_firmware(
     url: String,
@@ -25,6 +44,8 @@ pub async fn download_firmware(
     board: String,
     app_handle: tauri::AppHandle,
 ) -> Result<String, String> {
+    validate_cache_params(&version, &board)?;
+
     // Get app data directory
     let app_data_dir = app_handle
         .path()
@@ -111,6 +132,8 @@ pub async fn get_cached_firmware(
     board: String,
     app_handle: tauri::AppHandle,
 ) -> Result<Option<String>, String> {
+    validate_cache_params(&version, &board)?;
+
     let app_data_dir = app_handle
         .path()
         .app_data_dir()
@@ -175,6 +198,8 @@ pub async fn delete_cached_firmware(
     board: String,
     app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
+    validate_cache_params(&version, &board)?;
+
     let app_data_dir = app_handle
         .path()
         .app_data_dir()
@@ -226,6 +251,8 @@ pub async fn verify_cached_firmware(
     board: String,
     app_handle: tauri::AppHandle,
 ) -> Result<bool, String> {
+    validate_cache_params(&version, &board)?;
+
     let app_data_dir = app_handle
         .path()
         .app_data_dir()
@@ -267,4 +294,37 @@ pub async fn verify_and_clean_cache(
         .collect())
 }
 
-// Tests moved to src-tauri/src/dfu/firmware_reader.rs for DFU zip reading
+// DFU zip reading tests live in src-tauri/src/dfu/firmware_reader.rs
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_cache_params_accepts_known_boards() {
+        assert!(validate_cache_params("v1.2.0", "nrf52").is_ok());
+        assert!(validate_cache_params("v1.2.0", "esp32s3").is_ok());
+    }
+
+    #[test]
+    fn test_validate_cache_params_rejects_unknown_or_miscased_board() {
+        assert!(validate_cache_params("v1.2.0", "NRF52").is_err());
+        assert!(validate_cache_params("v1.2.0", "../../evil").is_err());
+        assert!(validate_cache_params("v1.2.0", "").is_err());
+    }
+
+    #[test]
+    fn test_validate_cache_params_rejects_path_and_key_metacharacters() {
+        assert!(validate_cache_params("", "nrf52").is_err());
+        assert!(validate_cache_params("../escape", "nrf52").is_err());
+        assert!(validate_cache_params("a/b", "nrf52").is_err());
+        assert!(validate_cache_params("a\\b", "nrf52").is_err());
+        assert!(validate_cache_params("1.0.0::nrf52", "nrf52").is_err());
+    }
+
+    #[test]
+    fn test_firmware_filename_conventions() {
+        assert_eq!(firmware_filename("v1.2.0", "nrf52"), "v1.2.0.zip");
+        assert_eq!(firmware_filename("v1.2.0", "esp32s3"), "v1.2.0-esp32s3.zip");
+    }
+}
