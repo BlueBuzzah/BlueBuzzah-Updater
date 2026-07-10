@@ -4,6 +4,7 @@
 mod cache;
 mod commands;
 mod dfu;
+mod esp;
 mod settings;
 
 use commands::dfu::{
