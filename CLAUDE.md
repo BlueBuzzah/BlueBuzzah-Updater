@@ -1,9 +1,9 @@
 # BlueBuzzah Updater
 
-Tauri 2.0 desktop app that flashes BlueBuzzah firmware to Adafruit Feather nRF52840 gloves over serial (Nordic Secure DFU), then configures device role and therapy profile post-flash.
+Tauri 2.0 desktop app that flashes BlueBuzzah firmware over serial to two hardware targets — Adafruit Feather nRF52840 gloves (Nordic Secure DFU) and PentaBuzzer / Seeed XIAO ESP32-S3 boards (esptool protocol via espflash) — then configures device role and therapy profile post-flash.
 
 **Frontend**: React 18 + TypeScript + Vite | Zustand, shadcn/ui, Tailwind, Lucide
-**Backend**: Rust + Tauri 2.0 | Nordic DFU protocol over serial
+**Backend**: Rust + Tauri 2.0 | Nordic DFU protocol (nRF52840) and espflash (ESP32-S3) over serial
 
 ## Quick Reference
 
@@ -30,6 +30,8 @@ Frontend flow: `src/components/wizard/` (FirmwareSelection → DeviceSelection �
 | `dfu/firmware_reader.rs` | Nordic DFU zip parsing (`manifest.json`, `firmware.bin`/`.dat`) |
 | `dfu/config.rs` | VID/PIDs, opcodes, all timing/retry constants |
 | `dfu/error.rs` | `DfuError` taxonomy — `is_retriable()`, `is_operation_retriable()`, stable `error_code()` (DFU-0xx) |
+| `esp/manifest.rs` | v3 (ESP32-S3/PentaBuzzer) firmware zip parsing — validates `manifest_version` 1, board `pentabuzzer_esp32s3`, chip `esp32s3`, per-part SHA256; parses manifest flash offsets |
+| `esp/flasher.rs` | espflash 4.5-based multi-part flash over the ESP32-S3 USB-JTAG/Serial bootloader; reuses `DfuStage` progress and `configure_device_role_flexible` role config; exposes Tauri command `flash_v3_firmware` |
 | `commands/` | Tauri command boundary (`dfu.rs`, `firmware.rs`, `settings.rs`); stringifies errors for frontend |
 | `cache.rs` | Per-version firmware cache with SHA256 verification |
 | `settings.rs` | `AdvancedSettings` persistence + pre-profile serial command generation |
@@ -42,13 +44,15 @@ Frontend flow: `src/components/wizard/` (FirmwareSelection → DeviceSelection �
 
 - VID `0x239A` (Adafruit); app PIDs `0x8029`/`0x802A`; bootloader PIDs `0x0029`/`0x002A`
 - DFU protocol at 115200 baud; bootloader entry via 1200-baud touch
+- VID `0x303A` (Espressif) / PID `0x1001` (ESP32-S3 USB-JTAG/Serial) identifies PentaBuzzer v3 boards; the same PID is used in both app and download mode, so `in_bootloader` is always `false` for v3 devices. Device labels are fixed per hardware revision by `find_supported_devices()`: "BlueBuzzah v2 (port)" for nRF52840, "BlueBuzzah v3 (port)" for ESP32-S3.
 
 ## Cross-Repo Contract (must match BlueBuzzah-Firmware)
 
 - Serial commands: `SET_ROLE:PRIMARY|SECONDARY`, `SET_PROFILE:REGULAR|NOISY|HYBRID|GENTLE`, advanced-setting commands from `settings.rs::to_pre_profile_commands()`
 - Response markers parsed by `protocol.rs`: `[CONFIG]`, `[ERROR]`, `[SETTING]`, `"Role set to"`, `"Profile set to"` — hardcoded in firmware `main.cpp` serial output; rewording either side breaks the other
 - Boot markers in `drain_boot_output`: `[READY]`, `[INIT]`, `[BOOT]`, `BlueBuzzah`
-- Firmware distribution: `FirmwareService.ts` fetches `https://api.github.com/repos/BlueBuzzah/BlueBuzzah-Firmware/releases`; first `.zip` asset = Nordic DFU package. 60 req/hr unauthenticated.
+- Firmware distribution: `FirmwareService.ts` fetches `https://api.github.com/repos/BlueBuzzah/BlueBuzzah-Firmware/releases`; asset name determines board — `NRF_ASSET_PATTERN` (`BlueBuzzah-Firmware-<tag>-<sha>.zip`) is the Nordic DFU package (v2), `V3_ASSET_PATTERN` (`BlueBuzzah-Firmware-v3-<tag>-<sha>.zip`) is the v3 package. 60 req/hr unauthenticated.
+- v3 manifest schema (`esp/manifest.rs`) is produced by BlueBuzzah-Firmware `scripts/package_penta.py`; keep the two in sync on any manifest field change.
 
 ## Gotchas
 
@@ -59,6 +63,9 @@ Frontend flow: `src/components/wizard/` (FirmwareSelection → DeviceSelection �
 - **macOS stale port**: `wait_with_drain` keep-alives the port during the long flash-erase wait; removing it causes macOS-only flakiness.
 - **Boot noise**: firmware boot logs can contain `ERROR` text; always `drain_boot_output` before sending a command or responses get misparsed.
 - **`[SETTING]` ack timeout = success**: `send_setting_command` treats no-ack as success for backward compat with older firmware.
+- **Format detection**: a firmware zip's `manifest.json` has `manifest_version` for v3 or a top-level `manifest` key for Nordic — never feed one reader the other's zip.
+- **Cache keying**: `cache.rs` keys entries `(version, board)` as `version::board`; nrf52 keeps legacy `{version}.zip` filenames on disk, other boards use `{version}-{board}.zip`.
+- **Batch flashing is single-board only**: flashing two v3 devices or one of each (v2 + v3) in the same run is unsupported — enforced by a UI guard in `DeviceSelection` and a defensive guard in `InstallationProgress`.
 
 ## Conventions
 
