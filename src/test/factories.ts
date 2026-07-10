@@ -35,6 +35,7 @@ export const createMockRelease = (overrides?: Partial<FirmwareRelease>): Firmwar
 export const createMockBundle = (overrides?: Partial<FirmwareBundle>): FirmwareBundle => ({
   version: '1.0.0',
   localPath: '/tmp/firmware/v1.0.0',
+  board: 'nrf52',
   ...overrides,
 });
 

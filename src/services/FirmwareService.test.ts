@@ -508,6 +508,7 @@ describe('FirmwareService', () => {
       expect(result).toEqual({
         version: '1.0.0',
         localPath: '/cache/firmware/v1.0.0',
+        board: 'nrf52',
       });
     });
 
@@ -519,6 +520,7 @@ describe('FirmwareService', () => {
       const result = await service.downloadFirmware(release);
 
       expect(result.localPath).toBe('/cache/firmware/v1.0.0');
+      expect(result.board).toBe('nrf52');
       // Should only call get_cached_firmware, not download_firmware
       expect(invoke).toHaveBeenCalledTimes(1);
     });

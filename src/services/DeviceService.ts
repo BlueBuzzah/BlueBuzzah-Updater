@@ -169,8 +169,10 @@ export class DeviceService implements IDeviceRepository {
         });
       };
 
-      // Call the DFU flash command
-      await invoke('flash_dfu_firmware', {
+      // Call the flash command matching this device's hardware family
+      const command =
+        device.board === 'esp32s3' ? 'flash_v3_firmware' : 'flash_dfu_firmware';
+      await invoke(command, {
         serialPort: device.path,
         firmwarePath: firmware.localPath,
         deviceRole: device.role,

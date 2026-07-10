@@ -194,12 +194,24 @@ export function InstallationProgress({
 
       addLog('All devices passed validation');
 
-      // Stage 1: Download firmware
-      addLog(`Starting firmware download for version ${release.version}...`);
+      // Batch flashing is single-board only — selection UI enforces this;
+      // guard defensively so a mixed batch can never reach the flashers.
+      const boards = [...new Set(targetDevices.map((d) => d.board))];
+      if (boards.length > 1) {
+        throw new Error(
+          'All devices in one update run must be the same hardware version.'
+        );
+      }
+      const board = boards[0];
+
+      // Stage 1: Download firmware for the selected board
+      addLog(
+        `Downloading ${board === 'esp32s3' ? 'v3' : 'v2'} firmware for version ${release.version}...`
+      );
       setStage('downloading');
       setDownloadProgress(0);
 
-      const firmware = await firmwareService.downloadFirmware(release);
+      const firmware = await firmwareService.downloadFirmware(release, board);
       setDownloadProgress(100);
       addLog('Firmware download complete');
 

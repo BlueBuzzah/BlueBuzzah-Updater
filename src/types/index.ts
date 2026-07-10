@@ -65,6 +65,7 @@ export type DeviceRole = 'PRIMARY' | 'SECONDARY';
 export interface FirmwareBundle {
   version: string;
   localPath: string;
+  board: BoardType;
 }
 
 export interface UpdateProgress {

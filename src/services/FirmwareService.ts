@@ -160,6 +160,7 @@ export class FirmwareService implements IFirmwareRepository {
         return {
           version: release.version,
           localPath: cachedPath,
+          board,
         };
       }
 
@@ -187,6 +188,7 @@ export class FirmwareService implements IFirmwareRepository {
       return {
         version: release.version,
         localPath,
+        board,
       };
     } catch (error) {
       console.error('Failed to download firmware:', error);
