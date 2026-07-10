@@ -28,7 +28,7 @@ import {
 } from '@/components/ui/tooltip';
 import { useToast } from '@/components/ui/use-toast';
 import { formatBytes, formatDate } from '@/lib/utils';
-import { firmwareService } from '@/services/FirmwareService';
+import { firmwareService, getAssetForBoard } from '@/services/FirmwareService';
 import { FirmwareRelease } from '@/types';
 import { Calendar, ChevronDown, ChevronUp, Download, FileText, FlaskConical, HardDrive, Loader2, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
@@ -99,7 +99,10 @@ export function FirmwareSelection({
 
     try {
       setIsDeleting(true);
-      await firmwareService.deleteCachedFirmware(releaseToDelete.version);
+      const entries = releaseToDelete.cachedEntries ?? [];
+      for (const entry of entries) {
+        await firmwareService.deleteCachedFirmware(entry.version, entry.board);
+      }
 
       toast({
         title: 'Cache deleted',
@@ -370,9 +373,19 @@ export function FirmwareSelection({
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Download Size</span>
                   <span className="font-medium">
-                    {release.assets.length > 0
-                      ? formatBytes(release.assets[0].size)
-                      : 'N/A'}
+                    {(() => {
+                      const v2 = getAssetForBoard(release, 'nrf52');
+                      const v3 = getAssetForBoard(release, 'esp32s3');
+                      const parts = [
+                        v2 && `v2: ${formatBytes(v2.size)}`,
+                        v3 && `v3: ${formatBytes(v3.size)}`,
+                      ].filter(Boolean);
+                      if (parts.length > 0) return parts.join(' • ');
+                      // Cached-only releases synthesize an asset that matches no pattern
+                      return release.assets.length > 0
+                        ? formatBytes(release.assets[0].size)
+                        : 'N/A';
+                    })()}
                   </span>
                 </div>
               </CardContent>

@@ -5,6 +5,10 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+fn default_board() -> String {
+    "nrf52".to_string()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CachedFirmwareMetadata {
     pub version: String,
@@ -15,6 +19,9 @@ pub struct CachedFirmwareMetadata {
     pub file_size: u64,
     pub published_at: String,
     pub release_notes: String,
+    /// Board family this zip targets ("nrf52" or "esp32s3").
+    #[serde(default = "default_board")]
+    pub board: String,
 }
 
 pub type FirmwareCacheIndex = HashMap<String, CachedFirmwareMetadata>;
@@ -72,8 +79,25 @@ impl CacheManager {
             }
         };
 
-        match serde_json::from_str(&contents) {
-            Ok(index) => Ok(index),
+        match serde_json::from_str::<FirmwareCacheIndex>(&contents) {
+            Ok(mut index) => {
+                // Migrate pre-board entries keyed by bare version.
+                let legacy: Vec<String> = index
+                    .keys()
+                    .filter(|k| !k.contains("::"))
+                    .cloned()
+                    .collect();
+                for key in legacy {
+                    if let Some(meta) = index.remove(&key) {
+                        // A board-keyed entry is newer-format and authoritative;
+                        // never let a stale legacy entry clobber it.
+                        index
+                            .entry(Self::cache_key(&meta.version, &meta.board))
+                            .or_insert(meta);
+                    }
+                }
+                Ok(index)
+            }
             Err(e) => {
                 eprintln!(
                     "[Cache] Warning: Cache index corrupted, returning empty: {}",
@@ -110,26 +134,38 @@ impl CacheManager {
         Ok(())
     }
 
+    /// Index key for a (version, board) pair.
+    pub fn cache_key(version: &str, board: &str) -> String {
+        format!("{}::{}", version, board)
+    }
+
     /// Add or update a firmware entry in the cache index
     pub fn update_entry(&self, metadata: CachedFirmwareMetadata) -> Result<(), String> {
         let mut index = self.load_index()?;
-        index.insert(metadata.version.clone(), metadata);
+        index.insert(
+            Self::cache_key(&metadata.version, &metadata.board),
+            metadata,
+        );
         self.save_index(&index)?;
         Ok(())
     }
 
     /// Remove a firmware entry from the cache index
-    pub fn remove_entry(&self, version: &str) -> Result<(), String> {
+    pub fn remove_entry(&self, version: &str, board: &str) -> Result<(), String> {
         let mut index = self.load_index()?;
-        index.remove(version);
+        index.remove(&Self::cache_key(version, board));
         self.save_index(&index)?;
         Ok(())
     }
 
     /// Get a specific firmware entry from the cache
-    pub fn get_entry(&self, version: &str) -> Result<Option<CachedFirmwareMetadata>, String> {
+    pub fn get_entry(
+        &self,
+        version: &str,
+        board: &str,
+    ) -> Result<Option<CachedFirmwareMetadata>, String> {
         let index = self.load_index()?;
-        Ok(index.get(version).cloned())
+        Ok(index.get(&Self::cache_key(version, board)).cloned())
     }
 
     /// Clear all entries from the cache index
@@ -139,25 +175,27 @@ impl CacheManager {
         Ok(())
     }
 
-    /// Verify that cached files still exist on disk
-    pub fn verify_cache_integrity(&self) -> Result<Vec<String>, String> {
+    /// Verify that cached files still exist on disk.
+    ///
+    /// Returns `(version, board)` pairs for entries whose zip is missing.
+    pub fn verify_cache_integrity(&self) -> Result<Vec<(String, String)>, String> {
         let index = self.load_index()?;
-        let mut missing_versions = Vec::new();
+        let mut missing = Vec::new();
 
-        for (version, metadata) in index.iter() {
+        for metadata in index.values() {
             let zip_exists = Path::new(&metadata.zip_path).exists();
 
             if !zip_exists {
-                missing_versions.push(version.clone());
+                missing.push((metadata.version.clone(), metadata.board.clone()));
             }
         }
 
-        Ok(missing_versions)
+        Ok(missing)
     }
 
     /// Verify SHA256 hash of a cached firmware file
-    pub fn verify_hash(&self, version: &str) -> Result<bool, String> {
-        let entry = self.get_entry(version)?;
+    pub fn verify_hash(&self, version: &str, board: &str) -> Result<bool, String> {
+        let entry = self.get_entry(version, board)?;
 
         match entry {
             Some(metadata) => {
@@ -193,9 +231,13 @@ impl CacheManager {
 
             // Look for .zip files
             if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("zip") {
-                if let Some(version) = path.file_stem().and_then(|s| s.to_str()) {
+                if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                    let (version, board) = match stem.strip_suffix("-esp32s3") {
+                        Some(v) => (v, "esp32s3"),
+                        None => (stem, "nrf52"),
+                    };
                     // Skip if already in index
-                    if index.contains_key(version) {
+                    if index.contains_key(&Self::cache_key(version, board)) {
                         continue;
                     }
 
@@ -233,9 +275,10 @@ impl CacheManager {
                         file_size,
                         published_at: "".to_string(), // Unknown for migrated cache
                         release_notes: "Migrated from existing cache".to_string(),
+                        board: board.to_string(),
                     };
 
-                    index.insert(version.to_string(), metadata);
+                    index.insert(Self::cache_key(version, board), metadata);
                     migrated_versions.push(version.to_string());
                 }
             }
@@ -265,6 +308,7 @@ mod tests {
             file_size: 1024,
             published_at: "2024-01-01T00:00:00Z".to_string(),
             release_notes: "Test release".to_string(),
+            board: "nrf52".to_string(),
         }
     }
 
@@ -318,14 +362,15 @@ mod tests {
         let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
 
         let mut index: FirmwareCacheIndex = HashMap::new();
-        index.insert("v1.0.0".to_string(), create_test_metadata("1.0.0"));
+        let key = CacheManager::cache_key("1.0.0", "nrf52");
+        index.insert(key.clone(), create_test_metadata("1.0.0"));
 
         cache_manager.save_index(&index).unwrap();
         let loaded = cache_manager.load_index().unwrap();
 
         assert_eq!(loaded.len(), 1);
-        assert!(loaded.contains_key("v1.0.0"));
-        assert_eq!(loaded.get("v1.0.0").unwrap().sha256_hash, "abc123def456");
+        assert!(loaded.contains_key(&key));
+        assert_eq!(loaded.get(&key).unwrap().sha256_hash, "abc123def456");
     }
 
     #[test]
@@ -337,8 +382,9 @@ mod tests {
         cache_manager.update_entry(metadata).unwrap();
 
         let index = cache_manager.load_index().unwrap();
-        assert!(index.contains_key("2.0.0"));
-        assert_eq!(index.get("2.0.0").unwrap().version, "2.0.0");
+        let key = CacheManager::cache_key("2.0.0", "nrf52");
+        assert!(index.contains_key(&key));
+        assert_eq!(index.get(&key).unwrap().version, "2.0.0");
     }
 
     #[test]
@@ -361,7 +407,10 @@ mod tests {
         let index = cache_manager.load_index().unwrap();
         assert_eq!(index.len(), 1);
         assert_eq!(
-            index.get("1.0.0").unwrap().release_notes,
+            index
+                .get(&CacheManager::cache_key("1.0.0", "nrf52"))
+                .unwrap()
+                .release_notes,
             "Updated version"
         );
     }
@@ -377,10 +426,10 @@ mod tests {
             .unwrap();
 
         // Remove it
-        cache_manager.remove_entry("1.0.0").unwrap();
+        cache_manager.remove_entry("1.0.0", "nrf52").unwrap();
 
         let index = cache_manager.load_index().unwrap();
-        assert!(!index.contains_key("1.0.0"));
+        assert!(!index.contains_key(&CacheManager::cache_key("1.0.0", "nrf52")));
     }
 
     #[test]
@@ -389,7 +438,7 @@ mod tests {
         let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
 
         // Should not error when removing nonexistent entry
-        let result = cache_manager.remove_entry("nonexistent");
+        let result = cache_manager.remove_entry("nonexistent", "nrf52");
         assert!(result.is_ok());
     }
 
@@ -402,7 +451,7 @@ mod tests {
             .update_entry(create_test_metadata("1.0.0"))
             .unwrap();
 
-        let entry = cache_manager.get_entry("1.0.0").unwrap();
+        let entry = cache_manager.get_entry("1.0.0", "nrf52").unwrap();
         assert!(entry.is_some());
         assert_eq!(entry.unwrap().version, "1.0.0");
     }
@@ -412,8 +461,141 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
 
-        let entry = cache_manager.get_entry("nonexistent").unwrap();
+        let entry = cache_manager.get_entry("nonexistent", "nrf52").unwrap();
         assert!(entry.is_none());
+    }
+
+    #[test]
+    fn test_cache_key_format() {
+        assert_eq!(CacheManager::cache_key("1.0.0", "nrf52"), "1.0.0::nrf52");
+        assert_eq!(
+            CacheManager::cache_key("1.0.0", "esp32s3"),
+            "1.0.0::esp32s3"
+        );
+    }
+
+    #[test]
+    fn test_get_entry_distinguishes_boards() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
+
+        let nrf52_meta = CachedFirmwareMetadata {
+            sha256_hash: "nrf52hash".to_string(),
+            ..create_test_metadata("1.0.0")
+        };
+        let esp32s3_meta = CachedFirmwareMetadata {
+            sha256_hash: "esp32s3hash".to_string(),
+            board: "esp32s3".to_string(),
+            ..create_test_metadata("1.0.0")
+        };
+        cache_manager.update_entry(nrf52_meta).unwrap();
+        cache_manager.update_entry(esp32s3_meta).unwrap();
+
+        let index = cache_manager.load_index().unwrap();
+        assert_eq!(index.len(), 2);
+
+        let nrf52_entry = cache_manager.get_entry("1.0.0", "nrf52").unwrap().unwrap();
+        let esp32s3_entry = cache_manager
+            .get_entry("1.0.0", "esp32s3")
+            .unwrap()
+            .unwrap();
+        assert_eq!(nrf52_entry.sha256_hash, "nrf52hash");
+        assert_eq!(esp32s3_entry.sha256_hash, "esp32s3hash");
+    }
+
+    #[test]
+    fn test_remove_entry_only_removes_matching_board() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
+
+        let nrf52_meta = create_test_metadata("1.0.0");
+        let esp32s3_meta = CachedFirmwareMetadata {
+            board: "esp32s3".to_string(),
+            ..create_test_metadata("1.0.0")
+        };
+        cache_manager.update_entry(nrf52_meta).unwrap();
+        cache_manager.update_entry(esp32s3_meta).unwrap();
+
+        cache_manager.remove_entry("1.0.0", "nrf52").unwrap();
+
+        let index = cache_manager.load_index().unwrap();
+        assert_eq!(index.len(), 1);
+        assert!(cache_manager
+            .get_entry("1.0.0", "nrf52")
+            .unwrap()
+            .is_none());
+        assert!(cache_manager
+            .get_entry("1.0.0", "esp32s3")
+            .unwrap()
+            .is_some());
+    }
+
+    #[test]
+    fn test_legacy_key_migration_does_not_clobber_board_keyed_entry() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_file = temp_dir.path().join("firmware_cache.json");
+
+        // Index containing BOTH a legacy bare-version key and an
+        // already-migrated board-keyed entry for the same (version, board).
+        let json = serde_json::json!({
+            "1.0.0": {
+                "version": "1.0.0",
+                "tag_name": "v1.0.0",
+                "sha256_hash": "stale",
+                "zip_path": "/old.zip",
+                "downloaded_at": "2023-01-01T00:00:00Z",
+                "file_size": 1,
+                "published_at": "",
+                "release_notes": ""
+            },
+            "1.0.0::nrf52": {
+                "version": "1.0.0",
+                "tag_name": "v1.0.0",
+                "sha256_hash": "fresh",
+                "zip_path": "/new.zip",
+                "downloaded_at": "2024-01-01T00:00:00Z",
+                "file_size": 2,
+                "published_at": "",
+                "release_notes": "",
+                "board": "nrf52"
+            }
+        });
+        fs::write(&cache_file, json.to_string()).unwrap();
+
+        let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
+        let index = cache_manager.load_index().unwrap();
+
+        assert_eq!(index.len(), 1);
+        assert_eq!(index.get("1.0.0::nrf52").unwrap().sha256_hash, "fresh");
+    }
+
+    #[test]
+    fn test_load_index_migrates_legacy_bare_version_keys() {
+        let temp_dir = TempDir::new().unwrap();
+        let cache_file = temp_dir.path().join("firmware_cache.json");
+
+        // Write a legacy index keyed by bare version (no "::board" suffix).
+        let legacy_json = serde_json::json!({
+            "1.0.0": {
+                "version": "1.0.0",
+                "tag_name": "v1.0.0",
+                "sha256_hash": "abc123def456",
+                "zip_path": "/path/to/zip",
+                "downloaded_at": "2024-01-01T00:00:00Z",
+                "file_size": 1024,
+                "published_at": "2024-01-01T00:00:00Z",
+                "release_notes": "Test release"
+            }
+        });
+        fs::write(&cache_file, legacy_json.to_string()).unwrap();
+
+        let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
+        let index = cache_manager.load_index().unwrap();
+
+        assert_eq!(index.len(), 1);
+        assert!(index.contains_key(&CacheManager::cache_key("1.0.0", "nrf52")));
+        assert!(!index.contains_key("1.0.0"));
+        assert_eq!(index.get("1.0.0::nrf52").unwrap().board, "nrf52");
     }
 
     #[test]
@@ -449,7 +631,7 @@ mod tests {
         cache_manager.update_entry(metadata).unwrap();
 
         let missing = cache_manager.verify_cache_integrity().unwrap();
-        assert_eq!(missing, vec!["1.0.0"]);
+        assert_eq!(missing, vec![("1.0.0".to_string(), "nrf52".to_string())]);
     }
 
     #[test]
@@ -488,7 +670,7 @@ mod tests {
         };
         cache_manager.update_entry(metadata).unwrap();
 
-        assert!(cache_manager.verify_hash("1.0.0").unwrap());
+        assert!(cache_manager.verify_hash("1.0.0", "nrf52").unwrap());
     }
 
     #[test]
@@ -507,7 +689,7 @@ mod tests {
         };
         cache_manager.update_entry(metadata).unwrap();
 
-        assert!(!cache_manager.verify_hash("1.0.0").unwrap());
+        assert!(!cache_manager.verify_hash("1.0.0", "nrf52").unwrap());
     }
 
     #[test]
@@ -521,7 +703,7 @@ mod tests {
         };
         cache_manager.update_entry(metadata).unwrap();
 
-        assert!(!cache_manager.verify_hash("1.0.0").unwrap());
+        assert!(!cache_manager.verify_hash("1.0.0", "nrf52").unwrap());
     }
 
     #[test]
@@ -529,7 +711,7 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
 
-        assert!(!cache_manager.verify_hash("nonexistent").unwrap());
+        assert!(!cache_manager.verify_hash("nonexistent", "nrf52").unwrap());
     }
 
     // ==================== Additional cache tests ====================
@@ -551,8 +733,9 @@ mod tests {
         assert!(migrated.contains(&"v1.0.0".to_string()));
 
         // Verify it's in the index
-        let entry = cache_manager.get_entry("v1.0.0").unwrap();
+        let entry = cache_manager.get_entry("v1.0.0", "nrf52").unwrap();
         assert!(entry.is_some());
+        assert_eq!(entry.unwrap().board, "nrf52");
     }
 
     #[test]
@@ -573,6 +756,29 @@ mod tests {
         // Migrate should skip already indexed
         let migrated = cache_manager.migrate_existing_cache(&firmware_dir).unwrap();
         assert!(migrated.is_empty());
+    }
+
+    #[test]
+    fn test_migrate_existing_cache_esp32s3_suffix() {
+        let temp_dir = TempDir::new().unwrap();
+        let firmware_dir = temp_dir.path().join("firmware");
+        fs::create_dir_all(&firmware_dir).unwrap();
+
+        // Create an esp32s3-suffixed zip file
+        let zip_path = firmware_dir.join("v1.0.0-esp32s3.zip");
+        fs::write(&zip_path, "fake esp32s3 zip content").unwrap();
+
+        let cache_manager = CacheManager::new(temp_dir.path()).unwrap();
+        let migrated = cache_manager.migrate_existing_cache(&firmware_dir).unwrap();
+
+        assert_eq!(migrated.len(), 1);
+        assert!(migrated.contains(&"v1.0.0".to_string()));
+
+        // Verify it's indexed under the esp32s3 board with the bare version.
+        let entry = cache_manager.get_entry("v1.0.0", "esp32s3").unwrap();
+        assert!(entry.is_some());
+        assert_eq!(entry.unwrap().board, "esp32s3");
+        assert!(cache_manager.get_entry("v1.0.0", "nrf52").unwrap().is_none());
     }
 
     #[test]

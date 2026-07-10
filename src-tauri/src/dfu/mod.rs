@@ -46,7 +46,11 @@ mod transport;
 // Only exports what's actually used by the Tauri commands
 
 // Device detection and tracking
-pub use device::{find_nrf52_devices, Nrf52Device};
+pub use device::{find_nrf52_devices, find_supported_devices, Nrf52Device};
+
+// Flexible device tracking through mode changes / reboots — used by both the
+// Nordic DFU path and the v3 (ESP32-S3) flasher.
+pub(crate) use device::wait_for_application_flexible;
 
 // Device identifier (for flexible tracking through reboots)
 pub mod device_pub {
@@ -54,8 +58,12 @@ pub mod device_pub {
 }
 pub use device_pub::*;
 
+// Reboot timing helpers — shared with the v3 (ESP32-S3) flasher.
+pub(crate) use config::{get_reboot_settle_delay, get_reboot_timeout};
+
 // Protocol
 pub use protocol::{configure_device_with_settings, upload_firmware, DfuStage};
+pub(crate) use protocol::configure_device_role_flexible;
 
 // Error types — re-exported for use in tests outside this module
 #[cfg(test)]

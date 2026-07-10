@@ -25,6 +25,13 @@ pub const FEATHER_BOOTLOADER_PIDS: &[u16] = &[
     0x002A, // Feather nRF52840 Sense (bootloader mode)
 ];
 
+/// Espressif USB Vendor ID.
+pub const ESPRESSIF_VID: u16 = 0x303A;
+
+/// ESP32-S3 built-in USB-JTAG/Serial PID (XIAO ESP32-S3 / PentaBuzzer).
+/// Same VID/PID in application and ROM download mode.
+pub const ESP32S3_JTAG_SERIAL_PID: u16 = 0x1001;
+
 // ============================================================================
 // Serial Communication
 // ============================================================================
@@ -427,6 +434,11 @@ pub fn is_compatible_device(vid: u16, pid: u16) -> bool {
     vid == ADAFRUIT_VID && (is_bootloader_pid(pid) || is_application_pid(pid))
 }
 
+/// Check if a VID/PID is a v3 (ESP32-S3) device.
+pub fn is_esp32s3_device(vid: u16, pid: u16) -> bool {
+    vid == ESPRESSIF_VID && pid == ESP32S3_JTAG_SERIAL_PID
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -467,6 +479,13 @@ mod tests {
         assert!(is_compatible_device(ADAFRUIT_VID, 0x0029));
         assert!(!is_compatible_device(0x1234, 0x8029));
         assert!(!is_compatible_device(ADAFRUIT_VID, 0x1234));
+    }
+
+    #[test]
+    fn test_is_esp32s3_device() {
+        assert!(is_esp32s3_device(0x303A, 0x1001));
+        assert!(!is_esp32s3_device(0x303A, 0x0002));
+        assert!(!is_esp32s3_device(ADAFRUIT_VID, 0x1001));
     }
 
     #[test]

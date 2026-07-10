@@ -6,6 +6,34 @@ use chrono;
 use std::time::Duration;
 use tauri_plugin_http::reqwest;
 
+/// nrf52 keeps the legacy bare filename so existing caches stay valid.
+fn firmware_filename(version: &str, board: &str) -> String {
+    if board == "nrf52" {
+        format!("{}.zip", version)
+    } else {
+        format!("{}-{}.zip", version, board)
+    }
+}
+
+/// Reject `version`/`board` values that could escape the firmware cache
+/// directory or corrupt cache keys. Both arrive over the IPC boundary; the
+/// bundled frontend only sends well-formed values, so this is defense in
+/// depth against a compromised webview or upstream release feed.
+fn validate_cache_params(version: &str, board: &str) -> Result<(), String> {
+    if !matches!(board, "nrf52" | "esp32s3") {
+        return Err(format!("Unknown board \"{}\"", board));
+    }
+    if version.is_empty()
+        || version.contains('/')
+        || version.contains('\\')
+        || version.contains("..")
+        || version.contains("::")
+    {
+        return Err(format!("Invalid firmware version \"{}\"", version));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn download_firmware(
     url: String,
@@ -13,8 +41,11 @@ pub async fn download_firmware(
     tag_name: String,
     published_at: String,
     release_notes: String,
+    board: String,
     app_handle: tauri::AppHandle,
 ) -> Result<String, String> {
+    validate_cache_params(&version, &board)?;
+
     // Get app data directory
     let app_data_dir = app_handle
         .path()
@@ -25,8 +56,8 @@ pub async fn download_firmware(
     fs::create_dir_all(&firmware_dir)
         .map_err(|e| format!("Failed to create firmware directory: {}", e))?;
 
-    let firmware_file = firmware_dir.join(format!("{}.zip", version));
-    let tmp_file = firmware_dir.join(format!("{}.zip.tmp", version));
+    let firmware_file = firmware_dir.join(firmware_filename(&version, &board));
+    let tmp_file = firmware_dir.join(format!("{}.tmp", firmware_filename(&version, &board)));
 
     // Download the file with connect and total timeouts
     let client = reqwest::Client::builder()
@@ -87,6 +118,7 @@ pub async fn download_firmware(
         file_size,
         published_at,
         release_notes,
+        board: board.clone(),
     };
     cache_manager.update_entry(metadata)?;
 
@@ -97,8 +129,11 @@ pub async fn download_firmware(
 #[tauri::command]
 pub async fn get_cached_firmware(
     version: String,
+    board: String,
     app_handle: tauri::AppHandle,
 ) -> Result<Option<String>, String> {
+    validate_cache_params(&version, &board)?;
+
     let app_data_dir = app_handle
         .path()
         .app_data_dir()
@@ -106,7 +141,7 @@ pub async fn get_cached_firmware(
 
     // Check cache index first
     let cache_manager = CacheManager::new(&app_data_dir)?;
-    let entry = cache_manager.get_entry(&version)?;
+    let entry = cache_manager.get_entry(&version, &board)?;
 
     match entry {
         Some(metadata) => {
@@ -118,13 +153,15 @@ pub async fn get_cached_firmware(
                 Ok(Some(metadata.zip_path))
             } else {
                 // Files missing, remove from cache index
-                cache_manager.remove_entry(&version)?;
+                cache_manager.remove_entry(&version, &board)?;
                 Ok(None)
             }
         }
         None => {
             // Fallback: check if zip file exists (for backwards compatibility)
-            let firmware_zip = app_data_dir.join("firmware").join(format!("{}.zip", version));
+            let firmware_zip = app_data_dir
+                .join("firmware")
+                .join(firmware_filename(&version, &board));
             if firmware_zip.exists() {
                 Ok(Some(firmware_zip.to_string_lossy().to_string()))
             } else {
@@ -158,8 +195,11 @@ pub async fn get_cache_index(
 #[tauri::command]
 pub async fn delete_cached_firmware(
     version: String,
+    board: String,
     app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
+    validate_cache_params(&version, &board)?;
+
     let app_data_dir = app_handle
         .path()
         .app_data_dir()
@@ -168,7 +208,7 @@ pub async fn delete_cached_firmware(
     let firmware_dir = app_data_dir.join("firmware");
 
     // Delete zip file
-    let zip_file = firmware_dir.join(format!("{}.zip", version));
+    let zip_file = firmware_dir.join(firmware_filename(&version, &board));
     if zip_file.exists() {
         fs::remove_file(&zip_file)
             .map_err(|e| format!("Failed to delete zip file: {}", e))?;
@@ -176,7 +216,7 @@ pub async fn delete_cached_firmware(
 
     // Remove from cache index
     let cache_manager = CacheManager::new(&app_data_dir)?;
-    cache_manager.remove_entry(&version)?;
+    cache_manager.remove_entry(&version, &board)?;
 
     Ok(())
 }
@@ -208,15 +248,18 @@ pub async fn clear_all_cache(
 #[tauri::command]
 pub async fn verify_cached_firmware(
     version: String,
+    board: String,
     app_handle: tauri::AppHandle,
 ) -> Result<bool, String> {
+    validate_cache_params(&version, &board)?;
+
     let app_data_dir = app_handle
         .path()
         .app_data_dir()
         .map_err(|e| format!("Failed to get app data directory: {}", e))?;
 
     let cache_manager = CacheManager::new(&app_data_dir)?;
-    cache_manager.verify_hash(&version)
+    cache_manager.verify_hash(&version, &board)
 }
 
 #[tauri::command]
@@ -237,15 +280,51 @@ pub async fn verify_and_clean_cache(
         println!("Migrated {} existing cached firmware versions", migrated.len());
     }
 
-    // Then, get list of versions with missing files
-    let missing_versions = cache_manager.verify_cache_integrity()?;
+    // Then, get list of (version, board) pairs with missing files
+    let missing = cache_manager.verify_cache_integrity()?;
 
     // Remove stale entries from cache index
-    for version in &missing_versions {
-        cache_manager.remove_entry(version)?;
+    for (version, board) in &missing {
+        cache_manager.remove_entry(version, board)?;
     }
 
-    Ok(missing_versions)
+    Ok(missing
+        .into_iter()
+        .map(|(v, b)| CacheManager::cache_key(&v, &b))
+        .collect())
 }
 
-// Tests moved to src-tauri/src/dfu/firmware_reader.rs for DFU zip reading
+// DFU zip reading tests live in src-tauri/src/dfu/firmware_reader.rs
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_cache_params_accepts_known_boards() {
+        assert!(validate_cache_params("v1.2.0", "nrf52").is_ok());
+        assert!(validate_cache_params("v1.2.0", "esp32s3").is_ok());
+    }
+
+    #[test]
+    fn test_validate_cache_params_rejects_unknown_or_miscased_board() {
+        assert!(validate_cache_params("v1.2.0", "NRF52").is_err());
+        assert!(validate_cache_params("v1.2.0", "../../evil").is_err());
+        assert!(validate_cache_params("v1.2.0", "").is_err());
+    }
+
+    #[test]
+    fn test_validate_cache_params_rejects_path_and_key_metacharacters() {
+        assert!(validate_cache_params("", "nrf52").is_err());
+        assert!(validate_cache_params("../escape", "nrf52").is_err());
+        assert!(validate_cache_params("a/b", "nrf52").is_err());
+        assert!(validate_cache_params("a\\b", "nrf52").is_err());
+        assert!(validate_cache_params("1.0.0::nrf52", "nrf52").is_err());
+    }
+
+    #[test]
+    fn test_firmware_filename_conventions() {
+        assert_eq!(firmware_filename("v1.2.0", "nrf52"), "v1.2.0.zip");
+        assert_eq!(firmware_filename("v1.2.0", "esp32s3"), "v1.2.0-esp32s3.zip");
+    }
+}

@@ -1,4 +1,8 @@
 // Domain Models
+
+/** Hardware board family a firmware asset / device belongs to. */
+export type BoardType = 'nrf52' | 'esp32s3';
+
 export interface FirmwareRelease {
   version: string;
   tagName: string;
@@ -9,6 +13,8 @@ export interface FirmwareRelease {
   sha256Hash?: string;
   isCached?: boolean;
   cachedMetadata?: CachedFirmwareMetadata;
+  /** All cached board entries for this version (one per cached board). */
+  cachedEntries?: CachedFirmwareMetadata[];
   isPrerelease?: boolean;
 }
 
@@ -20,6 +26,7 @@ export interface FirmwareAsset {
 
 export interface CachedFirmwareMetadata {
   version: string;
+  board: BoardType;
   tag_name: string;
   sha256_hash: string;
   zip_path: string;
@@ -39,6 +46,7 @@ export interface Device {
   // DFU-specific fields
   vid?: number;           // USB Vendor ID
   pid?: number;           // USB Product ID
+  board: BoardType; // Hardware family: v2 = 'nrf52', v3 = 'esp32s3'
   inBootloader?: boolean; // Whether device is in bootloader mode
   serialNumber?: string;  // Device serial number
 }
@@ -57,6 +65,7 @@ export type DeviceRole = 'PRIMARY' | 'SECONDARY';
 export interface FirmwareBundle {
   version: string;
   localPath: string;
+  board: BoardType;
 }
 
 export interface UpdateProgress {

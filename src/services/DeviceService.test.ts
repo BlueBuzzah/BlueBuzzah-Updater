@@ -50,6 +50,36 @@ describe('DeviceService', () => {
       expect(invoke).toHaveBeenCalledWith('detect_dfu_devices');
     });
 
+    it('maps backend board to Device.board', async () => {
+      const mockDevices = [
+        {
+          port: '/dev/cu.usbmodem1234',
+          label: 'BlueBuzzah v3 (/dev/cu.usbmodem1234)',
+          vid: 0x239a,
+          pid: 0x8029,
+          in_bootloader: false,
+          serial_number: 'ABC123',
+          board: 'esp32s3',
+        },
+        {
+          port: '/dev/cu.usbmodem5678',
+          label: 'BlueBuzzah v2 (/dev/cu.usbmodem5678)',
+          vid: 0x239a,
+          pid: 0x8029,
+          in_bootloader: false,
+          serial_number: 'DEF456',
+          board: 'nrf52',
+        },
+      ];
+
+      vi.mocked(invoke).mockResolvedValueOnce(mockDevices);
+
+      const devices = await service.detectDevices();
+
+      expect(devices[0].board).toBe('esp32s3');
+      expect(devices[1].board).toBe('nrf52');
+    });
+
     it('returns empty array when no devices', async () => {
       vi.mocked(invoke).mockResolvedValueOnce([]);
 
@@ -203,6 +233,52 @@ describe('DeviceService', () => {
         serialPort: '/dev/cu.usbmodem1234',
         firmwarePath: '/tmp/firmware.zip',
         deviceRole: 'PRIMARY',
+        progress: expect.any(Object),
+      });
+    });
+
+    it('invokes flash_v3_firmware for esp32s3 devices', async () => {
+      const device = createMockDevice({
+        board: 'esp32s3',
+        role: 'PRIMARY',
+        path: '/dev/cu.usbmodem1234',
+      });
+      const firmware = createMockBundle({
+        localPath: '/tmp/fw-v3.zip',
+        board: 'esp32s3',
+      });
+
+      vi.mocked(invoke).mockResolvedValueOnce(undefined);
+
+      await service.deployFirmware(device, firmware);
+
+      expect(invoke).toHaveBeenCalledWith('flash_v3_firmware', {
+        serialPort: '/dev/cu.usbmodem1234',
+        firmwarePath: '/tmp/fw-v3.zip',
+        deviceRole: 'PRIMARY',
+        progress: expect.any(Object),
+      });
+    });
+
+    it('still invokes flash_dfu_firmware for nrf52 devices', async () => {
+      const device = createMockDevice({
+        board: 'nrf52',
+        role: 'SECONDARY',
+        path: '/dev/cu.usbmodem1234',
+      });
+      const firmware = createMockBundle({
+        localPath: '/tmp/fw.zip',
+        board: 'nrf52',
+      });
+
+      vi.mocked(invoke).mockResolvedValueOnce(undefined);
+
+      await service.deployFirmware(device, firmware);
+
+      expect(invoke).toHaveBeenCalledWith('flash_dfu_firmware', {
+        serialPort: '/dev/cu.usbmodem1234',
+        firmwarePath: '/tmp/fw.zip',
+        deviceRole: 'SECONDARY',
         progress: expect.any(Object),
       });
     });

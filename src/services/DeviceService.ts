@@ -87,6 +87,7 @@ export class DeviceService implements IDeviceRepository {
         pid: number;
         in_bootloader: boolean;
         serial_number: string | null;
+        board: string;
       }[]>('detect_dfu_devices');
 
       // Map to Device interface
@@ -98,6 +99,10 @@ export class DeviceService implements IDeviceRepository {
         pid: d.pid,
         inBootloader: d.in_bootloader,
         serialNumber: d.serial_number ?? undefined,
+        // Unknown backend board strings intentionally fall back to 'nrf52'
+        // today; a THIRD board must make this an exhaustive mapping or it
+        // will be flashed with the wrong protocol.
+        board: d.board === 'esp32s3' ? 'esp32s3' : 'nrf52',
       }));
     } catch (error) {
       console.error('Failed to detect devices:', error);
@@ -167,8 +172,10 @@ export class DeviceService implements IDeviceRepository {
         });
       };
 
-      // Call the DFU flash command
-      await invoke('flash_dfu_firmware', {
+      // Call the flash command matching this device's hardware family
+      const command =
+        device.board === 'esp32s3' ? 'flash_v3_firmware' : 'flash_dfu_firmware';
+      await invoke(command, {
         serialPort: device.path,
         firmwarePath: firmware.localPath,
         deviceRole: device.role,

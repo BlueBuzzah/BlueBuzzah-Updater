@@ -10,8 +10,8 @@ use std::time::Duration;
 use tauri::ipc::Channel;
 
 use crate::dfu::{
-    configure_device_with_settings, find_nrf52_devices, upload_firmware, DeviceIdentifier,
-    DfuStage, Nrf52Device,
+    configure_device_with_settings, find_nrf52_devices, find_supported_devices, upload_firmware,
+    DeviceIdentifier, DfuStage, Nrf52Device,
 };
 use crate::settings::AdvancedSettings;
 
@@ -144,6 +144,8 @@ pub struct DfuDevice {
     pub in_bootloader: bool,
     /// Device serial number (if available).
     pub serial_number: Option<String>,
+    /// Board family: "nrf52" or "esp32s3".
+    pub board: String,
 }
 
 impl From<Nrf52Device> for DfuDevice {
@@ -155,6 +157,7 @@ impl From<Nrf52Device> for DfuDevice {
             pid: device.pid,
             in_bootloader: device.in_bootloader,
             serial_number: device.serial_number,
+            board: device.board.clone(),
         }
     }
 }
@@ -222,7 +225,7 @@ pub async fn detect_dfu_devices() -> Result<Vec<DfuDevice>, String> {
 
             // Perform initial scan to seed comparison — avoids mandatory
             // delay when a device is already connected.
-            let mut last_devices = find_nrf52_devices();
+            let mut last_devices = find_supported_devices();
             let mut last_count = last_devices.len();
             let mut stable_iterations: u32 = if last_count > 0 { 1 } else { 0 };
 
@@ -235,7 +238,7 @@ pub async fn detect_dfu_devices() -> Result<Vec<DfuDevice>, String> {
 
                 std::thread::sleep(std::time::Duration::from_millis(500));
 
-                let devices = find_nrf52_devices();
+                let devices = find_supported_devices();
                 let current_count = devices.len();
 
                 if current_count > 0 && current_count == last_count {
@@ -492,6 +495,72 @@ async fn flash_dfu_firmware_inner(
     let _ = progress_task.join();
 
     result.map_err(|e| format!("{}", e))
+}
+
+/// Flash a v3 (ESP32-S3 / PentaBuzzer) firmware package to a device.
+///
+/// # Arguments
+/// * `serial_port` - Serial port of the device
+/// * `firmware_path` - Path to the v3 firmware zip file
+/// * `device_role` - Role to configure ("PRIMARY" or "SECONDARY")
+/// * `progress` - Channel for progress updates
+///
+/// Unlike `flash_dfu_firmware`, this command has no built-in operation-level
+/// retry: the espflash bootloader connection is far more deterministic than
+/// the Nordic Secure DFU handshake, and a bad retry would re-erase/re-write
+/// flash that may already be partially correct.
+#[tauri::command]
+pub async fn flash_v3_firmware(
+    serial_port: String,
+    firmware_path: String,
+    device_role: String,
+    progress: Channel<DfuProgressEvent>,
+) -> Result<(), String> {
+    // Prevent concurrent flash operations (shared with the Nordic DFU path).
+    if DFU_IN_PROGRESS.swap(true, Ordering::SeqCst) {
+        return Err("A firmware installation is already in progress".into());
+    }
+    let _guard = DfuGuard;
+
+    // Reset cancellation flag at start of new operation
+    DFU_CANCELLED.store(false, Ordering::SeqCst);
+
+    // Create a channel for progress updates from the blocking thread
+    let (tx, rx) = mpsc::channel::<DfuStage>();
+
+    // Spawn a task to forward progress updates
+    let progress_channel = progress.clone();
+    let progress_task = thread::spawn(move || {
+        while let Ok(stage) = rx.recv() {
+            let event = DfuProgressEvent::from(stage);
+            if progress_channel.send(event).is_err() {
+                // Frontend disconnected — cancel the flash operation
+                eprintln!("[v3] Warning: progress channel disconnected, cancelling operation");
+                DFU_CANCELLED.store(true, Ordering::SeqCst);
+                break;
+            }
+        }
+    });
+
+    // Run the flash in a blocking task with cancellation support
+    let result = tokio::task::spawn_blocking(move || {
+        crate::esp::flash_v3(
+            &serial_port,
+            &firmware_path,
+            &device_role,
+            move |stage| {
+                let _ = tx.send(stage);
+            },
+            is_dfu_cancelled,
+        )
+    })
+    .await
+    .map_err(|e| format!("v3 flash panicked: {}", e))?;
+
+    // Wait for progress forwarding to complete
+    let _ = progress_task.join();
+
+    result
 }
 
 /// Check if a device is in bootloader mode.
@@ -794,15 +863,17 @@ mod tests {
             pid: 0x8029,
             serial_number: Some("ABC123".to_string()),
             in_bootloader: false,
-            product_name: Some("Test Device".to_string()),
+            product_name: Some("Test Device".to_string()), // ignored: label is fixed per board
             manufacturer: None,
+            board: "nrf52".to_string(),
         };
 
         let dfu_device = DfuDevice::from(nrf_device);
 
         assert_eq!(dfu_device.port, "/dev/cu.usbmodem1234");
-        assert_eq!(dfu_device.label, "Test Device");
+        assert_eq!(dfu_device.label, "BlueBuzzah v2 (/dev/cu.usbmodem1234)");
         assert_eq!(dfu_device.vid, 0x239A);
         assert!(!dfu_device.in_bootloader);
+        assert_eq!(dfu_device.board, "nrf52");
     }
 }

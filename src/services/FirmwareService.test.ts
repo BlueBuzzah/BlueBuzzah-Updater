@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
-import { FirmwareService } from './FirmwareService';
+import { FirmwareService, getAssetForBoard } from './FirmwareService';
 import {
   createMockGitHubRelease,
   createMockGitHubAsset,
@@ -8,8 +8,68 @@ import {
   createMockCachedMetadata,
 } from '@/test/factories';
 import { mockConsole } from '@/test/setup';
+import type { FirmwareRelease } from '@/types';
 
 // Note: Tauri API is mocked in test/setup.ts
+
+const makeRelease = (assetNames: string[]): FirmwareRelease => ({
+  version: '2.0.0',
+  tagName: 'v2.0.0',
+  releaseNotes: '',
+  publishedAt: new Date('2026-01-01'),
+  downloadUrl: '',
+  assets: assetNames.map((name) => ({
+    name,
+    downloadUrl: `https://example.com/${name}`,
+    size: 1024,
+  })),
+});
+
+describe('getAssetForBoard', () => {
+  it('selects the nRF asset for nrf52 when both assets are present', () => {
+    const release = makeRelease([
+      'BlueBuzzah-Firmware-v2.0.0-abc1234.zip',
+      'BlueBuzzah-Firmware-v3-v2.0.0-abc1234.zip',
+    ]);
+
+    const asset = getAssetForBoard(release, 'nrf52');
+
+    expect(asset?.name).toBe('BlueBuzzah-Firmware-v2.0.0-abc1234.zip');
+  });
+
+  it('never selects the v3 asset for nrf52', () => {
+    const release = makeRelease([
+      'BlueBuzzah-Firmware-v3-v2.0.0-abc1234.zip',
+    ]);
+
+    expect(getAssetForBoard(release, 'nrf52')).toBeNull();
+  });
+
+  it('selects the v3 asset for esp32s3 when both assets are present', () => {
+    const release = makeRelease([
+      'BlueBuzzah-Firmware-v3-v2.0.0-abc1234.zip',
+      'BlueBuzzah-Firmware-v2.0.0-abc1234.zip',
+    ]);
+
+    const asset = getAssetForBoard(release, 'esp32s3');
+
+    expect(asset?.name).toBe('BlueBuzzah-Firmware-v3-v2.0.0-abc1234.zip');
+  });
+
+  it('returns null for esp32s3 when the release predates v3 support', () => {
+    const release = makeRelease(['BlueBuzzah-Firmware-v1.9.0-def5678.zip']);
+
+    expect(getAssetForBoard(release, 'esp32s3')).toBeNull();
+  });
+
+  it('ignores non-zip assets', () => {
+    const release = makeRelease([
+      'BlueBuzzah-Firmware-v2.0.0-abc1234.zip.sha256',
+    ]);
+
+    expect(getAssetForBoard(release, 'nrf52')).toBeNull();
+  });
+});
 
 describe('FirmwareService', () => {
   let service: FirmwareService;
@@ -271,6 +331,112 @@ describe('FirmwareService', () => {
       expect(releases.find((r) => r.version === '1.0.0')?.isCached).toBe(true);
     });
 
+    it('marks a release cached when any board entry exists and collects cachedEntries', async () => {
+      const mockGitHubRelease = createMockGitHubRelease({
+        name: '2.0.0',
+        tag_name: 'v2.0.0',
+        assets: [
+          createMockGitHubAsset({
+            name: 'BlueBuzzah-Firmware-v2.0.0-abc1234.zip',
+          }),
+          createMockGitHubAsset({
+            name: 'BlueBuzzah-Firmware-v3-v2.0.0-abc1234.zip',
+          }),
+        ],
+      });
+
+      const mockCacheIndex = {
+        '2.0.0::nrf52': createMockCachedMetadata({
+          version: '2.0.0',
+          board: 'nrf52',
+        }),
+        '2.0.0::esp32s3': createMockCachedMetadata({
+          version: '2.0.0',
+          board: 'esp32s3',
+        }),
+      };
+
+      vi.mocked(global.fetch).mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve([mockGitHubRelease]),
+      } as Response);
+
+      vi.mocked(invoke).mockResolvedValueOnce([]); // verify_and_clean_cache
+      vi.mocked(invoke).mockResolvedValueOnce(mockCacheIndex); // get_cache_index
+
+      const releases = await service.fetchReleases();
+
+      expect(releases[0].isCached).toBe(true);
+      expect(releases[0].cachedEntries).toHaveLength(2);
+    });
+
+    it('synthesizes one cached-only release per version across boards', async () => {
+      const mockCacheIndex = {
+        '2.0.0::nrf52': createMockCachedMetadata({
+          version: '2.0.0',
+          board: 'nrf52',
+        }),
+        '2.0.0::esp32s3': createMockCachedMetadata({
+          version: '2.0.0',
+          board: 'esp32s3',
+        }),
+      };
+
+      vi.mocked(global.fetch).mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve([]),
+      } as Response);
+
+      vi.mocked(invoke).mockResolvedValueOnce([]); // verify_and_clean_cache
+      vi.mocked(invoke).mockResolvedValueOnce(mockCacheIndex); // get_cache_index
+
+      const releases = await service.fetchReleases();
+
+      expect(releases).toHaveLength(1);
+      expect(releases[0].version).toBe('2.0.0');
+      expect(releases[0].cachedEntries).toHaveLength(2);
+    });
+
+    it('sorts cached entries deterministically with nrf52 first regardless of cache index order', async () => {
+      const mockGitHubRelease = createMockGitHubRelease({
+        name: '2.0.0',
+        tag_name: 'v2.0.0',
+        assets: [
+          createMockGitHubAsset({
+            name: 'BlueBuzzah-Firmware-v2.0.0-abc1234.zip',
+          }),
+          createMockGitHubAsset({
+            name: 'BlueBuzzah-Firmware-v3-v2.0.0-abc1234.zip',
+          }),
+        ],
+      });
+
+      // esp32s3 entry appears before nrf52 in the cache index for this version.
+      const mockCacheIndex = {
+        '2.0.0::esp32s3': createMockCachedMetadata({
+          version: '2.0.0',
+          board: 'esp32s3',
+        }),
+        '2.0.0::nrf52': createMockCachedMetadata({
+          version: '2.0.0',
+          board: 'nrf52',
+        }),
+      };
+
+      vi.mocked(global.fetch).mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve([mockGitHubRelease]),
+      } as Response);
+
+      vi.mocked(invoke).mockResolvedValueOnce([]); // verify_and_clean_cache
+      vi.mocked(invoke).mockResolvedValueOnce(mockCacheIndex); // get_cache_index
+
+      const releases = await service.fetchReleases();
+
+      expect(releases[0].cachedEntries?.[0].board).toBe('nrf52');
+      expect(releases[0].cachedMetadata?.board).toBe('nrf52');
+    });
+
     it('uses release name as version, falls back to tag_name', async () => {
       const releaseWithName = createMockGitHubRelease({
         name: 'Release Name',
@@ -305,8 +471,8 @@ describe('FirmwareService', () => {
         publishedAt: new Date('2024-01-15'),
         assets: [
           {
-            name: 'firmware.zip',
-            downloadUrl: 'https://test.com/firmware.zip',
+            name: 'BlueBuzzah-Firmware-v1.0.0-abc1234.zip',
+            downloadUrl: 'https://test.com/BlueBuzzah-Firmware-v1.0.0-abc1234.zip',
             size: 1000,
           },
         ],
@@ -319,16 +485,59 @@ describe('FirmwareService', () => {
       await service.downloadFirmware(release);
 
       expect(invoke).toHaveBeenCalledWith('download_firmware', {
-        url: 'https://test.com/firmware.zip',
+        url: 'https://test.com/BlueBuzzah-Firmware-v1.0.0-abc1234.zip',
         version: '1.0.0',
+        board: 'nrf52',
         tagName: 'v1.0.0',
         publishedAt: expect.any(String),
         releaseNotes: 'Test notes',
       });
     });
 
+    it('passes board through to download_firmware invoke args', async () => {
+      const dualAssetRelease = createMockRelease({
+        version: '2.0.0',
+        tagName: 'v2.0.0',
+        assets: [
+          {
+            name: 'BlueBuzzah-Firmware-v2.0.0-abc1234.zip',
+            downloadUrl: 'https://example.com/BlueBuzzah-Firmware-v2.0.0-abc1234.zip',
+            size: 1000,
+          },
+          {
+            name: 'BlueBuzzah-Firmware-v3-v2.0.0-abc1234.zip',
+            downloadUrl: 'https://example.com/BlueBuzzah-Firmware-v3-v2.0.0-abc1234.zip',
+            size: 1000,
+          },
+        ],
+      });
+
+      vi.mocked(invoke)
+        .mockResolvedValueOnce(null) // get_cached_firmware
+        .mockResolvedValueOnce('/tmp/fw.zip'); // download_firmware
+
+      await service.downloadFirmware(dualAssetRelease, 'esp32s3');
+
+      expect(invoke).toHaveBeenCalledWith('download_firmware', {
+        url: 'https://example.com/BlueBuzzah-Firmware-v3-v2.0.0-abc1234.zip',
+        version: '2.0.0',
+        board: 'esp32s3',
+        tagName: 'v2.0.0',
+        publishedAt: expect.any(String),
+        releaseNotes: expect.any(String),
+      });
+    });
+
     it('returns local path on success', async () => {
-      const release = createMockRelease();
+      const release = createMockRelease({
+        assets: [
+          {
+            name: 'BlueBuzzah-Firmware-v1.0.0-abc1234.zip',
+            downloadUrl: 'https://test.com/BlueBuzzah-Firmware-v1.0.0-abc1234.zip',
+            size: 1000,
+          },
+        ],
+      });
 
       vi.mocked(invoke)
         .mockResolvedValueOnce(null) // get_cached_firmware
@@ -339,6 +548,7 @@ describe('FirmwareService', () => {
       expect(result).toEqual({
         version: '1.0.0',
         localPath: '/cache/firmware/v1.0.0',
+        board: 'nrf52',
       });
     });
 
@@ -350,12 +560,21 @@ describe('FirmwareService', () => {
       const result = await service.downloadFirmware(release);
 
       expect(result.localPath).toBe('/cache/firmware/v1.0.0');
+      expect(result.board).toBe('nrf52');
       // Should only call get_cached_firmware, not download_firmware
       expect(invoke).toHaveBeenCalledTimes(1);
     });
 
     it('handles download failure', async () => {
-      const release = createMockRelease();
+      const release = createMockRelease({
+        assets: [
+          {
+            name: 'BlueBuzzah-Firmware-v1.0.0-abc1234.zip',
+            downloadUrl: 'https://test.com/BlueBuzzah-Firmware-v1.0.0-abc1234.zip',
+            size: 1000,
+          },
+        ],
+      });
 
       vi.mocked(invoke)
         .mockResolvedValueOnce(null) // get_cached_firmware
@@ -378,7 +597,7 @@ describe('FirmwareService', () => {
       vi.mocked(invoke).mockResolvedValueOnce(null); // get_cached_firmware
 
       await expect(service.downloadFirmware(release)).rejects.toThrow(
-        'No firmware zip file found'
+        'No v2 (nRF52840) firmware asset found in this release.'
       );
       expect(mockConsole.error).toHaveBeenCalledWith(
         'Failed to download firmware:',
@@ -386,8 +605,35 @@ describe('FirmwareService', () => {
       );
     });
 
+    it('throws a cache-specific error for cached-only releases with no cache entry for the requested board', async () => {
+      const cachedOnlyRelease = createMockRelease({
+        version: '3.0.0',
+        assets: [
+          {
+            name: `3.0.0.zip`,
+            downloadUrl: '',
+            size: 1000,
+          },
+        ],
+      });
+
+      vi.mocked(invoke).mockResolvedValueOnce(null); // get_cached_firmware -> no cache entry for esp32s3
+
+      await expect(
+        service.downloadFirmware(cachedOnlyRelease, 'esp32s3')
+      ).rejects.toThrow(/only available from the local cache/);
+    });
+
     it('handles network timeout', async () => {
-      const release = createMockRelease();
+      const release = createMockRelease({
+        assets: [
+          {
+            name: 'BlueBuzzah-Firmware-v1.0.0-abc1234.zip',
+            downloadUrl: 'https://test.com/BlueBuzzah-Firmware-v1.0.0-abc1234.zip',
+            size: 1000,
+          },
+        ],
+      });
 
       vi.mocked(invoke)
         .mockResolvedValueOnce(null) // get_cached_firmware
@@ -407,16 +653,16 @@ describe('FirmwareService', () => {
     it('returns cached path when available', async () => {
       vi.mocked(invoke).mockResolvedValueOnce('/cache/firmware/v1.0.0');
 
-      const result = await service.getCachedFirmware('1.0.0');
+      const result = await service.getCachedFirmware('1.0.0', 'nrf52');
 
       expect(result).toBe('/cache/firmware/v1.0.0');
-      expect(invoke).toHaveBeenCalledWith('get_cached_firmware', { version: '1.0.0' });
+      expect(invoke).toHaveBeenCalledWith('get_cached_firmware', { version: '1.0.0', board: 'nrf52' });
     });
 
     it('returns null when not cached', async () => {
       vi.mocked(invoke).mockResolvedValueOnce(null);
 
-      const result = await service.getCachedFirmware('1.0.0');
+      const result = await service.getCachedFirmware('1.0.0', 'nrf52');
 
       expect(result).toBeNull();
     });
@@ -424,7 +670,7 @@ describe('FirmwareService', () => {
     it('returns null on cache read error', async () => {
       vi.mocked(invoke).mockRejectedValueOnce(new Error('Cache read failed'));
 
-      const result = await service.getCachedFirmware('1.0.0');
+      const result = await service.getCachedFirmware('1.0.0', 'nrf52');
 
       expect(result).toBeNull();
       expect(mockConsole.error).toHaveBeenCalledWith(
@@ -466,15 +712,15 @@ describe('FirmwareService', () => {
     it('calls delete_cached_firmware command', async () => {
       vi.mocked(invoke).mockResolvedValueOnce(undefined);
 
-      await service.deleteCachedFirmware('1.0.0');
+      await service.deleteCachedFirmware('1.0.0', 'nrf52');
 
-      expect(invoke).toHaveBeenCalledWith('delete_cached_firmware', { version: '1.0.0' });
+      expect(invoke).toHaveBeenCalledWith('delete_cached_firmware', { version: '1.0.0', board: 'nrf52' });
     });
 
     it('throws error on failure', async () => {
       vi.mocked(invoke).mockRejectedValueOnce(new Error('Delete failed'));
 
-      await expect(service.deleteCachedFirmware('1.0.0')).rejects.toThrow(
+      await expect(service.deleteCachedFirmware('1.0.0', 'nrf52')).rejects.toThrow(
         'Failed to delete cached firmware'
       );
       expect(mockConsole.error).toHaveBeenCalledWith(
@@ -508,16 +754,16 @@ describe('FirmwareService', () => {
     it('returns true when firmware is valid', async () => {
       vi.mocked(invoke).mockResolvedValueOnce(true);
 
-      const result = await service.verifyCachedFirmware('1.0.0');
+      const result = await service.verifyCachedFirmware('1.0.0', 'nrf52');
 
       expect(result).toBe(true);
-      expect(invoke).toHaveBeenCalledWith('verify_cached_firmware', { version: '1.0.0' });
+      expect(invoke).toHaveBeenCalledWith('verify_cached_firmware', { version: '1.0.0', board: 'nrf52' });
     });
 
     it('returns false when firmware is invalid', async () => {
       vi.mocked(invoke).mockResolvedValueOnce(false);
 
-      const result = await service.verifyCachedFirmware('1.0.0');
+      const result = await service.verifyCachedFirmware('1.0.0', 'nrf52');
 
       expect(result).toBe(false);
     });
@@ -525,7 +771,7 @@ describe('FirmwareService', () => {
     it('returns false on error', async () => {
       vi.mocked(invoke).mockRejectedValueOnce(new Error('Verify failed'));
 
-      const result = await service.verifyCachedFirmware('1.0.0');
+      const result = await service.verifyCachedFirmware('1.0.0', 'nrf52');
 
       expect(result).toBe(false);
       expect(mockConsole.error).toHaveBeenCalledWith(

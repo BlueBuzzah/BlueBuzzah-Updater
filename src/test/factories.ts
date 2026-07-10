@@ -35,6 +35,7 @@ export const createMockRelease = (overrides?: Partial<FirmwareRelease>): Firmwar
 export const createMockBundle = (overrides?: Partial<FirmwareBundle>): FirmwareBundle => ({
   version: '1.0.0',
   localPath: '/tmp/firmware/v1.0.0',
+  board: 'nrf52',
   ...overrides,
 });
 
@@ -42,6 +43,7 @@ export const createMockCachedMetadata = (
   overrides?: Partial<CachedFirmwareMetadata>
 ): CachedFirmwareMetadata => ({
   version: '1.0.0',
+  board: 'nrf52',
   tag_name: 'v1.0.0',
   sha256_hash: 'abc123def456',
   zip_path: '/cache/firmware/v1.0.0.zip',
@@ -79,6 +81,7 @@ export const createMockDevice = (overrides?: Partial<Device>): Device => ({
   isCircuitPy: false,
   vid: 0x239a,
   pid: 0x8029,
+  board: 'nrf52',
   inBootloader: false,
   serialNumber: 'ABC123',
   ...overrides,

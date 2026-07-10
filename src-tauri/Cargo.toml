@@ -25,6 +25,7 @@ chrono = "0.4"
 serialport = "4.3"
 crc16 = "0.4"
 thiserror = "1.0"
+espflash = { version = "4.5", default-features = false, features = ["serialport"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 cocoa = "0.25"

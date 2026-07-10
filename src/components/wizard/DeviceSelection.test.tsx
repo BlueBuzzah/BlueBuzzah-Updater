@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-library/react';
 import { DeviceSelection } from './DeviceSelection';
+import { Toaster } from '@/components/ui/toaster';
 import { deviceService } from '@/services/DeviceService';
 import { createMockDevice, createMockDevices } from '@/test/factories';
 
@@ -11,12 +12,8 @@ vi.mock('@/services/DeviceService', () => ({
   },
 }));
 
-// Mock the toast hook
-vi.mock('@/components/ui/use-toast', () => ({
-  useToast: () => ({
-    toast: vi.fn(),
-  }),
-}));
+// Note: real useToast/Toaster are used (not mocked) so tests can assert on
+// rendered toast content (see "Hardware Version" describe block below).
 
 describe('DeviceSelection', () => {
   const mockOnDevicesChange = vi.fn();
@@ -531,6 +528,130 @@ describe('DeviceSelection', () => {
       await waitFor(() => {
         expect(screen.getByText('Roles have been auto-assigned. You can change them if needed.')).toBeInTheDocument();
       });
+    });
+  });
+
+  describe('Hardware Version', () => {
+    const nrf52Device = createMockDevice({
+      path: 'COM3',
+      label: 'BlueBuzzah v2 (COM3)',
+      board: 'nrf52',
+    });
+    const esp32s3Device = createMockDevice({
+      path: 'COM4',
+      label: 'BlueBuzzah v3 (COM4)',
+      board: 'esp32s3',
+    });
+
+    it('shows a hardware-version badge per device', async () => {
+      vi.mocked(deviceService.detectDevices).mockResolvedValue([
+        nrf52Device,
+        esp32s3Device,
+      ]);
+
+      render(
+        <DeviceSelection selectedDevices={[]} onDevicesChange={vi.fn()} onRoleChange={vi.fn()} />
+      );
+
+      expect(await screen.findByText('nRF52840')).toBeInTheDocument();
+      expect(screen.getByText('ESP32-S3')).toBeInTheDocument();
+    });
+
+    it('blocks selecting a second device with a different hardware version', async () => {
+      vi.mocked(deviceService.detectDevices).mockResolvedValue([
+        nrf52Device,
+        esp32s3Device,
+      ]);
+      const onDevicesChange = vi.fn();
+
+      render(
+        <>
+          <DeviceSelection
+            selectedDevices={[nrf52Device]}
+            onDevicesChange={onDevicesChange}
+            onRoleChange={vi.fn()}
+          />
+          <Toaster />
+        </>
+      );
+
+      fireEvent.click(await screen.findByText('BlueBuzzah v3 (COM4)'));
+
+      expect(onDevicesChange).not.toHaveBeenCalled();
+      expect(
+        await screen.findByText(/same hardware version/i)
+      ).toBeInTheDocument();
+    });
+  });
+
+  describe('Stale Selection Pruning', () => {
+    // Note: the toast hook keeps a module-level memory state (not reset by
+    // React unmount/cleanup), so the "does not prune" test — which asserts a
+    // toast is ABSENT — must run before any test in this file produces a
+    // "Selection updated" toast, or it would see a stale toast left over
+    // from a previous test.
+    it('does not prune when the detected device matches path, board, and serial number exactly', async () => {
+      const selected = createMockDevice({
+        path: 'COM3',
+        board: 'nrf52',
+        serialNumber: 'ABC123',
+      });
+      const detected = createMockDevice({
+        path: 'COM3',
+        board: 'nrf52',
+        serialNumber: 'ABC123',
+      });
+      vi.mocked(deviceService.detectDevices).mockResolvedValue([detected]);
+      const onDevicesChange = vi.fn();
+
+      render(
+        <>
+          <DeviceSelection
+            selectedDevices={[selected]}
+            onDevicesChange={onDevicesChange}
+            onRoleChange={vi.fn()}
+          />
+          <Toaster />
+        </>
+      );
+
+      // Wait for detection to settle without relying on onDevicesChange being called.
+      await waitFor(() => {
+        expect(deviceService.detectDevices).toHaveBeenCalledTimes(1);
+      });
+
+      expect(screen.queryByText('Selection updated')).not.toBeInTheDocument();
+      expect(onDevicesChange).not.toHaveBeenCalled();
+    });
+
+    it('prunes a selection whose board no longer matches the device at the same path and shows a toast', async () => {
+      const selectedStale = createMockDevice({
+        path: 'COM3',
+        board: 'nrf52',
+        serialNumber: 'ABC123',
+      });
+      // Same path, but the detected device is now esp32s3 (e.g. Windows COM reuse).
+      const detected = createMockDevice({
+        path: 'COM3',
+        board: 'esp32s3',
+        serialNumber: 'ABC123',
+      });
+      vi.mocked(deviceService.detectDevices).mockResolvedValue([detected]);
+      const onDevicesChange = vi.fn();
+
+      render(
+        <>
+          <DeviceSelection
+            selectedDevices={[selectedStale]}
+            onDevicesChange={onDevicesChange}
+            onRoleChange={vi.fn()}
+          />
+          <Toaster />
+        </>
+      );
+
+      expect(await screen.findByText('Selection updated')).toBeInTheDocument();
+      expect(onDevicesChange).toHaveBeenCalledWith([]);
     });
   });
 });

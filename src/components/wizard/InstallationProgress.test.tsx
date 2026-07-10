@@ -610,6 +610,87 @@ describe('InstallationProgress', () => {
     });
   });
 
+  describe('Board Branching', () => {
+    it("downloads the firmware for the selected devices' board", async () => {
+      const device1 = createMockDevice({
+        path: '/dev/cu.usbmodem1',
+        label: 'PentaBuzzer #1',
+        role: 'PRIMARY',
+        board: 'esp32s3',
+      });
+      const device2 = createMockDevice({
+        path: '/dev/cu.usbmodem2',
+        label: 'PentaBuzzer #2',
+        role: 'SECONDARY',
+        board: 'esp32s3',
+      });
+      const v3Bundle = createMockBundle({ board: 'esp32s3', localPath: '/tmp/fw-v3.zip' });
+
+      vi.mocked(deviceService.validateDevices).mockResolvedValue(
+        new Map([
+          [device1.path, { valid: true, errors: [], warnings: [] }],
+          [device2.path, { valid: true, errors: [], warnings: [] }],
+        ])
+      );
+      vi.mocked(firmwareService.downloadFirmware).mockResolvedValue(v3Bundle);
+      vi.mocked(deviceService.deployFirmware).mockResolvedValue(undefined);
+
+      render(
+        <InstallationProgress
+          release={mockRelease}
+          devices={[device1, device2]}
+          onComplete={mockOnComplete}
+          onProgressUpdate={mockOnProgressUpdate}
+        />
+      );
+
+      await waitFor(() => {
+        expect(firmwareService.downloadFirmware).toHaveBeenCalledWith(
+          expect.anything(),
+          'esp32s3'
+        );
+        expect(firmwareService.downloadFirmware).toHaveBeenCalledTimes(1);
+      });
+    });
+
+    it('fails fast if selected devices have mixed hardware versions', async () => {
+      const device1 = createMockDevice({
+        path: '/dev/cu.usbmodem1',
+        label: 'Glove #1',
+        role: 'PRIMARY',
+        board: 'nrf52',
+      });
+      const device2 = createMockDevice({
+        path: '/dev/cu.usbmodem2',
+        label: 'PentaBuzzer #2',
+        role: 'SECONDARY',
+        board: 'esp32s3',
+      });
+
+      vi.mocked(deviceService.validateDevices).mockResolvedValue(
+        new Map([
+          [device1.path, { valid: true, errors: [], warnings: [] }],
+          [device2.path, { valid: true, errors: [], warnings: [] }],
+        ])
+      );
+
+      render(
+        <InstallationProgress
+          release={mockRelease}
+          devices={[device1, device2]}
+          onComplete={mockOnComplete}
+          onProgressUpdate={mockOnProgressUpdate}
+        />
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText(/same hardware version/i)).toBeInTheDocument();
+      });
+
+      expect(firmwareService.downloadFirmware).not.toHaveBeenCalled();
+    });
+  });
+
   describe('Cleanup on Unmount', () => {
     it('calls cancelFlash when component unmounts', async () => {
       vi.mocked(deviceService.validateDevices).mockImplementation(
