@@ -126,6 +126,21 @@ pub fn send_menu_command<T: DfuTransport>(
     })
 }
 
+/// Distinguish a device *rejecting* a menu command from one that never
+/// answered. `send_menu_command` reasons start with "Device rejected " for an
+/// ERROR frame and "Timeout waiting for menu response to " for silence — the
+/// two must not be treated alike after the point of no return: a rejection
+/// means firmware is still there and said no, while silence means the device
+/// may simply be a vanished/rebooting glove whose profile change already
+/// landed. Mirrors the reason-text discriminator `error.rs::is_retriable`
+/// already uses for `ProfileConfigFailed`.
+pub fn is_device_rejection(err: &DfuError) -> bool {
+    match err {
+        DfuError::ProfileConfigFailed { reason } => reason.starts_with("Device rejected"),
+        _ => false,
+    }
+}
+
 /// Firmware profile ID of the Custom profile (`profile_manager.h` CUSTOM_PROFILE_ID).
 pub const CUSTOM_PROFILE_ID: u8 = 4;
 
@@ -389,7 +404,22 @@ pub fn write_custom_params<T: DfuTransport>(
         .unwrap_or(params.amp_max);
 
     let batch = build_custom_batch(params, current_max);
-    send_menu_command(transport, &batch, MENU_COMMAND_TIMEOUT_MS)?;
+    if let Err(e) = send_menu_command(transport, &batch, MENU_COMMAND_TIMEOUT_MS) {
+        // A rejection means firmware is still there and said no - nothing
+        // beyond the profile switch itself took effect, and the caller must
+        // hear about it as a hard failure. A silent/vanished device, by
+        // contrast, is just this function's usual case: the profile change
+        // already landed before this call was ever made, so it is `partial`
+        // like every other post-ack failure here.
+        if is_device_rejection(&e) {
+            return Err(e);
+        }
+        return Ok(ProfileConfigOutcome::partial(format!(
+            "Profile loaded, but the parameter write could not be confirmed: {}. \
+             It may still be running its previous custom settings.",
+            e
+        )));
+    }
 
     let echo = match send_menu_command(transport, "PROFILE_GET", MENU_COMMAND_TIMEOUT_MS) {
         Ok(echo) => echo,
@@ -792,6 +822,23 @@ MIRROR:1\nJITTER:23.5\nFINGERS:4\u{4}";
         assert_eq!(
             outcome.status, "partial",
             "a silent device at the pre-write PROFILE_GET must not surface as Err"
+        );
+    }
+
+    #[test]
+    fn write_reports_partial_when_the_device_is_silent_at_the_profile_custom_send() {
+        let mut transport = ScriptedTransport::new(vec![
+            "[MENU-TX] ROLE:PRIMARY\nMOTORS:4\nPROFILE:4:custom_vcr\u{4}",
+            ECHO_MATCHING_FRAME, // pre-write read (current amplitudes)
+            // No reply to PROFILE_CUSTOM itself - the glove went silent.
+        ]);
+
+        let outcome = write_custom_params(&mut transport, &target_params()).unwrap();
+
+        assert_eq!(
+            outcome.status, "partial",
+            "a silent device at the PROFILE_CUSTOM send must not surface as Err — \
+             only a device rejection should"
         );
     }
 
