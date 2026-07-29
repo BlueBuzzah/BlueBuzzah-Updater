@@ -345,14 +345,26 @@ fn echo_mismatches(sent: &CustomProfileParams, echo: &MenuResponse) -> Vec<Strin
 /// `success_secondary` if the glove is SECONDARY → `PROFILE_GET` to learn the
 /// stored amplitudes → one `PROFILE_CUSTOM` → `PROFILE_GET` to verify.
 ///
-/// A device rejection (ERROR frame) is an `Err`. A verifying read that
-/// disagrees or never arrives is `Ok(partial)` — the profile change landed, the
-/// parameters may not have, and the caller must say so.
+/// Every call here runs after `configure_custom_profile`'s `PROFILE_LOAD:4`
+/// ack — the profile change has already landed on the device by the time this
+/// function is even entered. So a silent device is `Ok(partial)`, never `Err`,
+/// for every step except one: a device rejection (ERROR frame) replying to
+/// `PROFILE_CUSTOM` is a genuine "no, I didn't do that" from firmware, not a
+/// vanished device, and stays an `Err`.
 pub fn write_custom_params<T: DfuTransport>(
     transport: &mut T,
     params: &CustomProfileParams,
 ) -> DfuResult<ProfileConfigOutcome> {
-    let info = send_menu_command(transport, "INFO", MENU_COMMAND_TIMEOUT_MS)?;
+    let info = match send_menu_command(transport, "INFO", MENU_COMMAND_TIMEOUT_MS) {
+        Ok(info) => info,
+        Err(e) => {
+            return Ok(ProfileConfigOutcome::partial(format!(
+                "Profile loaded, but the device could not be reached to confirm its role: {}. \
+                 It may still be running its previous custom settings.",
+                e
+            )))
+        }
+    };
 
     if info.get("ROLE").map(str::trim) != Some("PRIMARY") {
         return Ok(ProfileConfigOutcome::success_secondary(
@@ -361,7 +373,16 @@ pub fn write_custom_params<T: DfuTransport>(
     }
 
     // Read the stored amplitudes so the batch can order AMPMIN/AMPMAX safely.
-    let current = send_menu_command(transport, "PROFILE_GET", MENU_COMMAND_TIMEOUT_MS)?;
+    let current = match send_menu_command(transport, "PROFILE_GET", MENU_COMMAND_TIMEOUT_MS) {
+        Ok(current) => current,
+        Err(e) => {
+            return Ok(ProfileConfigOutcome::partial(format!(
+                "Profile loaded, but the stored amplitudes could not be read: {}. \
+                 It may still be running its previous custom settings.",
+                e
+            )))
+        }
+    };
     let current_max = current
         .get("AMPMAX")
         .and_then(|v| v.trim().parse::<u8>().ok())
@@ -744,6 +765,34 @@ MIRROR:1\nJITTER:23.5\nFINGERS:4\u{4}";
 
         let outcome = write_custom_params(&mut transport, &target_params()).unwrap();
         assert_eq!(outcome.status, "partial");
+    }
+
+    #[test]
+    fn write_reports_partial_when_the_device_is_silent_at_info() {
+        // No scripted replies at all: the device never answers INFO.
+        let mut transport = ScriptedTransport::new(vec![]);
+
+        let outcome = write_custom_params(&mut transport, &target_params()).unwrap();
+
+        assert_eq!(
+            outcome.status, "partial",
+            "a silent device at INFO must not surface as Err — the profile change already landed"
+        );
+    }
+
+    #[test]
+    fn write_reports_partial_when_the_device_is_silent_at_the_pre_write_profile_get() {
+        let mut transport = ScriptedTransport::new(vec![
+            "[MENU-TX] ROLE:PRIMARY\nMOTORS:4\nPROFILE:4:custom_vcr\u{4}",
+            // No reply to the pre-write PROFILE_GET - the port went away.
+        ]);
+
+        let outcome = write_custom_params(&mut transport, &target_params()).unwrap();
+
+        assert_eq!(
+            outcome.status, "partial",
+            "a silent device at the pre-write PROFILE_GET must not surface as Err"
+        );
     }
 
     #[test]

@@ -1342,13 +1342,46 @@ pub fn configure_custom_profile<L: Fn(&str) + Clone>(
     send_menu_command(&mut transport, "PROFILE_LOAD:4", PROFILE_CONFIG_TIMEOUT_MS)?;
     drop(transport);
 
+    // Point of no return: the device has ACKed PROFILE_LOAD and is now
+    // irrevocably rebooting onto the Custom profile, carrying whatever
+    // parameter override it held before. From here on the profile change has
+    // landed on the device whether or not anything below succeeds, so no
+    // failure may escape as `Err` — that would tell the caller the operation
+    // failed when the glove has, in fact, already changed profiles. Every
+    // failure from here on must become `Ok(partial)` instead.
     log("Waiting for device to reboot...");
     std::thread::sleep(Duration::from_millis(get_reboot_settle_delay()));
-    let device = wait_for_application_flexible(identifier, get_reboot_timeout())?;
+
+    let device = match wait_for_application_flexible(identifier, get_reboot_timeout()) {
+        Ok(device) => device,
+        Err(e) => {
+            return Ok(ProfileConfigOutcome::partial(format!(
+                "Profile loaded, but the device did not reappear after rebooting: {}. \
+                 It may still be running its previous custom settings.",
+                e
+            )))
+        }
+    };
     log(&format!("Device reappeared on port: {}", device.port));
 
-    let mut transport = SerialTransport::open(&device.port)?;
-    drain_boot_output(&mut transport)?;
+    let mut transport = match SerialTransport::open(&device.port) {
+        Ok(transport) => transport,
+        Err(e) => {
+            return Ok(ProfileConfigOutcome::partial(format!(
+                "Profile loaded, but the reopened port could not be reached to confirm \
+                 parameters: {}. It may still be running its previous custom settings.",
+                e
+            )))
+        }
+    };
+
+    if let Err(e) = drain_boot_output(&mut transport) {
+        return Ok(ProfileConfigOutcome::partial(format!(
+            "Profile loaded, but the device's boot output could not be read to confirm \
+             parameters: {}. It may still be running its previous custom settings.",
+            e
+        )));
+    }
     transport.clear_input().ok();
     std::thread::sleep(Duration::from_millis(100));
 
