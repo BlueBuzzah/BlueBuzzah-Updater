@@ -9,6 +9,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
+import { CustomProfilePanel } from './CustomProfilePanel';
 import {
 	Tooltip,
 	TooltipContent,
@@ -215,7 +216,7 @@ export function ProfileSelection({
         </Card>
       )}
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
         {THERAPY_PROFILES.map((profile) => {
           const isSelected = selectedProfile === profile.id;
 
@@ -251,6 +252,8 @@ export function ProfileSelection({
         })}
       </div>
 
+      {selectedProfile === 'CUSTOM' && <CustomProfilePanel />}
+
       <Card className="bg-muted/50">
         <CardContent className="pt-6">
           <div className="text-sm text-muted-foreground">
@@ -271,6 +274,10 @@ export function ProfileSelection({
               <li>
                 <span className="font-medium">Gentle:</span> Lower amplitude with
                 sequential pattern for sensitive users
+              </li>
+              <li>
+                <span className="font-medium">Custom:</span> Your own timing,
+                amplitude, and session length — edit the parameters above
               </li>
             </ul>
           </div>
