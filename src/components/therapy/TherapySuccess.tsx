@@ -7,6 +7,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
 import { getProfileInfo } from '@/lib/therapy-profiles';
 import { useTherapyStore } from '@/stores/therapyStore';
@@ -91,34 +92,54 @@ export function TherapySuccess({
           <CardTitle className="text-base">Configured Devices</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          {result.deviceConfigs.map((config) => (
-            <div
-              key={config.device.path}
-              className={`flex items-center justify-between p-3 rounded-lg ${
-                config.success ? 'bg-muted/50' : 'bg-destructive/10'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <CircuitBoard className="h-5 w-5" />
-                <div>
-                  <p className="font-medium">{config.device.label}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {config.device.path}
-                  </p>
+          {result.deviceConfigs.map((config) => {
+            const isPartial = config.outcome?.status === 'partial';
+            const isSecondary = config.outcome?.status === 'success_secondary';
+
+            return (
+              <div
+                key={config.device.path}
+                className={`flex items-center justify-between p-3 rounded-lg ${
+                  config.success && !isPartial ? 'bg-muted/50' : 'bg-destructive/10'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <CircuitBoard className="h-5 w-5" />
+                  <div>
+                    <p className="font-medium">{config.device.label}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {config.device.path}
+                    </p>
+                    {isSecondary && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {config.outcome?.message}
+                      </p>
+                    )}
+                    {isPartial && (
+                      <p className="text-xs text-destructive mt-1">
+                        {config.outcome?.message}
+                      </p>
+                    )}
+                  </div>
                 </div>
+                {isPartial ? (
+                  <div className="flex items-center gap-2">
+                    <Badge variant="destructive">Partial</Badge>
+                    <XCircle className="h-5 w-5 text-destructive" />
+                  </div>
+                ) : config.success ? (
+                  <CheckCircle2 className="h-5 w-5 text-primary" />
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-destructive">
+                      {config.error || 'Failed'}
+                    </span>
+                    <XCircle className="h-5 w-5 text-destructive" />
+                  </div>
+                )}
               </div>
-              {config.success ? (
-                <CheckCircle2 className="h-5 w-5 text-primary" />
-              ) : (
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-destructive">
-                    {config.error || 'Failed'}
-                  </span>
-                  <XCircle className="h-5 w-5 text-destructive" />
-                </div>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </CardContent>
       </Card>
 

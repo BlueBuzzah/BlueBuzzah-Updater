@@ -17,6 +17,7 @@ import type {
   TherapyProfile,
   TherapyConfigProgress,
   TherapyConfigResult,
+  ProfileConfigOutcome,
 } from '@/types';
 import {
   CheckCircle2,
@@ -78,6 +79,7 @@ export function TherapyProgress({
       device: Device;
       success: boolean;
       error?: string;
+      outcome?: ProfileConfigOutcome;
     }[] = [];
 
     for (const device of devices) {
@@ -89,20 +91,37 @@ export function TherapyProgress({
 
       addLog(`Starting configuration for ${device.label}...`);
       try {
-        await therapyService.configureProfile(device, profile, (progress) => {
-          setDeviceProgress((prev) => {
-            const next = new Map(prev);
-            next.set(device.path, progress);
-            return next;
-          });
-          onProgressUpdate(device.path, progress);
+        const outcome = await therapyService.configureProfile(
+          device,
+          profile,
+          (progress) => {
+            setDeviceProgress((prev) => {
+              const next = new Map(prev);
+              next.set(device.path, progress);
+              return next;
+            });
+            onProgressUpdate(device.path, progress);
 
-          // Log progress messages
-          addLog(`${device.label}: ${progress.message}`);
-        });
+            // Log progress messages
+            addLog(`${device.label}: ${progress.message}`);
+          }
+        );
 
-        addLog(`✓ Successfully configured ${device.label}`);
-        results.push({ device, success: true });
+        switch (outcome.status) {
+          case 'success_secondary':
+            addLog(
+              `✓ ${device.label}: profile loaded. Custom parameters apply to the primary glove.`
+            );
+            break;
+          case 'partial':
+            addLog(`⚠ ${device.label}: ${outcome.message}`);
+            setShowLogs(true); // Auto-expand logs — a partial result must not be scrolled past
+            break;
+          default:
+            addLog(`✓ Successfully configured ${device.label}`);
+        }
+
+        results.push({ device, success: true, outcome });
         setConfiguredCount((c) => c + 1);
       } catch (error) {
         const errorMessage =
@@ -130,7 +149,12 @@ export function TherapyProgress({
       }
     }
 
-    const allSuccess = results.every((r) => r.success);
+    const allSuccess = results.every(
+      (r) => r.success && r.outcome?.status !== 'partial'
+    );
+    const allSecondary =
+      results.length > 0 &&
+      results.every((r) => r.outcome?.status === 'success_secondary');
 
     if (cancelledRef.current) {
       addLog('Configuration cancelled');
@@ -146,13 +170,16 @@ export function TherapyProgress({
     onComplete({
       success: allSuccess,
       message: allSuccess
-        ? `All devices configured with ${profileInfo?.name} profile`
+        ? allSecondary
+          ? 'Profile changed, but custom parameters were not applied — no glove answered as primary.'
+          : `All devices configured with ${profileInfo?.name} profile`
         : 'Some devices failed to configure',
       deviceConfigs: results.map((r) => ({
         device: r.device,
         success: r.success,
         profile: r.success ? profile : undefined,
         error: r.error,
+        outcome: r.outcome,
       })),
     });
   };
