@@ -28,6 +28,7 @@ import {
 	Gauge,
 	Settings,
 	Shuffle,
+	SlidersHorizontal,
 } from 'lucide-react';
 
 interface ProfileSelectionProps {
@@ -42,6 +43,7 @@ const profileIcons: Record<TherapyProfile, React.ReactNode> = {
   NOISY: <Activity className="h-8 w-8 text-primary" />,
   HYBRID: <Shuffle className="h-8 w-8 text-primary" />,
   GENTLE: <Feather className="h-8 w-8 text-primary" />,
+  CUSTOM: <SlidersHorizontal className="h-8 w-8 text-primary" />,
 };
 
 export function ProfileSelection({

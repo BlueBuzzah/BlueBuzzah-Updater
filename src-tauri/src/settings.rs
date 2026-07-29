@@ -16,6 +16,31 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// The seven user-editable Custom profile parameters.
+///
+/// Field names and units mirror the firmware menu keys ON, OFF, JITTER,
+/// AMPMIN, AMPMAX, SESSION, MIRROR. Bounds are NOT checked here — firmware is
+/// the sole validator (`ProfileManager::setParameter`), and the frontend
+/// constrains the inputs from `src/lib/therapy-bounds.ts`.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomProfileParams {
+    /// Burst duration in milliseconds (menu key ON).
+    pub on: f32,
+    /// Burst gap in milliseconds (menu key OFF).
+    pub off: f32,
+    /// Jitter percentage (menu key JITTER).
+    pub jitter: f32,
+    /// Minimum amplitude percentage (menu key AMPMIN).
+    pub amp_min: u8,
+    /// Maximum amplitude percentage (menu key AMPMAX).
+    pub amp_max: u8,
+    /// Session length in minutes (menu key SESSION).
+    pub session: u16,
+    /// Whether both gloves mirror the pattern (menu key MIRROR).
+    pub mirror: bool,
+}
+
 /// Advanced therapy settings that can generate serial commands.
 ///
 /// Each boolean/value field maps to a potential device command that will be
@@ -40,6 +65,11 @@ pub struct AdvancedSettings {
     /// Persisted so users don't have to re-select on each session.
     #[serde(default)]
     pub selected_profile: Option<String>,
+
+    /// Custom profile parameters, written over the menu protocol in phase 2 of
+    /// therapy configuration. Never emitted by `to_pre_profile_commands`.
+    #[serde(default)]
+    pub custom_profile: Option<CustomProfileParams>,
 
     // =========================================================================
     // EXTENSIBILITY: Add new settings below
@@ -215,6 +245,7 @@ mod tests {
             disable_led_during_therapy: true,
             debug_mode: false,
             selected_profile: None,
+            custom_profile: None,
         };
         let commands = settings.to_pre_profile_commands();
 
@@ -229,6 +260,7 @@ mod tests {
             disable_led_during_therapy: false,
             debug_mode: true,
             selected_profile: None,
+            custom_profile: None,
         };
         let commands = settings.to_pre_profile_commands();
 
@@ -243,6 +275,7 @@ mod tests {
             disable_led_during_therapy: true,
             debug_mode: true,
             selected_profile: None,
+            custom_profile: None,
         };
         let commands = settings.to_pre_profile_commands();
 
@@ -265,6 +298,7 @@ mod tests {
             disable_led_during_therapy: true,
             debug_mode: true,
             selected_profile: Some("REGULAR".to_string()),
+            custom_profile: None,
         };
         manager.save(&settings).unwrap();
 
@@ -282,6 +316,7 @@ mod tests {
             disable_led_during_therapy: true,
             debug_mode: false,
             selected_profile: None,
+            custom_profile: None,
         };
         assert!(custom_led.has_non_default_settings());
 
@@ -289,6 +324,7 @@ mod tests {
             disable_led_during_therapy: false,
             debug_mode: true,
             selected_profile: None,
+            custom_profile: None,
         };
         assert!(custom_debug.has_non_default_settings());
 
@@ -296,6 +332,7 @@ mod tests {
             disable_led_during_therapy: false,
             debug_mode: false,
             selected_profile: Some("NOISY".to_string()),
+            custom_profile: None,
         };
         assert!(custom_profile.has_non_default_settings());
     }
@@ -325,6 +362,7 @@ mod tests {
             disable_led_during_therapy: true,
             debug_mode: false,
             selected_profile: Some("REGULAR".to_string()),
+            custom_profile: None,
         };
         manager.save(&settings).unwrap();
 
@@ -340,6 +378,7 @@ mod tests {
             disable_led_during_therapy: true,
             debug_mode: true,
             selected_profile: Some("REGULAR".to_string()),
+            custom_profile: None,
         };
         let json = serde_json::to_string(&settings).unwrap();
 
@@ -350,5 +389,56 @@ mod tests {
         assert!(!json.contains("debug_mode"));
         assert!(json.contains("selectedProfile"));
         assert!(!json.contains("selected_profile"));
+    }
+
+    #[test]
+    fn custom_profile_absent_deserializes_to_none() {
+        let json = r#"{"disableLedDuringTherapy":false,"debugMode":false}"#;
+        let settings: AdvancedSettings = serde_json::from_str(json).unwrap();
+        assert!(settings.custom_profile.is_none());
+    }
+
+    #[test]
+    fn custom_profile_round_trips_through_camel_case_json() {
+        let settings = AdvancedSettings {
+            custom_profile: Some(CustomProfileParams {
+                on: 120.0,
+                off: 67.0,
+                jitter: 23.5,
+                amp_min: 70,
+                amp_max: 100,
+                session: 90,
+                mirror: true,
+            }),
+            ..Default::default()
+        };
+
+        let json = serde_json::to_string(&settings).unwrap();
+        assert!(json.contains("\"ampMin\":70"), "unexpected JSON: {}", json);
+
+        let parsed: AdvancedSettings = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed, settings);
+    }
+
+    #[test]
+    fn custom_profile_does_not_generate_pre_profile_commands() {
+        let settings = AdvancedSettings {
+            custom_profile: Some(CustomProfileParams {
+                on: 120.0,
+                off: 67.0,
+                jitter: 23.5,
+                amp_min: 70,
+                amp_max: 100,
+                session: 90,
+                mirror: true,
+            }),
+            ..Default::default()
+        };
+
+        // Custom parameters travel over the menu protocol in phase 2, never as
+        // pre-profile SETTING commands.
+        let commands = settings.to_pre_profile_commands();
+        assert!(commands.iter().all(|c| !c.contains("AMPMIN")));
+        assert!(commands.iter().all(|c| !c.contains("ON:")));
     }
 }
