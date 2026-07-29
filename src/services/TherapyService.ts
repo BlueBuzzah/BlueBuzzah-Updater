@@ -4,6 +4,8 @@ import type {
   TherapyProfile,
   TherapyConfigProgress,
   TherapyConfigStage,
+  CustomProfileRead,
+  ProfileConfigOutcome,
 } from '@/types';
 import { useSettingsStore } from '@/stores/settingsStore';
 
@@ -39,13 +41,20 @@ function mapBackendStage(stage: string): TherapyConfigStage {
 export interface ITherapyService {
   /**
    * Configure the therapy profile for a device.
-   * Advanced settings are automatically included from the settings store.
+   * Advanced settings — including custom profile parameters — are automatically
+   * included from the settings store.
    */
   configureProfile(
     device: Device,
     profile: TherapyProfile,
     onProgress?: (progress: TherapyConfigProgress) => void
-  ): Promise<void>;
+  ): Promise<ProfileConfigOutcome>;
+
+  /**
+   * Read Custom profile values from the first connected PRIMARY glove.
+   * Never rejects for "nothing plugged in" — that is the 'no_device' case.
+   */
+  readCustomProfile(): Promise<CustomProfileRead>;
 }
 
 export class TherapyService implements ITherapyService {
@@ -53,7 +62,7 @@ export class TherapyService implements ITherapyService {
     device: Device,
     profile: TherapyProfile,
     onProgress?: (progress: TherapyConfigProgress) => void
-  ): Promise<void> {
+  ): Promise<ProfileConfigOutcome> {
     // Create channel for progress updates from backend
     const progressChannel = new Channel<ProfileProgressEvent>();
 
@@ -70,12 +79,16 @@ export class TherapyService implements ITherapyService {
     const { settings } = useSettingsStore.getState();
 
     // Call Tauri backend command with settings
-    await invoke('set_device_profile', {
+    return await invoke<ProfileConfigOutcome>('set_device_profile', {
       serialPort: device.path,
       profile: profile,
       advancedSettings: settings,
       progress: progressChannel,
     });
+  }
+
+  async readCustomProfile(): Promise<CustomProfileRead> {
+    return await invoke<CustomProfileRead>('read_custom_profile');
   }
 }
 
