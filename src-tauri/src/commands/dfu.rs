@@ -10,9 +10,10 @@ use std::time::Duration;
 use tauri::ipc::Channel;
 
 use crate::dfu::{
-    configure_device_with_settings, find_nrf52_devices, find_supported_devices,
-    read_custom_profile_from, upload_firmware, CustomProfileRead, DeviceIdentifier, DfuStage,
-    DfuTransport, Nrf52Device, SerialTransport,
+    configure_custom_profile, configure_device_with_settings, find_nrf52_devices,
+    find_supported_devices, read_custom_profile_from, upload_firmware, CustomProfileRead,
+    DeviceIdentifier, DfuError, DfuStage, DfuTransport, Nrf52Device, ProfileConfigOutcome,
+    SerialTransport,
 };
 use crate::settings::AdvancedSettings;
 
@@ -639,7 +640,7 @@ pub async fn set_device_profile(
     profile: String,
     advanced_settings: Option<AdvancedSettings>,
     progress: Channel<ProfileProgressEvent>,
-) -> Result<(), String> {
+) -> Result<ProfileConfigOutcome, String> {
     // Get device info and create identifier for tracking
     let device = tokio::task::spawn_blocking({
         let port = serial_port.clone();
@@ -703,6 +704,8 @@ pub async fn set_device_profile(
             .map(|s| s.has_non_default_settings())
             .unwrap_or(false);
 
+    let custom_params = advanced_settings.as_ref().and_then(|s| s.custom_profile);
+
     // Run profile configuration in a blocking task
     let result = tokio::task::spawn_blocking({
         let serial_port = serial_port.clone();
@@ -732,14 +735,25 @@ pub async fn set_device_profile(
                 });
             };
 
-            // Configure the profile (with or without advanced settings)
-            let config_result = if pre_commands.is_empty() {
-                // No advanced settings - use original function with logging
-                let identifier = device_identifier.clone();
-                configure_device_with_settings(&serial_port, &profile, &[], &identifier, log)
+            // Configure the profile: Custom takes its own two-phase path,
+            // since configure_device_with_settings only matches the four
+            // preset names and would reject "CUSTOM".
+            let identifier = device_identifier.clone();
+            let config_result = if profile.eq_ignore_ascii_case("CUSTOM") {
+                match custom_params {
+                    Some(params) => configure_custom_profile(
+                        &serial_port,
+                        &params,
+                        &pre_commands,
+                        &identifier,
+                        log,
+                    ),
+                    None => Err(DfuError::ProfileConfigFailed {
+                        reason: "Custom profile selected but no parameters were provided"
+                            .to_string(),
+                    }),
+                }
             } else {
-                // Has advanced settings - use new function with logging
-                let identifier = device_identifier.clone();
                 configure_device_with_settings(
                     &serial_port,
                     &profile,
@@ -747,10 +761,11 @@ pub async fn set_device_profile(
                     &identifier,
                     log,
                 )
+                .map(|()| ProfileConfigOutcome::success(format!("Profile set to {}", profile)))
             };
 
             match &config_result {
-                Ok(()) => {
+                Ok(outcome) => {
                     // Send progress: rebooting (already handled internally, but we signal it)
                     let _ = tx.send(ProfileProgressEvent {
                         stage: "rebooting".to_string(),
@@ -762,7 +777,7 @@ pub async fn set_device_profile(
                     let _ = tx.send(ProfileProgressEvent {
                         stage: "complete".to_string(),
                         percent: 100.0,
-                        message: format!("Profile set to {}", profile),
+                        message: outcome.message.clone(),
                     });
                 }
                 Err(e) => {

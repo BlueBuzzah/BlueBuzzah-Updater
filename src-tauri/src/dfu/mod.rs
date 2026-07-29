@@ -65,16 +65,17 @@ pub(crate) use config::{get_reboot_settle_delay, get_reboot_timeout};
 // Protocol
 pub use protocol::{configure_device_with_settings, upload_firmware, DfuStage};
 pub(crate) use protocol::configure_device_role_flexible;
+pub(crate) use protocol::configure_custom_profile;
 
-// Error types — re-exported for use in tests outside this module
-#[cfg(test)]
-pub use error::DfuError;
+// Error types — re-exported for use in tests outside this module and by the
+// command boundary (missing-parameters branch of set_device_profile).
+pub(crate) use error::DfuError;
 
 // Firmware reading
 pub use firmware_reader::read_firmware_zip;
 
 // Firmware menu protocol — used by the Custom therapy profile flow.
-pub(crate) use menu::{read_custom_profile_from, CustomProfileRead};
+pub(crate) use menu::{read_custom_profile_from, CustomProfileRead, ProfileConfigOutcome};
 
 // Serial transport — the Tauri command boundary opens ports directly for the
 // Custom profile prefill read.

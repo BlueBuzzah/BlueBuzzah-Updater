@@ -232,6 +232,168 @@ pub fn read_custom_profile_from<T: DfuTransport>(
     }
 }
 
+/// The three distinct results of a Custom parameter write.
+///
+/// These must stay distinct rather than collapsing into pass/fail: reporting
+/// "partial" as success would leave a user believing parameters took effect
+/// when the glove is still running whatever override it held before.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileConfigOutcome {
+    /// "success" | "success_secondary" | "partial"
+    pub status: String,
+    pub message: String,
+}
+
+impl ProfileConfigOutcome {
+    pub fn success(message: impl Into<String>) -> Self {
+        Self { status: "success".to_string(), message: message.into() }
+    }
+
+    pub fn success_secondary(message: impl Into<String>) -> Self {
+        Self { status: "success_secondary".to_string(), message: message.into() }
+    }
+
+    pub fn partial(message: impl Into<String>) -> Self {
+        Self { status: "partial".to_string(), message: message.into() }
+    }
+}
+
+/// Tolerance for comparing a float the firmware re-serialized at one decimal.
+const ECHO_FLOAT_TOLERANCE: f32 = 0.05;
+
+/// Build the single `PROFILE_CUSTOM` command carrying all seven parameters.
+///
+/// Amplitude ordering is not cosmetic. `ProfileManager::setParameter` validates
+/// AMPMIN against the *currently stored* amplitudeMax and AMPMAX against the
+/// stored amplitudeMin (profile_manager.cpp:318-329), and the firmware applies
+/// the pairs in the order received. Exactly one of the two orders is always
+/// valid: AMPMIN may go first exactly when the target min already fits under the
+/// device's stored max, hence the `current_amp_max` argument, read from the
+/// device immediately before the write.
+///
+/// TYPE, FREQ, and PATTERN are rejected on the Custom profile; FINGERS is out of
+/// scope (it defaults to MAX_ACTUATORS, a compile-time board constant, and the
+/// Updater already flashes the firmware package matching the detected board).
+pub fn build_custom_batch(p: &CustomProfileParams, current_amp_max: u8) -> String {
+    let amplitude = if p.amp_min <= current_amp_max {
+        format!("AMPMIN:{}:AMPMAX:{}", p.amp_min, p.amp_max)
+    } else {
+        format!("AMPMAX:{}:AMPMIN:{}", p.amp_max, p.amp_min)
+    };
+
+    format!(
+        "PROFILE_CUSTOM:ON:{}:OFF:{}:JITTER:{}:{}:SESSION:{}:MIRROR:{}",
+        trim_float(p.on),
+        trim_float(p.off),
+        trim_float(p.jitter),
+        amplitude,
+        p.session,
+        if p.mirror { 1 } else { 0 }
+    )
+}
+
+/// Render a float without a trailing ".0" — `atof` accepts either, and the
+/// shorter form keeps the batch comfortably inside the 256-byte buffer.
+fn trim_float(value: f32) -> String {
+    if (value - value.round()).abs() < f32::EPSILON {
+        format!("{}", value.round() as i64)
+    } else {
+        format!("{}", value)
+    }
+}
+
+/// Compare a PROFILE_GET echo against what was sent.
+///
+/// Returns the names of the fields that disagree. Floats compare with a
+/// tolerance because firmware re-serializes ON/OFF/JITTER at one decimal.
+fn echo_mismatches(sent: &CustomProfileParams, echo: &MenuResponse) -> Vec<String> {
+    let mut mismatches = Vec::new();
+
+    let check_float = |key: &str, expected: f32, out: &mut Vec<String>| {
+        let actual = echo.get(key).and_then(|v| v.trim().parse::<f32>().ok());
+        match actual {
+            Some(actual) if (actual - expected).abs() <= ECHO_FLOAT_TOLERANCE => {}
+            _ => out.push(key.to_string()),
+        }
+    };
+
+    check_float("ON", sent.on, &mut mismatches);
+    check_float("OFF", sent.off, &mut mismatches);
+    check_float("JITTER", sent.jitter, &mut mismatches);
+
+    if echo.get("AMPMIN").and_then(|v| v.trim().parse::<u8>().ok()) != Some(sent.amp_min) {
+        mismatches.push("AMPMIN".to_string());
+    }
+    if echo.get("AMPMAX").and_then(|v| v.trim().parse::<u8>().ok()) != Some(sent.amp_max) {
+        mismatches.push("AMPMAX".to_string());
+    }
+    if echo.get("SESSION").and_then(|v| v.trim().parse::<u16>().ok()) != Some(sent.session) {
+        mismatches.push("SESSION".to_string());
+    }
+    if echo.get("MIRROR").map(|v| v.trim() != "0") != Some(sent.mirror) {
+        mismatches.push("MIRROR".to_string());
+    }
+
+    mismatches
+}
+
+/// Write Custom parameters over an already-open transport, on a device that has
+/// already been rebooted onto the Custom profile.
+///
+/// Sequence: `INFO` (role, and the loaded profile) → stop with
+/// `success_secondary` if the glove is SECONDARY → `PROFILE_GET` to learn the
+/// stored amplitudes → one `PROFILE_CUSTOM` → `PROFILE_GET` to verify.
+///
+/// A device rejection (ERROR frame) is an `Err`. A verifying read that
+/// disagrees or never arrives is `Ok(partial)` — the profile change landed, the
+/// parameters may not have, and the caller must say so.
+pub fn write_custom_params<T: DfuTransport>(
+    transport: &mut T,
+    params: &CustomProfileParams,
+) -> DfuResult<ProfileConfigOutcome> {
+    let info = send_menu_command(transport, "INFO", MENU_COMMAND_TIMEOUT_MS)?;
+
+    if info.get("ROLE").map(str::trim) != Some("PRIMARY") {
+        return Ok(ProfileConfigOutcome::success_secondary(
+            "Profile loaded. Custom parameters apply to the primary glove.",
+        ));
+    }
+
+    // Read the stored amplitudes so the batch can order AMPMIN/AMPMAX safely.
+    let current = send_menu_command(transport, "PROFILE_GET", MENU_COMMAND_TIMEOUT_MS)?;
+    let current_max = current
+        .get("AMPMAX")
+        .and_then(|v| v.trim().parse::<u8>().ok())
+        .unwrap_or(params.amp_max);
+
+    let batch = build_custom_batch(params, current_max);
+    send_menu_command(transport, &batch, MENU_COMMAND_TIMEOUT_MS)?;
+
+    let echo = match send_menu_command(transport, "PROFILE_GET", MENU_COMMAND_TIMEOUT_MS) {
+        Ok(echo) => echo,
+        Err(e) => {
+            return Ok(ProfileConfigOutcome::partial(format!(
+                "Profile loaded, but the parameters could not be confirmed: {}",
+                e
+            )))
+        }
+    };
+
+    let mismatches = echo_mismatches(params, &echo);
+    if mismatches.is_empty() {
+        Ok(ProfileConfigOutcome::success(
+            "Custom profile loaded and parameters applied.",
+        ))
+    } else {
+        Ok(ProfileConfigOutcome::partial(format!(
+            "Profile loaded, but the glove reported different values for: {}. \
+             It may still be running its previous custom settings.",
+            mismatches.join(", ")
+        )))
+    }
+}
+
 /// Transport double that replays canned menu frames, one per read.
 ///
 /// Every later Rust task tests its flow against this instead of hardware.
@@ -457,5 +619,142 @@ SESSION:90\nAMPMIN:70\nAMPMAX:100\nPATTERN:rndp\nMIRROR:1\nJITTER:23.5\nFINGERS:
         let read = read_custom_profile_from(&mut transport).unwrap();
         assert_eq!(read.case, "no_device");
         assert!(read.values.is_none());
+    }
+
+    fn target_params() -> CustomProfileParams {
+        CustomProfileParams {
+            on: 120.0,
+            off: 67.0,
+            jitter: 23.5,
+            amp_min: 70,
+            amp_max: 100,
+            session: 90,
+            mirror: true,
+        }
+    }
+
+    /// PROFILE_GET reply echoing target_params() exactly, in firmware's own
+    /// formatting: ON/OFF/JITTER get one decimal, the rest are integers.
+    const ECHO_MATCHING_FRAME: &str = "[MENU-TX] TYPE:LRA\nFREQ:250\nON:120.0\nOFF:67.0\n\
+SESSION:90\nAMPMIN:70\nAMPMAX:100\nPATTERN:rndp\nMIRROR:1\nJITTER:23.5\nFINGERS:4\u{4}";
+
+    #[test]
+    fn batch_omits_locked_and_out_of_scope_keys() {
+        let batch = build_custom_batch(&target_params(), 100);
+        for forbidden in ["TYPE", "FREQ", "PATTERN", "FINGERS"] {
+            assert!(!batch.contains(forbidden), "{} must not be sent: {}", forbidden, batch);
+        }
+        assert!(batch.starts_with("PROFILE_CUSTOM:"));
+        assert!(batch.contains("ON:120"));
+        assert!(batch.contains("OFF:67"));
+        assert!(batch.contains("JITTER:23.5"));
+        assert!(batch.contains("SESSION:90"));
+        assert!(batch.contains("MIRROR:1"));
+    }
+
+    #[test]
+    fn batch_sends_ampmin_first_when_the_target_min_fits_the_current_max() {
+        // Device at 20/50, target 40/60: AMPMIN:40 <= current max 50, so it is safe first.
+        let params = CustomProfileParams { amp_min: 40, amp_max: 60, ..target_params() };
+        let batch = build_custom_batch(&params, 50);
+        let min_at = batch.find("AMPMIN").unwrap();
+        let max_at = batch.find("AMPMAX").unwrap();
+        assert!(min_at < max_at, "expected AMPMIN before AMPMAX: {}", batch);
+    }
+
+    #[test]
+    fn batch_sends_ampmax_first_when_the_target_min_exceeds_the_current_max() {
+        // Device at 20/50, target 70/100: AMPMIN:70 would be rejected against
+        // the stored max of 50 (profile_manager.cpp:321), so AMPMAX must go first.
+        let batch = build_custom_batch(&target_params(), 50);
+        let min_at = batch.find("AMPMIN").unwrap();
+        let max_at = batch.find("AMPMAX").unwrap();
+        assert!(max_at < min_at, "expected AMPMAX before AMPMIN: {}", batch);
+    }
+
+    #[test]
+    fn batch_fits_the_firmware_command_limits() {
+        let batch = build_custom_batch(&target_params(), 100);
+        // MAX_COMMAND_PARAMS is 16 and the working buffer is 256 bytes.
+        assert!(batch.len() < 200, "batch too long ({} bytes): {}", batch.len(), batch);
+        assert_eq!(batch.matches(':').count(), 14, "expected 7 KEY:VALUE pairs: {}", batch);
+    }
+
+    #[test]
+    fn write_skips_profile_custom_when_the_device_answers_secondary() {
+        let mut transport = ScriptedTransport::new(vec![
+            "[MENU-TX] ROLE:SECONDARY\nMOTORS:4\nPROFILE:4:custom_vcr\u{4}",
+        ]);
+
+        let outcome = write_custom_params(&mut transport, &target_params()).unwrap();
+
+        assert_eq!(outcome.status, "success_secondary");
+        assert_eq!(
+            transport.written(),
+            &["INFO\n".to_string()],
+            "a SECONDARY glove must receive nothing beyond INFO"
+        );
+    }
+
+    #[test]
+    fn write_reports_success_when_the_echo_matches() {
+        let mut transport = ScriptedTransport::new(vec![
+            "[MENU-TX] ROLE:PRIMARY\nMOTORS:4\nPROFILE:4:custom_vcr\u{4}",
+            ECHO_MATCHING_FRAME,                       // pre-write read (current amplitudes)
+            "[MENU-TX] STATUS:CUSTOM_LOADED\u{4}",     // PROFILE_CUSTOM ack
+            ECHO_MATCHING_FRAME,                       // verifying read
+        ]);
+
+        let outcome = write_custom_params(&mut transport, &target_params()).unwrap();
+
+        assert_eq!(outcome.status, "success");
+        assert_eq!(transport.written().len(), 4);
+        assert!(transport.written()[2].starts_with("PROFILE_CUSTOM:"));
+        assert_eq!(transport.written()[3], "PROFILE_GET\n");
+    }
+
+    #[test]
+    fn write_reports_partial_when_the_echo_disagrees() {
+        let disagreeing = "[MENU-TX] ON:100.0\nOFF:67.0\nSESSION:90\nAMPMIN:70\nAMPMAX:100\n\
+MIRROR:1\nJITTER:23.5\nFINGERS:4\u{4}";
+        let mut transport = ScriptedTransport::new(vec![
+            "[MENU-TX] ROLE:PRIMARY\nMOTORS:4\nPROFILE:4:custom_vcr\u{4}",
+            ECHO_MATCHING_FRAME,
+            "[MENU-TX] STATUS:CUSTOM_LOADED\u{4}",
+            disagreeing, // ON came back 100, not the 120 that was sent
+        ]);
+
+        let outcome = write_custom_params(&mut transport, &target_params()).unwrap();
+
+        assert_eq!(
+            outcome.status, "partial",
+            "an echo that disagrees must not be reported as success"
+        );
+        assert!(outcome.message.to_lowercase().contains("on"));
+    }
+
+    #[test]
+    fn write_reports_partial_when_the_verifying_read_never_returns() {
+        let mut transport = ScriptedTransport::new(vec![
+            "[MENU-TX] ROLE:PRIMARY\nMOTORS:4\nPROFILE:4:custom_vcr\u{4}",
+            ECHO_MATCHING_FRAME,
+            "[MENU-TX] STATUS:CUSTOM_LOADED\u{4}",
+            // no verifying frame - the port went away
+        ]);
+
+        let outcome = write_custom_params(&mut transport, &target_params()).unwrap();
+        assert_eq!(outcome.status, "partial");
+    }
+
+    #[test]
+    fn write_propagates_a_device_rejection_as_an_error() {
+        let mut transport = ScriptedTransport::new(vec![
+            "[MENU-TX] ROLE:PRIMARY\nMOTORS:4\nPROFILE:4:custom_vcr\u{4}",
+            ECHO_MATCHING_FRAME,
+            "[MENU-TX] ERROR:Cannot modify parameters during active session\u{4}",
+        ]);
+
+        let err = write_custom_params(&mut transport, &target_params()).unwrap_err();
+        assert!(format!("{}", err).contains("active session"));
     }
 }

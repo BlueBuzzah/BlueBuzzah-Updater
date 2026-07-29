@@ -26,11 +26,13 @@ use super::device::{
 };
 use super::error::{DfuError, DfuResult};
 use super::firmware_reader::read_firmware_zip;
+use super::menu::{send_menu_command, write_custom_params, ProfileConfigOutcome};
 use super::packet::{
     build_firmware_data_packet, build_init_packet, build_start_dfu_packet, build_stop_data_packet,
     reset_sequence_number, HciAck, HciSlipDecoder, FIRMWARE_CHUNK_SIZE, IMAGE_TYPE_APPLICATION,
 };
 use super::transport::{DfuTransport, SerialTransport};
+use crate::settings::CustomProfileParams;
 
 /// DFU progress stages for UI feedback.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1285,6 +1287,75 @@ fn configure_device_with_settings_inner<L: Fn(&str)>(
             }
         ),
     })
+}
+
+// =============================================================================
+// Custom Profile Configuration (two-phase)
+// =============================================================================
+
+/// Load the Custom profile and write its parameters.
+///
+/// Two phases are unavoidable: `PROFILE_CUSTOM` is rejected unless Custom is
+/// already the loaded profile (menu_controller.cpp:664) and `PROFILE_LOAD`
+/// reboots the device (menu_controller.cpp:597).
+///
+/// 1. the advanced-settings pre-commands, exactly as the preset path sends them
+/// 2. `PROFILE_LOAD:4` — the device answers STATUS:REBOOTING, then resets
+/// 3. `wait_for_application_flexible` reacquires it on its (possibly new) port
+/// 4. `write_custom_params` handles INFO / role gating / write / verify
+///
+/// Step 3 is where Windows COM renumbering lives, and it reuses the existing
+/// re-enumeration handling unchanged — nothing new to build here.
+pub fn configure_custom_profile<L: Fn(&str) + Clone>(
+    port_name: &str,
+    params: &CustomProfileParams,
+    pre_profile_commands: &[String],
+    identifier: &DeviceIdentifier,
+    log: L,
+) -> DfuResult<ProfileConfigOutcome> {
+    log(&format!("Opening serial port: {}", port_name));
+    let mut transport = SerialTransport::open(port_name)?;
+
+    if !transport.is_healthy() {
+        return Err(DfuError::DeviceDisconnected {
+            operation: "custom profile configuration health check".to_string(),
+        });
+    }
+
+    log("Draining boot output...");
+    drain_boot_output(&mut transport)?;
+    transport.clear_input().ok();
+    std::thread::sleep(Duration::from_millis(100));
+
+    if !pre_profile_commands.is_empty() {
+        log(&format!(
+            "Sending {} advanced setting command(s)...",
+            pre_profile_commands.len()
+        ));
+        for command in pre_profile_commands {
+            send_setting_command(&mut transport, command, &log)?;
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    log("Loading Custom profile (device will reboot)...");
+    send_menu_command(&mut transport, "PROFILE_LOAD:4", PROFILE_CONFIG_TIMEOUT_MS)?;
+    drop(transport);
+
+    log("Waiting for device to reboot...");
+    std::thread::sleep(Duration::from_millis(get_reboot_settle_delay()));
+    let device = wait_for_application_flexible(identifier, get_reboot_timeout())?;
+    log(&format!("Device reappeared on port: {}", device.port));
+
+    let mut transport = SerialTransport::open(&device.port)?;
+    drain_boot_output(&mut transport)?;
+    transport.clear_input().ok();
+    std::thread::sleep(Duration::from_millis(100));
+
+    log("Writing custom parameters...");
+    let outcome = write_custom_params(&mut transport, params)?;
+    log(&outcome.message);
+    Ok(outcome)
 }
 
 #[cfg(test)]
