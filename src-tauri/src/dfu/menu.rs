@@ -162,6 +162,15 @@ impl DfuTransport for ScriptedTransport {
                 let bytes = reply.as_bytes();
                 let len = bytes.len().min(buffer.len());
                 buffer[..len].copy_from_slice(&bytes[..len]);
+                // A real serial port only delivers up to the buffer size and
+                // leaves the remainder queued for the next read — split an
+                // oversized reply the same way instead of truncating it, or
+                // callers testing frames near/over the 256-byte read buffer
+                // would silently lose bytes (possibly the EOT itself).
+                if len < bytes.len() {
+                    let remainder = String::from_utf8_lossy(&bytes[len..]).into_owned();
+                    self.replies.push_front(remainder);
+                }
                 Ok(len)
             }
             None => {
@@ -233,6 +242,30 @@ mod tests {
         let response = send_menu_command(&mut transport, "INFO", 500).unwrap();
         assert_eq!(response.get("ROLE"), Some("PRIMARY"));
         assert_eq!(transport.written(), &["INFO\n".to_string()]);
+    }
+
+    #[test]
+    fn scripted_transport_splits_an_oversized_reply_across_reads() {
+        // Longer than the 16-byte buffer below, so it can't fit in one read.
+        let frame = "[MENU-TX] ROLE:PRIMARY\nMOTORS:4\u{4}";
+        assert!(frame.len() > 16);
+        let mut transport = ScriptedTransport::new(vec![frame]);
+
+        let mut accumulated = Vec::new();
+        let mut buffer = [0u8; 16];
+        loop {
+            let n = transport.read(&mut buffer, 0).unwrap();
+            if n == 0 {
+                break;
+            }
+            accumulated.extend_from_slice(&buffer[..n]);
+        }
+
+        // Nothing was dropped: the full frame reassembles across multiple reads.
+        let text = String::from_utf8_lossy(&accumulated);
+        let response = parse_menu_response(&text).expect("frame should parse");
+        assert_eq!(response.get("ROLE"), Some("PRIMARY"));
+        assert_eq!(response.get("MOTORS"), Some("4"));
     }
 
     #[test]
