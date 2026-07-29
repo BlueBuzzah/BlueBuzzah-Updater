@@ -13,8 +13,11 @@
 
 use std::time::{Duration, Instant};
 
+use serde::Serialize;
+
 use super::error::{DfuError, DfuResult};
 use super::transport::DfuTransport;
+use crate::settings::CustomProfileParams;
 
 /// End-of-transmission byte that terminates every menu frame.
 const EOT: char = '\u{4}';
@@ -121,6 +124,112 @@ pub fn send_menu_command<T: DfuTransport>(
             }
         ),
     })
+}
+
+/// Firmware profile ID of the Custom profile (`profile_manager.h` CUSTOM_PROFILE_ID).
+pub const CUSTOM_PROFILE_ID: u8 = 4;
+
+/// Round-trip timeout for a single menu command. The menu answers immediately;
+/// this only has to cover serial latency and a SECONDARY glove's silence.
+pub const MENU_COMMAND_TIMEOUT_MS: u64 = 2000;
+
+/// Outcome of a prefill read, including which of the three cases applied.
+///
+/// A prefill that cannot say where its numbers came from is worse than no
+/// prefill, so the case always travels with the values.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomProfileRead {
+    /// "custom" | "not_custom" | "no_device"
+    pub case: String,
+    /// Populated only for the "custom" case.
+    pub values: Option<CustomProfileParams>,
+    /// Loaded profile name from INFO, e.g. "regular_vcr".
+    pub profile_name: Option<String>,
+    /// MAX_ACTUATORS as reported by INFO.
+    pub motors: Option<u8>,
+}
+
+impl CustomProfileRead {
+    fn no_device() -> Self {
+        Self {
+            case: "no_device".to_string(),
+            values: None,
+            profile_name: None,
+            motors: None,
+        }
+    }
+}
+
+/// Split INFO's `PROFILE:<id>:<name>` value into its two parts.
+fn parse_profile_field(value: &str) -> Option<(u8, String)> {
+    let (id, name) = value.split_once(':')?;
+    Some((id.trim().parse().ok()?, name.trim().to_string()))
+}
+
+/// Build params from a PROFILE_GET frame. Missing or unparseable keys mean the
+/// frame is not usable — better no prefill than a partly-guessed one.
+fn params_from_profile_get(response: &MenuResponse) -> Option<CustomProfileParams> {
+    Some(CustomProfileParams {
+        on: response.get("ON")?.parse().ok()?,
+        off: response.get("OFF")?.parse().ok()?,
+        jitter: response.get("JITTER")?.parse().ok()?,
+        amp_min: response.get("AMPMIN")?.parse().ok()?,
+        amp_max: response.get("AMPMAX")?.parse().ok()?,
+        session: response.get("SESSION")?.parse().ok()?,
+        mirror: response.get("MIRROR")?.trim() != "0",
+    })
+}
+
+/// Read Custom parameters from an already-open transport.
+///
+/// `INFO` first, then `PROFILE_GET` **only** when INFO reports profile 4.
+/// PROFILE_GET does not identify which profile its values belong to, so asking
+/// unconditionally would present another profile's timings as the user's own.
+///
+/// Silence and a SECONDARY answer both resolve to the "no_device" case rather
+/// than an error: a SECONDARY glove is gated firmware-side and never replies.
+pub fn read_custom_profile_from<T: DfuTransport>(
+    transport: &mut T,
+) -> DfuResult<CustomProfileRead> {
+    let info = match send_menu_command(transport, "INFO", MENU_COMMAND_TIMEOUT_MS) {
+        Ok(response) => response,
+        Err(_) => return Ok(CustomProfileRead::no_device()),
+    };
+
+    if info.get("ROLE").map(str::trim) != Some("PRIMARY") {
+        return Ok(CustomProfileRead::no_device());
+    }
+
+    let motors = info.get("MOTORS").and_then(|m| m.trim().parse::<u8>().ok());
+    let (profile_id, profile_name) = match info.get("PROFILE").and_then(parse_profile_field) {
+        Some(parsed) => parsed,
+        None => return Ok(CustomProfileRead::no_device()),
+    };
+
+    if profile_id != CUSTOM_PROFILE_ID {
+        return Ok(CustomProfileRead {
+            case: "not_custom".to_string(),
+            values: None,
+            profile_name: Some(profile_name),
+            motors,
+        });
+    }
+
+    let values = send_menu_command(transport, "PROFILE_GET", MENU_COMMAND_TIMEOUT_MS)
+        .ok()
+        .as_ref()
+        .and_then(params_from_profile_get);
+
+    match values {
+        Some(values) => Ok(CustomProfileRead {
+            case: "custom".to_string(),
+            values: Some(values),
+            profile_name: Some(profile_name),
+            motors,
+        }),
+        None => Ok(CustomProfileRead::no_device()),
+    }
 }
 
 /// Transport double that replays canned menu frames, one per read.
@@ -280,5 +389,73 @@ mod tests {
         let mut transport = ScriptedTransport::new(vec![]);
         let err = send_menu_command(&mut transport, "INFO", 50).unwrap_err();
         assert!(format!("{}", err).to_lowercase().contains("timeout"));
+    }
+
+    const CUSTOM_VALUES_FRAME: &str = "[MENU-TX] TYPE:LRA\nFREQ:250\nON:120.0\nOFF:67.0\n\
+SESSION:90\nAMPMIN:70\nAMPMAX:100\nPATTERN:rndp\nMIRROR:1\nJITTER:23.5\nFINGERS:4\u{4}";
+
+    #[test]
+    fn read_returns_values_when_the_glove_is_on_custom() {
+        let mut transport = ScriptedTransport::new(vec![
+            "[MENU-TX] ROLE:PRIMARY\nMOTORS:4\nPROFILE:4:custom_vcr\u{4}",
+            CUSTOM_VALUES_FRAME,
+        ]);
+
+        let read = read_custom_profile_from(&mut transport).unwrap();
+
+        assert_eq!(read.case, "custom");
+        assert_eq!(read.profile_name.as_deref(), Some("custom_vcr"));
+        assert_eq!(read.motors, Some(4));
+        let values = read.values.expect("custom read must carry values");
+        assert_eq!(values.on, 120.0);
+        assert_eq!(values.off, 67.0);
+        assert_eq!(values.jitter, 23.5);
+        assert_eq!(values.amp_min, 70);
+        assert_eq!(values.amp_max, 100);
+        assert_eq!(values.session, 90);
+        assert!(values.mirror);
+    }
+
+    /// The regression test that matters most: a glove on another profile must
+    /// never hand back that profile's timings as the user's custom settings.
+    #[test]
+    fn read_returns_not_custom_and_no_values_for_another_profile() {
+        let mut transport = ScriptedTransport::new(vec![
+            "[MENU-TX] ROLE:PRIMARY\nMOTORS:4\nPROFILE:1:regular_vcr\u{4}",
+            // Scripted but must never be requested.
+            CUSTOM_VALUES_FRAME,
+        ]);
+
+        let read = read_custom_profile_from(&mut transport).unwrap();
+
+        assert_eq!(read.case, "not_custom");
+        assert!(read.values.is_none(), "must not surface another profile's values");
+        assert_eq!(read.profile_name.as_deref(), Some("regular_vcr"));
+        assert_eq!(read.motors, Some(4));
+        assert_eq!(
+            transport.written(),
+            &["INFO\n".to_string()],
+            "PROFILE_GET must not be sent when the glove is not on Custom"
+        );
+    }
+
+    #[test]
+    fn read_returns_no_device_when_the_glove_answers_secondary() {
+        let mut transport = ScriptedTransport::new(vec![
+            "[MENU-TX] ROLE:SECONDARY\nMOTORS:4\nPROFILE:1:regular_vcr\u{4}",
+        ]);
+
+        let read = read_custom_profile_from(&mut transport).unwrap();
+
+        assert_eq!(read.case, "no_device");
+        assert!(read.values.is_none());
+    }
+
+    #[test]
+    fn read_returns_no_device_on_silence_rather_than_erroring() {
+        let mut transport = ScriptedTransport::new(vec![]);
+        let read = read_custom_profile_from(&mut transport).unwrap();
+        assert_eq!(read.case, "no_device");
+        assert!(read.values.is_none());
     }
 }

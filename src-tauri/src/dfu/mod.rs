@@ -73,6 +73,13 @@ pub use error::DfuError;
 // Firmware reading
 pub use firmware_reader::read_firmware_zip;
 
+// Firmware menu protocol — used by the Custom therapy profile flow.
+pub(crate) use menu::{read_custom_profile_from, CustomProfileRead};
+
+// Serial transport — the Tauri command boundary opens ports directly for the
+// Custom profile prefill read.
+pub(crate) use transport::{DfuTransport, SerialTransport};
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -13,6 +13,7 @@ use commands::dfu::{
     flash_dfu_firmware,
     flash_v3_firmware,
     is_device_in_bootloader,
+    read_custom_profile,
     set_device_profile,
     validate_firmware_package,
 };
@@ -50,6 +51,7 @@ fn main() {
             is_device_in_bootloader,
             validate_firmware_package,
             set_device_profile,
+            read_custom_profile,
             // Firmware cache commands
             download_firmware,
             get_cached_firmware,

@@ -10,8 +10,9 @@ use std::time::Duration;
 use tauri::ipc::Channel;
 
 use crate::dfu::{
-    configure_device_with_settings, find_nrf52_devices, find_supported_devices, upload_firmware,
-    DeviceIdentifier, DfuStage, Nrf52Device,
+    configure_device_with_settings, find_nrf52_devices, find_supported_devices,
+    read_custom_profile_from, upload_firmware, CustomProfileRead, DeviceIdentifier, DfuStage,
+    DfuTransport, Nrf52Device, SerialTransport,
 };
 use crate::settings::AdvancedSettings;
 
@@ -784,6 +785,56 @@ pub async fn set_device_profile(
     let _ = progress_task.join();
 
     result.map_err(|e| format!("{}", e))
+}
+
+/// Read Custom therapy profile values from the first connected PRIMARY glove.
+///
+/// Opens each enumerated application-mode device at the normal DFU baud rate
+/// (115200 — NEVER 1200, which is the nRF52 bootloader touch reset) and asks it
+/// INFO. The first device answering ROLE:PRIMARY decides the result.
+///
+/// Never errors on "nothing plugged in": the frontend needs to distinguish
+/// no-glove from read-failure, and both map to the "no_device" case.
+#[tauri::command]
+pub async fn read_custom_profile() -> Result<CustomProfileRead, String> {
+    tokio::task::spawn_blocking(|| {
+        for device in find_supported_devices() {
+            if device.in_bootloader {
+                continue;
+            }
+
+            let mut transport = match SerialTransport::open(&device.port) {
+                Ok(transport) => transport,
+                Err(e) => {
+                    eprintln!("[read_custom_profile] {} not readable: {}", device.port, e);
+                    continue;
+                }
+            };
+
+            // Boot logs can contain the word ERROR; clear them before parsing.
+            if let Err(e) = transport.clear_input() {
+                eprintln!("[read_custom_profile] clear_input failed: {}", e);
+            }
+
+            match read_custom_profile_from(&mut transport) {
+                Ok(read) if read.case != "no_device" => return read,
+                Ok(_) => continue,
+                Err(e) => {
+                    eprintln!("[read_custom_profile] {} read failed: {}", device.port, e);
+                    continue;
+                }
+            }
+        }
+
+        CustomProfileRead {
+            case: "no_device".to_string(),
+            values: None,
+            profile_name: None,
+            motors: None,
+        }
+    })
+    .await
+    .map_err(|e| format!("Custom profile read task panicked: {}", e))
 }
 
 /// Information about a firmware package.
