@@ -37,6 +37,7 @@ mod config;
 mod device;
 mod error;
 mod firmware_reader;
+mod menu;
 mod packet;
 mod protocol;
 mod slip;
