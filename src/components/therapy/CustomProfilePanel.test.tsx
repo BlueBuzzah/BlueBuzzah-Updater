@@ -98,9 +98,13 @@ describe('CustomProfilePanel', () => {
 
     render(<CustomProfilePanel />);
 
-    const derived = await screen.findByTestId('derived-timing');
-    expect(derived).toHaveTextContent('835 ms');
-    expect(derived).not.toHaveTextContent('668 ms');
+    // The element renders before the read resolves, showing both counts, so
+    // the assertion has to retry — finding the element is not enough.
+    await waitFor(() => {
+      const derived = screen.getByTestId('derived-timing');
+      expect(derived).toHaveTextContent('835 ms');
+      expect(derived).not.toHaveTextContent('668 ms');
+    });
   });
 
   it('shows the deviation banner and resets on demand', async () => {
