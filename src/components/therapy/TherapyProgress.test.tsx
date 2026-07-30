@@ -220,6 +220,30 @@ describe('TherapyProgress outcome reporting', () => {
     expect(onComplete.mock.calls[0][0].success).toBe(true);
   });
 
+  it('logs the backend message for a secondary rather than claiming a profile load', async () => {
+    // success_secondary also comes from the preflight role check, before
+    // anything is written, so the log must not assert a profile change.
+    mockConfigure.mockResolvedValue({
+      status: 'success_secondary',
+      message: 'This glove did not answer as the primary.',
+    });
+
+    render(
+      <TherapyProgress
+        profile="CUSTOM"
+        devices={[device('/dev/cu.b', 'Glove B')]}
+        onComplete={vi.fn()}
+        onProgressUpdate={vi.fn()}
+      />
+    );
+
+    await waitFor(() => {
+      const logs = useTherapyStore.getState().logs.join('\n');
+      expect(logs).toMatch(/did not answer as the primary/i);
+      expect(logs).not.toMatch(/profile loaded/i);
+    });
+  });
+
   it('states that parameters were not applied when no device answered primary', async () => {
     mockConfigure.mockResolvedValue({
       status: 'success_secondary',

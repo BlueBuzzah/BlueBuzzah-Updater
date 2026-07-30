@@ -184,6 +184,23 @@ describe('CustomProfilePanel', () => {
     expect(mockRead).toHaveBeenCalledTimes(2);
   });
 
+  // The command answers 'no_device' instead of rejecting, so a rejection is an
+  // IPC-level failure. Unhandled, it surfaced as a console error out of the
+  // effect; the panel must simply fall back to the defaults.
+  it('falls back to the defaults when the prefill read rejects', async () => {
+    mockRead.mockRejectedValue('IPC failure');
+
+    render(<CustomProfilePanel />);
+
+    await waitFor(() => expect(mockRead).toHaveBeenCalled());
+    expect(screen.getByLabelText(/burst duration/i)).toHaveValue(
+      CUSTOM_DEFAULTS.on
+    );
+    expect(
+      screen.queryByText(/Loaded from your primary glove/i)
+    ).not.toBeInTheDocument();
+  });
+
   it('persists edits to the settings store', async () => {
     const user = userEvent.setup();
     mockRead.mockResolvedValue({

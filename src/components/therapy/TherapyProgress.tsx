@@ -115,9 +115,12 @@ export function TherapyProgress({
 
         switch (outcome.status) {
           case 'success_secondary':
-            addLog(
-              `✓ ${device.label}: profile loaded. Custom parameters apply to the primary glove.`
-            );
+            // The backend's own message, never a fixed line: this status comes
+            // from two different points — the preflight role check, before
+            // anything is changed, and after PROFILE_LOAD has landed. Only the
+            // backend knows which, so hardcoding "profile loaded" here claims a
+            // change that may never have happened.
+            addLog(`✓ ${device.label}: ${outcome.message}`);
             break;
           case 'partial':
             addLog(`⚠ ${device.label}: ${outcome.message}`);
@@ -194,7 +197,7 @@ export function TherapyProgress({
       success: allSuccess,
       message: allSuccess
         ? allSecondary
-          ? 'Profile changed, but custom parameters were not applied — no glove answered as primary.'
+          ? 'Custom parameters were not applied — no glove answered as primary.'
           : `All devices configured with ${profileInfo?.name} profile`
         : 'Some devices failed to configure',
       deviceConfigs: results.map((r) => ({

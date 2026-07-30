@@ -78,6 +78,14 @@ const NUMERIC_FIELDS: CustomNumericField[] = [
 ];
 
 /**
+ * Fields the backend deserializes into integers (`u8`/`u16` in
+ * `src-tauri/src/settings.rs`). A decimal reaches serde as a float and is
+ * rejected at the Tauri boundary with a type error the user cannot act on, so
+ * it has to be caught here. ON/OFF/JITTER are `f32` and accept decimals.
+ */
+const INTEGER_FIELDS: CustomNumericField[] = ['ampMin', 'ampMax', 'session'];
+
+/**
  * Validate every field against the firmware bounds.
  *
  * @returns Human-readable messages, one per violation. Empty array means valid.
@@ -97,6 +105,9 @@ export function validateCustomParams(p: CustomProfileParams): string[] {
       errors.push(
         `${bounds.label} must be between ${bounds.min} and ${bounds.max} ${bounds.unit}.`
       );
+    }
+    if (INTEGER_FIELDS.includes(field) && !Number.isInteger(value)) {
+      errors.push(`${bounds.label} must be a whole number.`);
     }
   }
 

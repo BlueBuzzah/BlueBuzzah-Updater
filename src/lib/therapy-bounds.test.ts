@@ -95,6 +95,20 @@ describe('validateCustomParams', () => {
     const errors = validateCustomParams(withField('on', Number.NaN));
     expect(errors.length).toBeGreaterThan(0);
   });
+
+  // ampMin/ampMax/session deserialize into u8/u16, so a decimal that passes
+  // here fails at the Tauri boundary with an unactionable serde type error.
+  it.each(['ampMin', 'ampMax', 'session'] as const)(
+    'rejects a fractional %s',
+    (field) => {
+      const errors = validateCustomParams(withField(field, 70.5));
+      expect(errors.join(' ')).toMatch(/whole number/i);
+    }
+  );
+
+  it('accepts a fractional jitter, which the backend takes as f32', () => {
+    expect(validateCustomParams(withField('jitter', 23.5))).toEqual([]);
+  });
 });
 
 describe('isDeviatingFromDefaults', () => {

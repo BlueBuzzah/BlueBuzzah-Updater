@@ -60,6 +60,14 @@ export function CustomProfilePanel(): JSX.Element {
         // hardware, so a successful read overrides the persisted values.
         setSettings({ customProfile: result.values });
       }
+    } catch (error) {
+      // The command answers 'no_device' rather than rejecting for an absent or
+      // unreadable glove, so a rejection here is an IPC-level failure. Prefill
+      // is a convenience: leave `read` null so no prefill claim is made and the
+      // panel falls back to the defaults, rather than crashing the render with
+      // an unhandled rejection.
+      console.error('[CustomProfilePanel] prefill read failed:', error);
+      setRead(null);
     } finally {
       setIsReading(false);
     }
