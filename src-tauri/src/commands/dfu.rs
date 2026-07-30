@@ -819,7 +819,10 @@ pub async fn read_custom_profile() -> Result<CustomProfileRead, String> {
                 continue;
             }
 
-            let mut transport = match SerialTransport::open(&device.port) {
+            // Read-only: open without pulsing DTR, so querying a glove does not
+            // reboot it. `SerialTransport::open` resets the device by design
+            // (the DFU flow needs that); this query has no reason to.
+            let mut transport = match SerialTransport::open_for_query(&device.port) {
                 Ok(transport) => transport,
                 Err(e) => {
                     eprintln!("[read_custom_profile] {} not readable: {}", device.port, e);
