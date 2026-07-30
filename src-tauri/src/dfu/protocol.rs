@@ -1372,11 +1372,11 @@ pub fn configure_custom_profile<L: Fn(&str) + Clone>(
     let device = match wait_for_application_flexible(identifier, get_reboot_timeout()) {
         Ok(device) => device,
         Err(e) => {
-            return Ok(ProfileConfigOutcome::partial(format!(
-                "Profile loaded, but the device did not reappear after rebooting: {}. \
+            return Ok(ProfileConfigOutcome::partial_with_detail(
+                "Profile loaded, but the glove did not reappear after rebooting. \
                  It may still be running its previous custom settings.",
-                e
-            )))
+                e.to_string(),
+            ))
         }
     };
     log(&format!("Device reappeared on port: {}", device.port));
@@ -1384,20 +1384,20 @@ pub fn configure_custom_profile<L: Fn(&str) + Clone>(
     let mut transport = match SerialTransport::open(&device.port) {
         Ok(transport) => transport,
         Err(e) => {
-            return Ok(ProfileConfigOutcome::partial(format!(
-                "Profile loaded, but the reopened port could not be reached to confirm \
-                 parameters: {}. It may still be running its previous custom settings.",
-                e
-            )))
+            return Ok(ProfileConfigOutcome::partial_with_detail(
+                "Profile loaded, but its port could not be reopened to confirm the \
+                 parameters. It may still be running its previous custom settings.",
+                e.to_string(),
+            ))
         }
     };
 
     if let Err(e) = drain_boot_output(&mut transport) {
-        return Ok(ProfileConfigOutcome::partial(format!(
-            "Profile loaded, but the device's boot output could not be read to confirm \
-             parameters: {}. It may still be running its previous custom settings.",
-            e
-        )));
+        return Ok(ProfileConfigOutcome::partial_with_detail(
+            "Profile loaded, but its boot output could not be read to confirm the \
+             parameters. It may still be running its previous custom settings.",
+            e.to_string(),
+        ));
     }
     transport.clear_input().ok();
     std::thread::sleep(Duration::from_millis(100));

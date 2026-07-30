@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
+import { summarizeDeviceError } from '@/lib/error-messages';
 import { getProfileInfo } from '@/lib/therapy-profiles';
 import { useTherapyStore } from '@/stores/therapyStore';
 import type { Device, TherapyProfile, TherapyConfigResult } from '@/types';
@@ -115,14 +116,14 @@ export function TherapySuccess({
                         {config.outcome?.message}
                       </p>
                     )}
-                    {isPartial && (
+                    {isPartial && config.outcome?.message && (
                       <p className="text-xs text-destructive mt-1">
-                        {config.outcome?.message}
+                        {summarizeDeviceError(config.outcome.message)}
                       </p>
                     )}
                     {!config.success && config.error && (
                       <p className="text-xs text-destructive mt-1">
-                        {config.error}
+                        {summarizeDeviceError(config.error)}
                       </p>
                     )}
                   </div>

@@ -117,6 +117,9 @@ export function TherapyProgress({
             break;
           case 'partial':
             addLog(`⚠ ${device.label}: ${outcome.message}`);
+            if (outcome.detail) {
+              addLog(`   Detail: ${outcome.detail.replace(/\n/g, '\n   ')}`);
+            }
             setShowLogs(true); // Auto-expand logs — a partial result must not be scrolled past
             break;
           default:

@@ -257,7 +257,12 @@ pub fn read_custom_profile_from<T: DfuTransport>(
 pub struct ProfileConfigOutcome {
     /// "success" | "success_secondary" | "partial"
     pub status: String,
+    /// Short, human-readable line fit for a device card.
     pub message: String,
+    /// Raw diagnostic text — the device's echoed serial output and the
+    /// underlying error. Belongs in the log, never on a card: firmware
+    /// timeouts embed the entire boot stream, which is unreadable inline.
+    pub detail: Option<String>,
 }
 
 impl ProfileConfigOutcome {
@@ -265,6 +270,7 @@ impl ProfileConfigOutcome {
         Self {
             status: "success".to_string(),
             message: message.into(),
+            detail: None,
         }
     }
 
@@ -272,6 +278,16 @@ impl ProfileConfigOutcome {
         Self {
             status: "success_secondary".to_string(),
             message: message.into(),
+            detail: None,
+        }
+    }
+
+    /// A partial outcome whose diagnostic text is kept out of the card.
+    pub fn partial_with_detail(message: impl Into<String>, detail: impl Into<String>) -> Self {
+        Self {
+            status: "partial".to_string(),
+            message: message.into(),
+            detail: Some(detail.into()),
         }
     }
 
@@ -279,6 +295,7 @@ impl ProfileConfigOutcome {
         Self {
             status: "partial".to_string(),
             message: message.into(),
+            detail: None,
         }
     }
 }
@@ -315,6 +332,58 @@ pub fn build_custom_batch(p: &CustomProfileParams, current_amp_max: u8) -> Strin
         p.session,
         if p.mirror { 1 } else { 0 }
     )
+}
+
+/// How long to keep asking a freshly-rebooted glove whether its menu is up.
+///
+/// `drain_boot_output` stops after 500 ms of silence, which is not a reliable
+/// readiness test on v3: its boot-time motor diagnostics ("[DIAG] silk port 3
+/// (F2): MOTOR PRESENT") emit in bursts with gaps longer than that, so the
+/// drain returns while the device is still booting and the first menu command
+/// is swallowed. The only trustworthy readiness signal is the menu answering.
+pub const MENU_READY_TIMEOUT_MS: u64 = 20_000;
+
+/// One probe's share of that budget. Short enough to retry promptly, long
+/// enough for a real reply to arrive once the menu is finally listening.
+const MENU_READY_PROBE_MS: u64 = 1500;
+
+/// Poll `INFO` until the firmware menu answers, or the budget runs out.
+///
+/// Condition-based rather than time-based: a booting glove is indistinguishable
+/// from a silent one at any single instant, so ask repeatedly instead of
+/// guessing how long boot takes. Re-sending `INFO` during boot is harmless —
+/// the device is not yet dispatching commands, so it is simply ignored.
+///
+/// A device *rejection* returns immediately; only silence is retried.
+pub fn wait_for_menu_ready<T: DfuTransport>(
+    transport: &mut T,
+    timeout_ms: u64,
+) -> DfuResult<MenuResponse> {
+    wait_for_menu_ready_with_probe(transport, timeout_ms, MENU_READY_PROBE_MS)
+}
+
+/// `wait_for_menu_ready` with an explicit per-probe timeout, so tests can drive
+/// the retry loop without burning real seconds.
+pub fn wait_for_menu_ready_with_probe<T: DfuTransport>(
+    transport: &mut T,
+    timeout_ms: u64,
+    probe_ms: u64,
+) -> DfuResult<MenuResponse> {
+    let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+    let mut last_err = None;
+
+    while Instant::now() < deadline {
+        match send_menu_command(transport, "INFO", probe_ms) {
+            Ok(response) => return Ok(response),
+            // Firmware answered and said no — retrying will not change that.
+            Err(e) if is_device_rejection(&e) => return Err(e),
+            Err(e) => last_err = Some(e),
+        }
+    }
+
+    Err(last_err.unwrap_or(DfuError::ProfileConfigFailed {
+        reason: format!("Timeout waiting for menu response to INFO after {timeout_ms}ms"),
+    }))
 }
 
 /// Render a float without a trailing ".0" — `atof` accepts either, and the
@@ -415,14 +484,16 @@ pub fn write_custom_params<T: DfuTransport>(
     transport: &mut T,
     params: &CustomProfileParams,
 ) -> DfuResult<ProfileConfigOutcome> {
-    let info = match send_menu_command(transport, "INFO", MENU_COMMAND_TIMEOUT_MS) {
+    // The glove has just rebooted onto Custom and may still be running its boot
+    // diagnostics, so poll for menu readiness rather than assuming it is up.
+    let info = match wait_for_menu_ready(transport, MENU_READY_TIMEOUT_MS) {
         Ok(info) => info,
         Err(e) => {
-            return Ok(ProfileConfigOutcome::partial(format!(
-                "Profile loaded, but the device could not be reached to confirm its role: {}. \
+            return Ok(ProfileConfigOutcome::partial_with_detail(
+                "Profile loaded, but the glove never came back to confirm the parameters. \
                  It may still be running its previous custom settings.",
-                e
-            )))
+                e.to_string(),
+            ))
         }
     };
 
@@ -436,11 +507,11 @@ pub fn write_custom_params<T: DfuTransport>(
     let current = match send_menu_command(transport, "PROFILE_GET", MENU_COMMAND_TIMEOUT_MS) {
         Ok(current) => current,
         Err(e) => {
-            return Ok(ProfileConfigOutcome::partial(format!(
-                "Profile loaded, but the stored amplitudes could not be read: {}. \
+            return Ok(ProfileConfigOutcome::partial_with_detail(
+                "Profile loaded, but its stored amplitudes could not be read. \
                  It may still be running its previous custom settings.",
-                e
-            )))
+                e.to_string(),
+            ))
         }
     };
     let current_max = current
@@ -459,20 +530,21 @@ pub fn write_custom_params<T: DfuTransport>(
         if is_device_rejection(&e) {
             return Err(e);
         }
-        return Ok(ProfileConfigOutcome::partial(format!(
-            "Profile loaded, but the parameter write could not be confirmed: {}. \
+        return Ok(ProfileConfigOutcome::partial_with_detail(
+            "Profile loaded, but the parameter write could not be confirmed. \
              It may still be running its previous custom settings.",
-            e
-        )));
+            e.to_string(),
+        ));
     }
 
     let echo = match send_menu_command(transport, "PROFILE_GET", MENU_COMMAND_TIMEOUT_MS) {
         Ok(echo) => echo,
         Err(e) => {
-            return Ok(ProfileConfigOutcome::partial(format!(
-                "Profile loaded, but the parameters could not be confirmed: {}",
-                e
-            )))
+            return Ok(ProfileConfigOutcome::partial_with_detail(
+                "Profile loaded, but the parameters could not be confirmed. \
+                 It may still be running its previous custom settings.",
+                e.to_string(),
+            ))
         }
     };
 
@@ -840,6 +912,62 @@ SESSION:90\nAMPMIN:70\nAMPMAX:100\nPATTERN:rndp\nMIRROR:1\nJITTER:23.5\nFINGERS:
             "a PRIMARY glove must proceed to the profile load"
         );
         assert_eq!(transport.written(), &["INFO\n".to_string()]);
+    }
+
+    /// v3 boot emits motor diagnostics in bursts with gaps longer than
+    /// drain_boot_output's 500ms silence threshold, so the drain returns while
+    /// the glove is still booting and the first INFO is swallowed. Readiness
+    /// has to be probed, not assumed.
+    #[test]
+    fn menu_ready_poll_survives_boot_chatter_before_the_menu_answers() {
+        let mut transport = ScriptedTransport::new(vec![
+            "[DIAG] silk port 3 (F2): MOTOR PRESENT (STATUS=0xE4)",
+            "[DIAG] silk port 2 (F3): MOTOR PRESENT (STATUS=0xE4)",
+            "[MENU-TX] ROLE:PRIMARY\nMOTORS:4\nPROFILE:4:custom_vcr\u{4}",
+        ]);
+
+        let info = wait_for_menu_ready_with_probe(&mut transport, 20_000, 50)
+            .expect("boot chatter before the frame must not defeat the read");
+
+        assert_eq!(info.get("ROLE"), Some("PRIMARY"));
+        // Whether the frame arrives inside one probe or a later one depends on
+        // real serial timing; either way every write must be a bare INFO probe.
+        assert!(transport.written().iter().all(|w| w == "INFO\n"));
+    }
+
+    #[test]
+    fn menu_ready_poll_gives_up_at_its_deadline() {
+        let mut transport = ScriptedTransport::new(vec![]);
+        let err = wait_for_menu_ready(&mut transport, 300).unwrap_err();
+        assert!(format!("{}", err).to_lowercase().contains("timeout"));
+    }
+
+    #[test]
+    fn menu_ready_poll_returns_a_device_rejection_immediately() {
+        let mut transport = ScriptedTransport::new(vec![
+            "[MENU-TX] ERROR:Session must be stopped before loading a profile\u{4}",
+        ]);
+
+        let err = wait_for_menu_ready(&mut transport, 20_000).unwrap_err();
+
+        assert!(format!("{}", err).contains("Session must be stopped"));
+        assert_eq!(
+            transport.written().len(),
+            1,
+            "a rejection is final - it must not be retried"
+        );
+    }
+
+    #[test]
+    fn partial_outcomes_keep_raw_device_output_out_of_the_card_message() {
+        let outcome = ProfileConfigOutcome::partial_with_detail(
+            "Profile loaded, but the glove never came back to confirm the parameters.",
+            "Timeout waiting for menu response to INFO. Received: [DIAG] silk port 3 (F2)",
+        );
+
+        assert!(!outcome.message.contains("[DIAG]"));
+        assert!(!outcome.message.contains("Received:"));
+        assert!(outcome.detail.unwrap().contains("[DIAG]"));
     }
 
     #[test]

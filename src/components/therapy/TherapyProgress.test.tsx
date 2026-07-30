@@ -100,6 +100,33 @@ describe('TherapyProgress outcome reporting', () => {
     expect(logged).toContain('Role: SECONDARY');
   });
 
+  it('keeps a partial outcome detail out of the card and in the log', async () => {
+    mockConfigure.mockResolvedValue({
+      status: 'partial',
+      message: 'Profile loaded, but the glove never came back to confirm the parameters.',
+      detail:
+        'Timeout waiting for menu response to INFO. Received: [DIAG] silk port 3 (F2): MOTOR PRESENT (STATUS=0xE4)',
+    });
+    const onComplete = vi.fn();
+
+    render(
+      <TherapyProgress
+        profile="CUSTOM"
+        devices={[device('/dev/cu.a', 'Glove A')]}
+        onComplete={onComplete}
+        onProgressUpdate={vi.fn()}
+      />
+    );
+
+    await waitFor(() => expect(onComplete).toHaveBeenCalled());
+
+    const logged = useTherapyStore.getState().logs.join('\n');
+    expect(logged).toContain('MOTOR PRESENT (STATUS=0xE4)');
+    expect(
+      onComplete.mock.calls[0][0].deviceConfigs[0].outcome.message
+    ).not.toContain('[DIAG]');
+  });
+
   it('carries the backend outcome into the per-device result', async () => {
     const outcome = { status: 'partial' as const, message: 'not confirmed' };
     mockConfigure.mockResolvedValue(outcome);

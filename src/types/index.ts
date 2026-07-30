@@ -193,7 +193,14 @@ export type ProfileConfigStatus = 'success' | 'success_secondary' | 'partial';
 
 export interface ProfileConfigOutcome {
   status: ProfileConfigStatus;
+  /** Short, human-readable line fit for a device card. */
   message: string;
+  /**
+   * Raw diagnostic text — the device's echoed serial output and the underlying
+   * error. Belongs in the configuration log, never on a card: firmware
+   * timeouts embed the entire boot stream, which is unreadable inline.
+   */
+  detail?: string | null;
 }
 
 export type TherapyConfigStage =
