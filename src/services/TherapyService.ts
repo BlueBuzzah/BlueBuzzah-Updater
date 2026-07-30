@@ -31,6 +31,8 @@ function mapBackendStage(stage: string): TherapyConfigStage {
       return 'rebooting';
     case 'complete':
       return 'complete';
+    case 'partial':
+      return 'partial';
     case 'error':
       return 'error';
     default:

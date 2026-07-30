@@ -208,6 +208,8 @@ export type TherapyConfigStage =
   | 'sending'
   | 'rebooting'
   | 'complete'
+  /** Profile changed, parameters unconfirmed — not a success. */
+  | 'partial'
   | 'error';
 
 export interface TherapyConfigProgress {

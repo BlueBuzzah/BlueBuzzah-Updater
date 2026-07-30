@@ -104,8 +104,12 @@ export function TherapyProgress({
             });
             onProgressUpdate(device.path, progress);
 
-            // Log progress messages
-            addLog(`${device.label}: ${progress.message}`);
+            // Terminal stages carry the outcome message, which the switch below
+            // logs with its own status marker — logging it here too printed
+            // every outcome twice.
+            if (progress.stage !== 'complete' && progress.stage !== 'partial') {
+              addLog(`${device.label}: ${progress.message}`);
+            }
           }
         );
 
@@ -211,6 +215,7 @@ export function TherapyProgress({
     switch (progress.stage) {
       case 'complete':
         return <CheckCircle2 className="h-5 w-5 text-primary" />;
+      case 'partial':
       case 'error':
         return <XCircle className="h-5 w-5 text-destructive" />;
       default:
@@ -262,7 +267,7 @@ export function TherapyProgress({
             <Card
               key={device.path}
               className={
-                progress?.stage === 'error'
+                progress?.stage === 'error' || progress?.stage === 'partial'
                   ? 'border-destructive/50'
                   : progress?.stage === 'complete'
                   ? 'border-primary/50'
@@ -284,6 +289,9 @@ export function TherapyProgress({
                     {progress?.stage === 'error' && (
                       <Badge variant="destructive">Failed</Badge>
                     )}
+                    {progress?.stage === 'partial' && (
+                      <Badge variant="destructive">Partial</Badge>
+                    )}
                     {progress?.stage === 'complete' && (
                       <Badge variant="secondary">Configured</Badge>
                     )}
@@ -295,19 +303,22 @@ export function TherapyProgress({
                 <Progress
                   value={progress?.progress ?? 0}
                   className={`h-2 ${
-                    progress?.stage === 'error' ? '[&>div]:bg-destructive' : ''
+                    progress?.stage === 'error' || progress?.stage === 'partial'
+                      ? '[&>div]:bg-destructive'
+                      : ''
                   }`}
                 />
                 <p
                   className={`text-sm mt-2 ${
-                    progress?.stage === 'error'
+                    progress?.stage === 'error' || progress?.stage === 'partial'
                       ? 'text-destructive'
                       : 'text-muted-foreground'
                   }`}
                 >
                   {progress?.message ?? 'Waiting...'}
                 </p>
-                {progress?.stage === 'error' && (
+                {(progress?.stage === 'error' ||
+                  progress?.stage === 'partial') && (
                   <p className="text-xs text-muted-foreground mt-1">
                     Full device output is in the configuration log below.
                   </p>

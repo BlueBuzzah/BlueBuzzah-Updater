@@ -774,9 +774,18 @@ pub async fn set_device_profile(
                     // both stale and, for that case, simply untrue. The reboot
                     // is already reported from inside the flow, where it happens.
 
-                    // Send progress: complete
+                    // A partial gets its own stage. Reporting it as "complete"
+                    // let the progress screen badge it "Configured" - an
+                    // explicit success claim for a glove that is running its
+                    // previous override. success_secondary IS a success and
+                    // stays complete.
+                    let stage = if outcome.status == "partial" {
+                        "partial"
+                    } else {
+                        "complete"
+                    };
                     let _ = tx.send(ProfileProgressEvent {
-                        stage: "complete".to_string(),
+                        stage: stage.to_string(),
                         percent: 100.0,
                         message: outcome.message.clone(),
                     });

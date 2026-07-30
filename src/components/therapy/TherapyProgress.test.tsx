@@ -127,6 +127,40 @@ describe('TherapyProgress outcome reporting', () => {
     ).not.toContain('[DIAG]');
   });
 
+  // The progress screen must not claim success for a partial. A partial means
+  // the profile changed but the parameters did not - the glove is running its
+  // previous override - so a "Configured" badge there is an explicit false
+  // success claim on the very screen the safety design exists to protect.
+  it('marks a partial device as partial, not configured, on the progress card', async () => {
+    mockConfigure.mockImplementation(async (_device, _profile, onProgress) => {
+      onProgress?.({
+        devicePath: '/dev/cu.a',
+        stage: 'partial',
+        progress: 100,
+        message: 'Profile loaded, but the parameters could not be confirmed.',
+      });
+      return {
+        status: 'partial' as const,
+        message: 'Profile loaded, but the parameters could not be confirmed.',
+      };
+    });
+    const onComplete = vi.fn();
+
+    render(
+      <TherapyProgress
+        profile="CUSTOM"
+        devices={[device('/dev/cu.a', 'Glove A')]}
+        onComplete={onComplete}
+        onProgressUpdate={vi.fn()}
+      />
+    );
+
+    await waitFor(() => expect(onComplete).toHaveBeenCalled());
+
+    expect(screen.getByText('Partial')).toBeInTheDocument();
+    expect(screen.queryByText('Configured')).not.toBeInTheDocument();
+  });
+
   it('carries the backend outcome into the per-device result', async () => {
     const outcome = { status: 'partial' as const, message: 'not confirmed' };
     mockConfigure.mockResolvedValue(outcome);

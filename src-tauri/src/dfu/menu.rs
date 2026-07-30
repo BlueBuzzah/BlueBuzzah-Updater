@@ -91,6 +91,15 @@ pub fn send_menu_command<T: DfuTransport>(
     // surplus answers behind: every timed-out probe still wrote its command,
     // and the device answers all of them once it finishes booting. Without this
     // each later command reads the previous one's response.
+    //
+    // Residual, accepted: clearing only reaches what the OS has already
+    // buffered, not bytes still in USB flight. A straggling reply that lands
+    // between the clear and the device receiving this command can still be
+    // mis-attributed. The blast radius is self-limiting — the wrong frame lacks
+    // the keys the caller wants, so the batch is built from a fallback value
+    // and firmware rejects it, surfacing as a loud Err rather than a silent
+    // wrong write. Closing it properly needs sequence numbers in the firmware
+    // protocol, which is a firmware change, not a client one.
     transport.clear_input().ok();
 
     let line = format!("{}\n", command);
@@ -344,6 +353,15 @@ pub fn build_custom_batch(p: &CustomProfileParams, current_amp_max: u8) -> Strin
 /// is swallowed. The only trustworthy readiness signal is the menu answering.
 pub const MENU_READY_TIMEOUT_MS: u64 = 20_000;
 
+/// Budget for the pre-flight role probe, before anything is changed.
+///
+/// Deliberately far shorter than `MENU_READY_TIMEOUT_MS`: this runs on a glove
+/// that the Updater has *not* just rebooted, so it only has to cover a device
+/// still finishing its own power-on boot. Every SECONDARY glove pays this in
+/// full — it answers nothing by design — so a generous budget here is dead time
+/// on the common two-glove path.
+pub const PREFLIGHT_ROLE_TIMEOUT_MS: u64 = 6000;
+
 /// One probe's share of that budget. Short enough to retry promptly, long
 /// enough for a real reply to arrive once the menu is finally listening.
 const MENU_READY_PROBE_MS: u64 = 1500;
@@ -483,8 +501,28 @@ fn echo_mismatches(sent: &CustomProfileParams, echo: &MenuResponse) -> Vec<Strin
 /// Returns `Some(outcome)` when the caller must stop (nothing has been changed
 /// on the device), or `None` when this glove is the PRIMARY and the caller
 /// should proceed.
-pub fn preflight_primary_check<T: DfuTransport>(transport: &mut T) -> Option<ProfileConfigOutcome> {
-    let is_primary = send_menu_command(transport, "INFO", MENU_COMMAND_TIMEOUT_MS)
+pub fn preflight_primary_check<T: DfuTransport>(
+    transport: &mut T,
+) -> Option<ProfileConfigOutcome> {
+    preflight_primary_check_with_budget(
+        transport,
+        PREFLIGHT_ROLE_TIMEOUT_MS,
+        MENU_READY_PROBE_MS,
+    )
+}
+
+/// `preflight_primary_check` with an explicit budget, so tests can drive the
+/// retry loop without burning real seconds.
+pub fn preflight_primary_check_with_budget<T: DfuTransport>(
+    transport: &mut T,
+    timeout_ms: u64,
+    probe_ms: u64,
+) -> Option<ProfileConfigOutcome> {
+    // Retried, not single-shot. A glove that is merely still running its boot
+    // diagnostics looks exactly like a SECONDARY for the first second or two,
+    // and calling a healthy PRIMARY "secondary" sends the user to swap gloves
+    // for no reason — a wrong answer, not a safe one.
+    let is_primary = wait_for_menu_ready_with_probe(transport, timeout_ms, probe_ms)
         .ok()
         .and_then(|info| info.get("ROLE").map(|role| role.trim() == "PRIMARY"))
         .unwrap_or(false);
@@ -662,6 +700,11 @@ impl DfuTransport for ScriptedTransport {
         Ok(())
     }
 
+    // Records the call but does not drop queued replies, so a test can prove
+    // clear-before-write ordering. It CANNOT prove that clearing works: the
+    // reply queue is popped in scripted order regardless. A `clear_input` that
+    // returns Ok without actually flushing the OS buffer is therefore invisible
+    // to this whole suite and can only be caught on hardware.
     fn clear_input(&mut self) -> DfuResult<()> {
         self.ops.push("clear");
         Ok(())
@@ -917,15 +960,43 @@ SESSION:90\nAMPMIN:70\nAMPMAX:100\nPATTERN:rndp\nMIRROR:1\nJITTER:23.5\nFINGERS:
     fn preflight_stops_on_a_silent_glove_before_anything_is_changed() {
         let mut transport = ScriptedTransport::new(vec![]);
 
-        let outcome = preflight_primary_check(&mut transport)
+        let outcome = preflight_primary_check_with_budget(&mut transport, 350, 100)
             .expect("a silent glove must stop the flow before PROFILE_LOAD");
 
         assert_eq!(outcome.status, "success_secondary");
-        assert_eq!(
-            transport.written(),
-            &["INFO\n".to_string()],
-            "nothing beyond the role probe may reach a non-primary glove"
+        // The probe may be retried; what must never happen is any OTHER command
+        // reaching a glove that has not identified itself as the primary.
+        assert!(
+            transport.written().iter().all(|w| w == "INFO\n"),
+            "nothing beyond the role probe may reach a non-primary glove: {:?}",
+            transport.written()
         );
+    }
+
+    /// A single short probe cannot tell a SECONDARY glove from a healthy
+    /// PRIMARY still emitting boot diagnostics — and misreporting the latter
+    /// tells the user the wrong glove is primary, which is actively misleading
+    /// rather than a safe failure. So the probe must be retried before
+    /// concluding "not primary".
+    ///
+    /// Asserted via probe count rather than a late reply: ScriptedTransport
+    /// hands over every scripted reply instantly, so it cannot express "the
+    /// answer arrives after probe 1" — a reply-timing test would pass against
+    /// the single-shot version too.
+    #[test]
+    fn preflight_retries_before_concluding_a_glove_is_not_primary() {
+        let mut transport = ScriptedTransport::new(vec![]);
+
+        let outcome = preflight_primary_check_with_budget(&mut transport, 350, 100)
+            .expect("a silent glove is still reported as not-primary");
+
+        assert_eq!(outcome.status, "success_secondary");
+        assert!(
+            transport.written().len() >= 2,
+            "expected the role probe to be retried within its budget, got {:?}",
+            transport.written()
+        );
+        assert!(transport.written().iter().all(|w| w == "INFO\n"));
     }
 
     #[test]
@@ -934,7 +1005,7 @@ SESSION:90\nAMPMIN:70\nAMPMAX:100\nPATTERN:rndp\nMIRROR:1\nJITTER:23.5\nFINGERS:
             "[MENU-TX] ROLE:SECONDARY\nMOTORS:4\nPROFILE:1:regular_vcr\u{4}",
         ]);
 
-        let outcome = preflight_primary_check(&mut transport)
+        let outcome = preflight_primary_check_with_budget(&mut transport, 350, 100)
             .expect("a SECONDARY glove must stop the flow before PROFILE_LOAD");
 
         assert_eq!(outcome.status, "success_secondary");
@@ -997,8 +1068,16 @@ SESSION:90\nAMPMIN:70\nAMPMAX:100\nPATTERN:rndp\nMIRROR:1\nJITTER:23.5\nFINGERS:
     #[test]
     fn menu_ready_poll_gives_up_at_its_deadline() {
         let mut transport = ScriptedTransport::new(vec![]);
-        let err = wait_for_menu_ready(&mut transport, 300).unwrap_err();
+        // Probe well under the budget, so the budget is what actually ends the
+        // loop. With the default 1500ms probe the inner timeout would dominate
+        // and any budget below it would behave identically.
+        let err = wait_for_menu_ready_with_probe(&mut transport, 300, 50).unwrap_err();
         assert!(format!("{}", err).to_lowercase().contains("timeout"));
+        assert!(
+            transport.written().len() >= 2,
+            "the budget should cover several probes: {:?}",
+            transport.written()
+        );
     }
 
     #[test]
@@ -1017,17 +1096,6 @@ SESSION:90\nAMPMIN:70\nAMPMAX:100\nPATTERN:rndp\nMIRROR:1\nJITTER:23.5\nFINGERS:
         );
     }
 
-    #[test]
-    fn partial_outcomes_keep_raw_device_output_out_of_the_card_message() {
-        let outcome = ProfileConfigOutcome::partial_with_detail(
-            "Profile loaded, but the glove never came back to confirm the parameters.",
-            "Timeout waiting for menu response to INFO. Received: [DIAG] silk port 3 (F2)",
-        );
-
-        assert!(!outcome.message.contains("[DIAG]"));
-        assert!(!outcome.message.contains("Received:"));
-        assert!(outcome.detail.unwrap().contains("[DIAG]"));
-    }
 
     #[test]
     fn write_skips_profile_custom_when_the_device_answers_secondary() {

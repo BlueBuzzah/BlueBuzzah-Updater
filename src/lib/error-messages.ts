@@ -423,6 +423,10 @@ export function summarizeDeviceError(raw: string): string {
   if (!text) return 'Configuration failed';
 
   // Cut the echoed device output, keeping the sentence that introduces it.
+  // Coupled to the exact ". Received:" wording that `dfu/menu.rs` builds its
+  // timeout reasons with. If that wording changes, this silently stops cutting
+  // rather than failing, and raw device output reaches the card — so the two
+  // must be changed together.
   const echoIndex = text.search(/\.\s*Received:/i);
   const withoutEcho = echoIndex >= 0 ? text.slice(0, echoIndex + 1) : text;
 
