@@ -262,15 +262,24 @@ pub struct ProfileConfigOutcome {
 
 impl ProfileConfigOutcome {
     pub fn success(message: impl Into<String>) -> Self {
-        Self { status: "success".to_string(), message: message.into() }
+        Self {
+            status: "success".to_string(),
+            message: message.into(),
+        }
     }
 
     pub fn success_secondary(message: impl Into<String>) -> Self {
-        Self { status: "success_secondary".to_string(), message: message.into() }
+        Self {
+            status: "success_secondary".to_string(),
+            message: message.into(),
+        }
     }
 
     pub fn partial(message: impl Into<String>) -> Self {
-        Self { status: "partial".to_string(), message: message.into() }
+        Self {
+            status: "partial".to_string(),
+            message: message.into(),
+        }
     }
 }
 
@@ -343,7 +352,11 @@ fn echo_mismatches(sent: &CustomProfileParams, echo: &MenuResponse) -> Vec<Strin
     if echo.get("AMPMAX").and_then(|v| v.trim().parse::<u8>().ok()) != Some(sent.amp_max) {
         mismatches.push("AMPMAX".to_string());
     }
-    if echo.get("SESSION").and_then(|v| v.trim().parse::<u16>().ok()) != Some(sent.session) {
+    if echo
+        .get("SESSION")
+        .and_then(|v| v.trim().parse::<u16>().ok())
+        != Some(sent.session)
+    {
         mismatches.push("SESSION".to_string());
     }
     if echo.get("MIRROR").map(|v| v.trim() != "0") != Some(sent.mirror) {
@@ -366,6 +379,38 @@ fn echo_mismatches(sent: &CustomProfileParams, echo: &MenuResponse) -> Vec<Strin
 /// for every step except one: a device rejection (ERROR frame) replying to
 /// `PROFILE_CUSTOM` is a genuine "no, I didn't do that" from firmware, not a
 /// vanished device, and stays an `Err`.
+/// Ask a glove whether it is the PRIMARY, *before* anything is changed on it.
+///
+/// This check has to come first. `main.cpp` gates ALL menu dispatch on
+/// `deviceRole == DeviceRole::PRIMARY`, and `PROFILE_LOAD:4` is itself a menu
+/// command — so a SECONDARY glove ignores the profile load exactly as it
+/// ignores `INFO`. Checking the role only afterwards means the load times out
+/// and the role is never learned, turning the perfectly normal two-glove case
+/// into a hard failure.
+///
+/// Silence is the SECONDARY signal: a gated glove never answers at all, so
+/// there is no reply to distinguish it from an unresponsive one. The port was
+/// just opened successfully, so silence here means "not the primary".
+///
+/// Returns `Some(outcome)` when the caller must stop (nothing has been changed
+/// on the device), or `None` when this glove is the PRIMARY and the caller
+/// should proceed.
+pub fn preflight_primary_check<T: DfuTransport>(transport: &mut T) -> Option<ProfileConfigOutcome> {
+    let is_primary = send_menu_command(transport, "INFO", MENU_COMMAND_TIMEOUT_MS)
+        .ok()
+        .and_then(|info| info.get("ROLE").map(|role| role.trim() == "PRIMARY"))
+        .unwrap_or(false);
+
+    if is_primary {
+        return None;
+    }
+
+    Some(ProfileConfigOutcome::success_secondary(
+        "This glove did not answer as the primary. Custom parameters apply to \
+         the primary glove, which drives both.",
+    ))
+}
+
 pub fn write_custom_params<T: DfuTransport>(
     transport: &mut T,
     params: &CustomProfileParams,
@@ -642,7 +687,10 @@ SESSION:90\nAMPMIN:70\nAMPMAX:100\nPATTERN:rndp\nMIRROR:1\nJITTER:23.5\nFINGERS:
         let read = read_custom_profile_from(&mut transport).unwrap();
 
         assert_eq!(read.case, "not_custom");
-        assert!(read.values.is_none(), "must not surface another profile's values");
+        assert!(
+            read.values.is_none(),
+            "must not surface another profile's values"
+        );
         assert_eq!(read.profile_name.as_deref(), Some("regular_vcr"));
         assert_eq!(read.motors, Some(4));
         assert_eq!(
@@ -693,7 +741,12 @@ SESSION:90\nAMPMIN:70\nAMPMAX:100\nPATTERN:rndp\nMIRROR:1\nJITTER:23.5\nFINGERS:
     fn batch_omits_locked_and_out_of_scope_keys() {
         let batch = build_custom_batch(&target_params(), 100);
         for forbidden in ["TYPE", "FREQ", "PATTERN", "FINGERS"] {
-            assert!(!batch.contains(forbidden), "{} must not be sent: {}", forbidden, batch);
+            assert!(
+                !batch.contains(forbidden),
+                "{} must not be sent: {}",
+                forbidden,
+                batch
+            );
         }
         assert!(batch.starts_with("PROFILE_CUSTOM:"));
         assert!(batch.contains("ON:120"));
@@ -706,7 +759,11 @@ SESSION:90\nAMPMIN:70\nAMPMAX:100\nPATTERN:rndp\nMIRROR:1\nJITTER:23.5\nFINGERS:
     #[test]
     fn batch_sends_ampmin_first_when_the_target_min_fits_the_current_max() {
         // Device at 20/50, target 40/60: AMPMIN:40 <= current max 50, so it is safe first.
-        let params = CustomProfileParams { amp_min: 40, amp_max: 60, ..target_params() };
+        let params = CustomProfileParams {
+            amp_min: 40,
+            amp_max: 60,
+            ..target_params()
+        };
         let batch = build_custom_batch(&params, 50);
         let min_at = batch.find("AMPMIN").unwrap();
         let max_at = batch.find("AMPMAX").unwrap();
@@ -727,8 +784,62 @@ SESSION:90\nAMPMIN:70\nAMPMAX:100\nPATTERN:rndp\nMIRROR:1\nJITTER:23.5\nFINGERS:
     fn batch_fits_the_firmware_command_limits() {
         let batch = build_custom_batch(&target_params(), 100);
         // MAX_COMMAND_PARAMS is 16 and the working buffer is 256 bytes.
-        assert!(batch.len() < 200, "batch too long ({} bytes): {}", batch.len(), batch);
-        assert_eq!(batch.matches(':').count(), 14, "expected 7 KEY:VALUE pairs: {}", batch);
+        assert!(
+            batch.len() < 200,
+            "batch too long ({} bytes): {}",
+            batch.len(),
+            batch
+        );
+        assert_eq!(
+            batch.matches(':').count(),
+            14,
+            "expected 7 KEY:VALUE pairs: {}",
+            batch
+        );
+    }
+
+    /// The two-glove case. `PROFILE_LOAD:4` is itself a menu command, and
+    /// main.cpp gates menu dispatch on PRIMARY — so a SECONDARY glove ignores
+    /// the profile load and answers nothing. Checking the role only after the
+    /// load means the load times out first and the role is never learned.
+    #[test]
+    fn preflight_stops_on_a_silent_glove_before_anything_is_changed() {
+        let mut transport = ScriptedTransport::new(vec![]);
+
+        let outcome = preflight_primary_check(&mut transport)
+            .expect("a silent glove must stop the flow before PROFILE_LOAD");
+
+        assert_eq!(outcome.status, "success_secondary");
+        assert_eq!(
+            transport.written(),
+            &["INFO\n".to_string()],
+            "nothing beyond the role probe may reach a non-primary glove"
+        );
+    }
+
+    #[test]
+    fn preflight_stops_when_the_glove_answers_secondary() {
+        let mut transport = ScriptedTransport::new(vec![
+            "[MENU-TX] ROLE:SECONDARY\nMOTORS:4\nPROFILE:1:regular_vcr\u{4}",
+        ]);
+
+        let outcome = preflight_primary_check(&mut transport)
+            .expect("a SECONDARY glove must stop the flow before PROFILE_LOAD");
+
+        assert_eq!(outcome.status, "success_secondary");
+    }
+
+    #[test]
+    fn preflight_lets_a_primary_glove_proceed() {
+        let mut transport = ScriptedTransport::new(vec![
+            "[MENU-TX] ROLE:PRIMARY\nMOTORS:4\nPROFILE:1:regular_vcr\u{4}",
+        ]);
+
+        assert!(
+            preflight_primary_check(&mut transport).is_none(),
+            "a PRIMARY glove must proceed to the profile load"
+        );
+        assert_eq!(transport.written(), &["INFO\n".to_string()]);
     }
 
     #[test]
@@ -751,9 +862,9 @@ SESSION:90\nAMPMIN:70\nAMPMAX:100\nPATTERN:rndp\nMIRROR:1\nJITTER:23.5\nFINGERS:
     fn write_reports_success_when_the_echo_matches() {
         let mut transport = ScriptedTransport::new(vec![
             "[MENU-TX] ROLE:PRIMARY\nMOTORS:4\nPROFILE:4:custom_vcr\u{4}",
-            ECHO_MATCHING_FRAME,                       // pre-write read (current amplitudes)
-            "[MENU-TX] STATUS:CUSTOM_LOADED\u{4}",     // PROFILE_CUSTOM ack
-            ECHO_MATCHING_FRAME,                       // verifying read
+            ECHO_MATCHING_FRAME, // pre-write read (current amplitudes)
+            "[MENU-TX] STATUS:CUSTOM_LOADED\u{4}", // PROFILE_CUSTOM ack
+            ECHO_MATCHING_FRAME, // verifying read
         ]);
 
         let outcome = write_custom_params(&mut transport, &target_params()).unwrap();
@@ -830,7 +941,7 @@ MIRROR:1\nJITTER:23.5\nFINGERS:4\u{4}";
         let mut transport = ScriptedTransport::new(vec![
             "[MENU-TX] ROLE:PRIMARY\nMOTORS:4\nPROFILE:4:custom_vcr\u{4}",
             ECHO_MATCHING_FRAME, // pre-write read (current amplitudes)
-            // No reply to PROFILE_CUSTOM itself - the glove went silent.
+                                 // No reply to PROFILE_CUSTOM itself - the glove went silent.
         ]);
 
         let outcome = write_custom_params(&mut transport, &target_params()).unwrap();
