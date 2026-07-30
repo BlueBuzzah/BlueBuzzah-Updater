@@ -8,6 +8,7 @@ import type { TherapyProfileInfo } from '@/types';
  * - NOISY → noisy_vcr: Mirrored with 23.5% jitter
  * - HYBRID → hybrid_vcr: Non-mirrored with 23.5% jitter
  * - GENTLE → gentle: Lower amplitude, sequential pattern
+ * - CUSTOM → custom_vcr: User-editable parameters (profile ID 4)
  */
 export const THERAPY_PROFILES: TherapyProfileInfo[] = [
   {
@@ -29,6 +30,11 @@ export const THERAPY_PROFILES: TherapyProfileInfo[] = [
     id: 'GENTLE',
     name: 'Gentle',
     description: 'Lower amplitude with sequential pattern for sensitive users',
+  },
+  {
+    id: 'CUSTOM',
+    name: 'Custom',
+    description: 'Your own timing, amplitude, and session length',
   },
 ];
 

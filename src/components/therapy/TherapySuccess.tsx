@@ -7,7 +7,9 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
+import { summarizeDeviceError } from '@/lib/error-messages';
 import { getProfileInfo } from '@/lib/therapy-profiles';
 import { useTherapyStore } from '@/stores/therapyStore';
 import type { Device, TherapyProfile, TherapyConfigResult } from '@/types';
@@ -40,8 +42,36 @@ export function TherapySuccess({
   const [showLogs, setShowLogs] = useState(false);
 
   const profileInfo = getProfileInfo(profile);
-  const successCount = result.deviceConfigs.filter((c) => c.success).length;
+  // A partial device reports `success: true` — the profile change really did
+  // land — so it must be counted as its own outcome rather than folded into
+  // either bucket. Counting only `!success` produced "0 of 2 devices failed" on
+  // a screen that was simultaneously showing a Partial badge.
+  const partialCount = result.deviceConfigs.filter(
+    (c) => c.outcome?.status === 'partial'
+  ).length;
   const failCount = result.deviceConfigs.filter((c) => !c.success).length;
+  const successCount = result.deviceConfigs.filter(
+    (c) => c.success && c.outcome?.status !== 'partial'
+  ).length;
+
+  // Agrees with the total in "1 of 2 devices", not with the count.
+  const plural = (n: number) => (n === 1 ? 'device' : 'devices');
+
+  /** One sentence covering whichever problems actually occurred. */
+  const outcomeSummary = (() => {
+    const total = devices.length;
+
+    if (failCount > 0 && partialCount > 0) {
+      return `${failCount} of ${total} ${plural(total)} failed, and ${partialCount} finished only partially.`;
+    }
+    if (partialCount > 0) {
+      return `${partialCount} of ${total} ${plural(total)} finished only partially — the profile changed, but the parameters were not confirmed.`;
+    }
+    if (failCount === total) {
+      return 'All devices failed to configure.';
+    }
+    return `${failCount} of ${total} ${plural(total)} failed to configure.`;
+  })();
 
   const exportLogs = async () => {
     await copyToClipboard(logs.join('\n'), 'Configuration logs');
@@ -68,10 +98,8 @@ export function TherapySuccess({
               <XCircle className="h-10 w-10 text-destructive" />
             </div>
             <h2 className="text-2xl font-bold mb-2">Configuration Issues</h2>
-            <p className="text-muted-foreground">
-              {failCount === devices.length
-                ? 'All devices failed to configure.'
-                : `${failCount} of ${devices.length} device${failCount !== 1 ? 's' : ''} failed to configure.`}
+            <p className="text-muted-foreground" data-testid="outcome-summary">
+              {outcomeSummary}
             </p>
           </>
         )}
@@ -91,34 +119,57 @@ export function TherapySuccess({
           <CardTitle className="text-base">Configured Devices</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          {result.deviceConfigs.map((config) => (
-            <div
-              key={config.device.path}
-              className={`flex items-center justify-between p-3 rounded-lg ${
-                config.success ? 'bg-muted/50' : 'bg-destructive/10'
-              }`}
-            >
-              <div className="flex items-center gap-3">
-                <CircuitBoard className="h-5 w-5" />
-                <div>
-                  <p className="font-medium">{config.device.label}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {config.device.path}
-                  </p>
+          {result.deviceConfigs.map((config) => {
+            const isPartial = config.outcome?.status === 'partial';
+            const isSecondary = config.outcome?.status === 'success_secondary';
+
+            return (
+              <div
+                key={config.device.path}
+                className={`flex items-center justify-between p-3 rounded-lg ${
+                  config.success && !isPartial ? 'bg-muted/50' : 'bg-destructive/10'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <CircuitBoard className="h-5 w-5" />
+                  <div>
+                    <p className="font-medium">{config.device.label}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {config.device.path}
+                    </p>
+                    {isSecondary && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {config.outcome?.message}
+                      </p>
+                    )}
+                    {isPartial && config.outcome?.message && (
+                      <p className="text-xs text-destructive mt-1">
+                        {summarizeDeviceError(config.outcome.message)}
+                      </p>
+                    )}
+                    {!config.success && config.error && (
+                      <p className="text-xs text-destructive mt-1">
+                        {summarizeDeviceError(config.error)}
+                      </p>
+                    )}
+                  </div>
                 </div>
+                {isPartial ? (
+                  <div className="flex items-center gap-2">
+                    <Badge variant="destructive">Partial</Badge>
+                    <XCircle className="h-5 w-5 text-destructive" />
+                  </div>
+                ) : config.success ? (
+                  <CheckCircle2 className="h-5 w-5 text-primary" />
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <Badge variant="destructive">Failed</Badge>
+                    <XCircle className="h-5 w-5 text-destructive" />
+                  </div>
+                )}
               </div>
-              {config.success ? (
-                <CheckCircle2 className="h-5 w-5 text-primary" />
-              ) : (
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-destructive">
-                    {config.error || 'Failed'}
-                  </span>
-                  <XCircle className="h-5 w-5 text-destructive" />
-                </div>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </CardContent>
       </Card>
 

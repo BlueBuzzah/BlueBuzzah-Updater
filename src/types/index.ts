@@ -1,3 +1,7 @@
+import type { CustomProfileParams } from '@/lib/therapy-bounds';
+
+export type { CustomProfileParams };
+
 // Domain Models
 
 /** Hardware board family a firmware asset / device belongs to. */
@@ -113,6 +117,12 @@ export interface AdvancedSettings {
   debugMode: boolean;
   /** Selected therapy profile, persisted for convenience */
   selectedProfile?: TherapyProfile | null;
+  /**
+   * Custom profile parameters, persisted so bench tuning survives a restart.
+   * A successful read from a glove takes precedence over these — the device is
+   * the source of truth for what is actually on the hardware.
+   */
+  customProfile?: CustomProfileParams;
 }
 
 export interface WizardState {
@@ -145,7 +155,12 @@ export interface GitHubAsset {
 // Therapy Profile Types
 // ============================================================================
 
-export type TherapyProfile = 'REGULAR' | 'NOISY' | 'HYBRID' | 'GENTLE';
+export type TherapyProfile =
+  | 'REGULAR'
+  | 'NOISY'
+  | 'HYBRID'
+  | 'GENTLE'
+  | 'CUSTOM';
 
 export interface TherapyProfileInfo {
   id: TherapyProfile;
@@ -153,11 +168,48 @@ export interface TherapyProfileInfo {
   description: string;
 }
 
+/** Which of the three prefill situations a glove read landed in. */
+export type CustomProfileReadCase = 'custom' | 'not_custom' | 'no_device';
+
+/**
+ * Result of reading Custom parameters from a connected glove.
+ *
+ * `values` is populated ONLY for the 'custom' case. PROFILE_GET returns the
+ * values of whatever profile is loaded without saying which profile they belong
+ * to, so prefilling from a glove sitting on Regular would silently present
+ * another profile's timings as the user's custom settings.
+ */
+export interface CustomProfileRead {
+  case: CustomProfileReadCase;
+  values: CustomProfileParams | null;
+  /** Loaded profile name from INFO, e.g. "regular_vcr". Null when no device. */
+  profileName: string | null;
+  /** MAX_ACTUATORS reported by INFO. Null when no device. */
+  motors: number | null;
+}
+
+/** The three distinct results of a Custom profile configuration attempt. */
+export type ProfileConfigStatus = 'success' | 'success_secondary' | 'partial';
+
+export interface ProfileConfigOutcome {
+  status: ProfileConfigStatus;
+  /** Short, human-readable line fit for a device card. */
+  message: string;
+  /**
+   * Raw diagnostic text — the device's echoed serial output and the underlying
+   * error. Belongs in the configuration log, never on a card: firmware
+   * timeouts embed the entire boot stream, which is unreadable inline.
+   */
+  detail?: string | null;
+}
+
 export type TherapyConfigStage =
   | 'connecting'
   | 'sending'
   | 'rebooting'
   | 'complete'
+  /** Profile changed, parameters unconfirmed — not a success. */
+  | 'partial'
   | 'error';
 
 export interface TherapyConfigProgress {
@@ -178,6 +230,8 @@ export interface DeviceConfigResult {
   success: boolean;
   profile?: TherapyProfile;
   error?: string;
+  /** Present when the backend reported a distinct outcome (Custom profile). */
+  outcome?: ProfileConfigOutcome;
 }
 
 export interface TherapyState {

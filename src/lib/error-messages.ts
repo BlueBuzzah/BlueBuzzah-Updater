@@ -405,3 +405,35 @@ export function getErrorGuidanceForPlatform(
     resolutionSteps: filterStepsByPlatform(guidance.resolutionSteps, platform),
   };
 }
+
+/** Longest device-card error summary before it gets an ellipsis. */
+const MAX_SUMMARY_LENGTH = 160;
+
+/**
+ * Condense a raw backend error into one short line fit for a device card.
+ *
+ * Firmware timeouts embed the device's entire echoed serial stream after
+ * `Received:` — boot banners, BLE chatter, status blocks. That detail is
+ * genuinely useful when diagnosing, but it belongs in the copyable log, not
+ * splashed across a status card where it buries the one line that says what
+ * actually went wrong. Callers should log the raw text and display this.
+ */
+export function summarizeDeviceError(raw: string): string {
+  const text = (raw ?? '').trim();
+  if (!text) return 'Configuration failed';
+
+  // Cut the echoed device output, keeping the sentence that introduces it.
+  // Coupled to the exact ". Received:" wording that `dfu/menu.rs` builds its
+  // timeout reasons with. If that wording changes, this silently stops cutting
+  // rather than failing, and raw device output reaches the card — so the two
+  // must be changed together.
+  const echoIndex = text.search(/\.\s*Received:/i);
+  const withoutEcho = echoIndex >= 0 ? text.slice(0, echoIndex + 1) : text;
+
+  const firstLine = withoutEcho.split('\n')[0].trim();
+  if (!firstLine) return 'Configuration failed';
+
+  return firstLine.length > MAX_SUMMARY_LENGTH
+    ? `${firstLine.slice(0, MAX_SUMMARY_LENGTH - 1).trimEnd()}…`
+    : firstLine;
+}

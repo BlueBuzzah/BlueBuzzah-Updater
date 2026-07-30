@@ -1,3 +1,4 @@
+export { CustomProfilePanel } from './CustomProfilePanel';
 export { ProfileSelection } from './ProfileSelection';
 export { TherapyDeviceSelection } from './TherapyDeviceSelection';
 export { TherapyProgress } from './TherapyProgress';

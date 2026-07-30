@@ -1,3 +1,4 @@
+import { summarizeDeviceError } from './error-messages';
 import { describe, it, expect } from 'vitest';
 import {
   getErrorGuidance,
@@ -259,5 +260,46 @@ describe('getErrorGuidanceForPlatform', () => {
     const winGuidance = getErrorGuidanceForPlatform('Permission denied', 'windows');
     expect(macGuidance!.resolutionSteps.some(s => s.includes('admin/root'))).toBe(true);
     expect(winGuidance!.resolutionSteps.some(s => s.includes('admin/root'))).toBe(true);
+  });
+});
+
+describe('summarizeDeviceError', () => {
+  // The firmware echoes its whole serial boot/status stream back inside a
+  // timeout message. Rendering that verbatim on a device card is unreadable;
+  // the full text belongs in the copyable log instead.
+  const noisy =
+    'Timeout waiting for menu response to PROFILE_LOAD:4. Received: [BLE] UART service discovered, notifications enabled\n' +
+    ' [BLE] PRIMARY connection interval: 10.0ms [CONNECT] Handle: 1, Type: PRIMARY\n' +
+    ' [STATUS] Role: SECONDARY | State: READY';
+
+  it('drops the echoed device output after "Received:"', () => {
+    const summary = summarizeDeviceError(noisy);
+    expect(summary).toBe(
+      'Timeout waiting for menu response to PROFILE_LOAD:4.'
+    );
+    expect(summary).not.toContain('[BLE]');
+    expect(summary).not.toContain('\n');
+  });
+
+  it('keeps a short single-line message unchanged', () => {
+    expect(summarizeDeviceError('Device not found')).toBe('Device not found');
+  });
+
+  it('collapses a multi-line message to its first line', () => {
+    expect(summarizeDeviceError('Port busy\n  at foo\n  at bar')).toBe(
+      'Port busy'
+    );
+  });
+
+  it('truncates an overlong single line', () => {
+    const long = `Failed because ${'x'.repeat(400)}`;
+    const summary = summarizeDeviceError(long);
+    expect(summary.length).toBeLessThanOrEqual(160);
+    expect(summary.endsWith('…')).toBe(true);
+  });
+
+  it('falls back for an empty or whitespace-only message', () => {
+    expect(summarizeDeviceError('   ')).toBe('Configuration failed');
+    expect(summarizeDeviceError('')).toBe('Configuration failed');
   });
 });

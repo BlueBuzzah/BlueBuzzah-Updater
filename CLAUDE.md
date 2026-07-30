@@ -53,6 +53,10 @@ Frontend flow: `src/components/wizard/` (FirmwareSelection → DeviceSelection �
 - Boot markers in `drain_boot_output`: `[READY]`, `[INIT]`, `[BOOT]`, `BlueBuzzah`
 - Firmware distribution: `FirmwareService.ts` fetches `https://api.github.com/repos/BlueBuzzah/BlueBuzzah-Firmware/releases`; asset name determines board — `NRF_ASSET_PATTERN` (`BlueBuzzah-Firmware-<tag>-<sha>.zip`) is the Nordic DFU package (v2), `V3_ASSET_PATTERN` (`BlueBuzzah-Firmware-v3-<tag>-<sha>.zip`) is the v3 package. 60 req/hr unauthenticated.
 - v3 manifest schema (`esp/manifest.rs`) is produced by BlueBuzzah-Firmware `scripts/package_penta.py`; keep the two in sync on any manifest field change.
+- Menu protocol (Custom therapy profile): the Updater sends `INFO`, `PROFILE_LOAD:4`, `PROFILE_GET`, and `PROFILE_CUSTOM:KEY:VALUE…` over app-mode serial and parses the `[MENU-TX] KEY:VALUE\n…\x04` frame (`dfu/menu.rs`). This works only because those commands are absent from firmware `INTERNAL_MESSAGES` (`include/internal_messages.h` — the single definition site, shared by `src/menu_controller.cpp` and the native test) — adding any of them there silently severs the Updater from the device, which is why `test_menu_controller` guards it.
+- Custom parameter bounds are duplicated in `src/lib/therapy-bounds.ts` from firmware `include/config.h:197-206`. Firmware remains the sole validator; the TS table only constrains inputs and cannot widen what the device accepts.
+- `PROFILE_GET` does not identify which profile its values belong to. Always ask `INFO` first and only read values when it reports `PROFILE:4:…`.
+- `setParameter` validates `AMPMIN` against the stored `amplitudeMax` and vice versa, so `build_custom_batch` orders the two keys from the device's current values. Reordering them unconditionally reintroduces a rejected batch.
 
 ## Gotchas
 
@@ -66,6 +70,7 @@ Frontend flow: `src/components/wizard/` (FirmwareSelection → DeviceSelection �
 - **Format detection**: a firmware zip's `manifest.json` has `manifest_version` for v3 or a top-level `manifest` key for Nordic — never feed one reader the other's zip.
 - **Cache keying**: `cache.rs` keys entries `(version, board)` as `version::board`; nrf52 keeps legacy `{version}.zip` filenames on disk, other boards use `{version}-{board}.zip`.
 - **Batch flashing is single-board only**: mixing hardware versions (one v2 + one v3) in the same run is unsupported — enforced by a UI guard in `DeviceSelection` and a defensive guard in `InstallationProgress`. Two devices of the same version flash fine.
+- **Custom profile writes are two-phase and reboot the device**: `PROFILE_CUSTOM` is rejected unless Custom is already loaded, and `PROFILE_LOAD` reboots. Phase 2 therefore reacquires the port via `wait_for_application_flexible` between the two. A partial outcome (profile loaded, parameters unconfirmed) must never be reported as success.
 
 ## Conventions
 

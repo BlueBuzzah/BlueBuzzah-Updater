@@ -26,11 +26,15 @@ use super::device::{
 };
 use super::error::{DfuError, DfuResult};
 use super::firmware_reader::read_firmware_zip;
+use super::menu::{
+    preflight_primary_check, send_menu_command, write_custom_params, ProfileConfigOutcome,
+};
 use super::packet::{
     build_firmware_data_packet, build_init_packet, build_start_dfu_packet, build_stop_data_packet,
     reset_sequence_number, HciAck, HciSlipDecoder, FIRMWARE_CHUNK_SIZE, IMAGE_TYPE_APPLICATION,
 };
 use super::transport::{DfuTransport, SerialTransport};
+use crate::settings::CustomProfileParams;
 
 /// DFU progress stages for UI feedback.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -113,11 +117,7 @@ impl DfuStage {
             DfuStage::Starting => "Starting firmware transfer...".into(),
             DfuStage::SendingInit => "Sending initialization data...".into(),
             DfuStage::Uploading { sent, total } => {
-                let percent = if *total == 0 {
-                    0
-                } else {
-                    (sent * 100) / total
-                };
+                let percent = if *total == 0 { 0 } else { (sent * 100) / total };
                 format!("Uploading firmware... {}%", percent)
             }
             DfuStage::Finalizing => "Finalizing transfer...".into(),
@@ -222,10 +222,7 @@ impl<T: DfuTransport, L: Fn(&str)> HciDfuProtocol<T, L> {
                 Ok(ack) => {
                     // Log recovery if we had to retry
                     if attempt > 0 {
-                        (self.log)(&format!(
-                            "Recovered after {} retry attempt(s)",
-                            attempt
-                        ));
+                        (self.log)(&format!("Recovered after {} retry attempt(s)", attempt));
                     }
                     (self.log)(&format!("Received ACK: seq={}", ack.ack_number));
                     return Ok(());
@@ -253,10 +250,7 @@ impl<T: DfuTransport, L: Fn(&str)> HciDfuProtocol<T, L> {
                 Err(e) => {
                     // Non-retriable error, or max retries exhausted
                     if attempt > 0 {
-                        (self.log)(&format!(
-                            "Failed after {} retry attempt(s): {}",
-                            attempt, e
-                        ));
+                        (self.log)(&format!("Failed after {} retry attempt(s): {}", attempt, e));
                     }
                     return Err(e);
                 }
@@ -563,21 +557,32 @@ where
         message: format!("Post-reboot port snapshot: {}", snapshot_ports()),
     });
     on_progress(DfuStage::Log {
-        message: format!("Scanning for device in application mode (timeout: {}ms)...", get_reboot_timeout()),
+        message: format!(
+            "Scanning for device in application mode (timeout: {}ms)...",
+            get_reboot_timeout()
+        ),
     });
     let app_device = wait_for_application_flexible(&device_identifier, get_reboot_timeout())?;
     on_progress(DfuStage::Log {
-        message: format!("Device found on port {} | snapshot: {}", app_device.port, snapshot_ports()),
+        message: format!(
+            "Device found on port {} | snapshot: {}",
+            app_device.port,
+            snapshot_ports()
+        ),
     });
 
     // Step 10: Configure device role (instrumented)
     on_progress(DfuStage::ConfiguringRole);
     let role_started = std::time::Instant::now();
-    let role_result = configure_device_role_flexible(&app_device.port, device_role, &device_identifier)
-        .map_err(|e| match e {
-            DfuError::RoleConfigFailed { .. } => e,
-            other => DfuError::RoleConfigFailed { reason: other.to_string() },
-        });
+    let role_result =
+        configure_device_role_flexible(&app_device.port, device_role, &device_identifier).map_err(
+            |e| match e {
+                DfuError::RoleConfigFailed { .. } => e,
+                other => DfuError::RoleConfigFailed {
+                    reason: other.to_string(),
+                },
+            },
+        );
     on_progress(DfuStage::Log {
         message: format!(
             "Role config finished in {}ms (ok={}) | snapshot: {}",
@@ -718,7 +723,10 @@ pub(crate) fn configure_device_role_flexible(
             // Re-wait for device and capture updated port
             if let Ok(device) = wait_for_application_flexible(identifier, 5000) {
                 if device.port != current_port {
-                    eprintln!("[configure_device_role] Device reappeared on new port: {}", device.port);
+                    eprintln!(
+                        "[configure_device_role] Device reappeared on new port: {}",
+                        device.port
+                    );
                 }
                 current_port = device.port;
             }
@@ -891,7 +899,11 @@ fn drain_boot_output(transport: &mut SerialTransport) -> DfuResult<bool> {
 ///
 /// Note: For flexible device tracking, use `configure_device_profile_flexible()` instead.
 #[allow(dead_code)]
-pub fn configure_device_profile(port_name: &str, profile: &str, serial_number: &str) -> DfuResult<()> {
+pub fn configure_device_profile(
+    port_name: &str,
+    profile: &str,
+    serial_number: &str,
+) -> DfuResult<()> {
     let identifier = DeviceIdentifier::Serial {
         serial: serial_number.to_string(),
         vid: super::config::ADAFRUIT_VID,
@@ -1054,9 +1066,7 @@ fn send_setting_command<L: Fn(&str)>(
 ) -> DfuResult<()> {
     // Parse command to create human-readable log message
     let trimmed = command.trim();
-    let (setting_name, setting_value) = trimmed
-        .split_once(':')
-        .unwrap_or((trimmed, "unknown"));
+    let (setting_name, setting_value) = trimmed.split_once(':').unwrap_or((trimmed, "unknown"));
 
     let friendly_name = match setting_name {
         "THERAPY_LED_OFF" => "Disable LED During Therapy",
@@ -1285,6 +1295,117 @@ fn configure_device_with_settings_inner<L: Fn(&str)>(
             }
         ),
     })
+}
+
+// =============================================================================
+// Custom Profile Configuration (two-phase)
+// =============================================================================
+
+/// Load the Custom profile and write its parameters.
+///
+/// Two phases are unavoidable: `PROFILE_CUSTOM` is rejected unless Custom is
+/// already the loaded profile (menu_controller.cpp:664) and `PROFILE_LOAD`
+/// reboots the device (menu_controller.cpp:597).
+///
+/// 1. the advanced-settings pre-commands, exactly as the preset path sends them
+/// 2. `PROFILE_LOAD:4` — the device answers STATUS:REBOOTING, then resets
+/// 3. `wait_for_application_flexible` reacquires it on its (possibly new) port
+/// 4. `write_custom_params` handles INFO / role gating / write / verify
+///
+/// Step 3 is where Windows COM renumbering lives, and it reuses the existing
+/// re-enumeration handling unchanged — nothing new to build here.
+pub fn configure_custom_profile<L: Fn(&str) + Clone>(
+    port_name: &str,
+    params: &CustomProfileParams,
+    pre_profile_commands: &[String],
+    identifier: &DeviceIdentifier,
+    log: L,
+) -> DfuResult<ProfileConfigOutcome> {
+    log(&format!("Opening serial port: {}", port_name));
+    let mut transport = SerialTransport::open(port_name)?;
+
+    if !transport.is_healthy() {
+        return Err(DfuError::DeviceDisconnected {
+            operation: "custom profile configuration health check".to_string(),
+        });
+    }
+
+    log("Draining boot output...");
+    drain_boot_output(&mut transport)?;
+    transport.clear_input().ok();
+    std::thread::sleep(Duration::from_millis(100));
+
+    if !pre_profile_commands.is_empty() {
+        log(&format!(
+            "Sending {} advanced setting command(s)...",
+            pre_profile_commands.len()
+        ));
+        for command in pre_profile_commands {
+            send_setting_command(&mut transport, command, &log)?;
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    // Role first, before anything is changed. PROFILE_LOAD:4 is itself a menu
+    // command and main.cpp gates menu dispatch on PRIMARY, so a SECONDARY glove
+    // ignores it and answers nothing — asking the role afterwards would mean
+    // the load times out before we ever learn we were talking to a secondary.
+    if let Some(outcome) = preflight_primary_check(&mut transport) {
+        // Not logged here: the caller reports every outcome once, and echoing
+        // it from inside the flow duplicated every line in the user's log.
+        return Ok(outcome);
+    }
+
+    log("Loading Custom profile (device will reboot)...");
+    send_menu_command(&mut transport, "PROFILE_LOAD:4", PROFILE_CONFIG_TIMEOUT_MS)?;
+    drop(transport);
+
+    // Point of no return: the device has ACKed PROFILE_LOAD and is now
+    // irrevocably rebooting onto the Custom profile, carrying whatever
+    // parameter override it held before. From here on the profile change has
+    // landed on the device whether or not anything below succeeds, so no
+    // failure may escape as `Err` — that would tell the caller the operation
+    // failed when the glove has, in fact, already changed profiles. Every
+    // failure from here on must become `Ok(partial)` instead.
+    log("Waiting for device to reboot...");
+    std::thread::sleep(Duration::from_millis(get_reboot_settle_delay()));
+
+    let device = match wait_for_application_flexible(identifier, get_reboot_timeout()) {
+        Ok(device) => device,
+        Err(e) => {
+            return Ok(ProfileConfigOutcome::partial_with_detail(
+                "Profile loaded, but the glove did not reappear after rebooting. \
+                 It may still be running its previous custom settings.",
+                e.to_string(),
+            ))
+        }
+    };
+    log(&format!("Device reappeared on port: {}", device.port));
+
+    let mut transport = match SerialTransport::open(&device.port) {
+        Ok(transport) => transport,
+        Err(e) => {
+            return Ok(ProfileConfigOutcome::partial_with_detail(
+                "Profile loaded, but its port could not be reopened to confirm the \
+                 parameters. It may still be running its previous custom settings.",
+                e.to_string(),
+            ))
+        }
+    };
+
+    if let Err(e) = drain_boot_output(&mut transport) {
+        return Ok(ProfileConfigOutcome::partial_with_detail(
+            "Profile loaded, but its boot output could not be read to confirm the \
+             parameters. It may still be running its previous custom settings.",
+            e.to_string(),
+        ));
+    }
+    transport.clear_input().ok();
+    std::thread::sleep(Duration::from_millis(100));
+
+    log("Writing custom parameters...");
+    let outcome = write_custom_params(&mut transport, params)?;
+    Ok(outcome)
 }
 
 #[cfg(test)]

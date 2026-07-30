@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -9,6 +10,7 @@ import {
 } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
+import { summarizeDeviceError } from '@/lib/error-messages';
 import { getProfileInfo } from '@/lib/therapy-profiles';
 import { therapyService } from '@/services/TherapyService';
 import { useTherapyStore } from '@/stores/therapyStore';
@@ -17,6 +19,7 @@ import type {
   TherapyProfile,
   TherapyConfigProgress,
   TherapyConfigResult,
+  ProfileConfigOutcome,
 } from '@/types';
 import {
   CheckCircle2,
@@ -78,6 +81,7 @@ export function TherapyProgress({
       device: Device;
       success: boolean;
       error?: string;
+      outcome?: ProfileConfigOutcome;
     }[] = [];
 
     for (const device of devices) {
@@ -89,24 +93,60 @@ export function TherapyProgress({
 
       addLog(`Starting configuration for ${device.label}...`);
       try {
-        await therapyService.configureProfile(device, profile, (progress) => {
-          setDeviceProgress((prev) => {
-            const next = new Map(prev);
-            next.set(device.path, progress);
-            return next;
-          });
-          onProgressUpdate(device.path, progress);
+        const outcome = await therapyService.configureProfile(
+          device,
+          profile,
+          (progress) => {
+            setDeviceProgress((prev) => {
+              const next = new Map(prev);
+              next.set(device.path, progress);
+              return next;
+            });
+            onProgressUpdate(device.path, progress);
 
-          // Log progress messages
-          addLog(`${device.label}: ${progress.message}`);
-        });
+            // Terminal stages carry the outcome message, which the switch below
+            // logs with its own status marker — logging it here too printed
+            // every outcome twice.
+            if (progress.stage !== 'complete' && progress.stage !== 'partial') {
+              addLog(`${device.label}: ${progress.message}`);
+            }
+          }
+        );
 
-        addLog(`✓ Successfully configured ${device.label}`);
-        results.push({ device, success: true });
+        switch (outcome.status) {
+          case 'success_secondary':
+            // The backend's own message, never a fixed line: this status comes
+            // from two different points — the preflight role check, before
+            // anything is changed, and after PROFILE_LOAD has landed. Only the
+            // backend knows which, so hardcoding "profile loaded" here claims a
+            // change that may never have happened.
+            addLog(`✓ ${device.label}: ${outcome.message}`);
+            break;
+          case 'partial':
+            addLog(`⚠ ${device.label}: ${outcome.message}`);
+            if (outcome.detail) {
+              addLog(`   Detail: ${outcome.detail.replace(/\n/g, '\n   ')}`);
+            }
+            setShowLogs(true); // Auto-expand logs — a partial result must not be scrolled past
+            break;
+          default:
+            addLog(`✓ Successfully configured ${device.label}`);
+        }
+
+        results.push({ device, success: true, outcome });
         setConfiguredCount((c) => c + 1);
       } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : 'Configuration failed';
+        // Tauri rejects an invoke with the command's Err payload verbatim — a
+        // plain string for `Result<_, String>`, never an Error. Testing only
+        // for Error therefore throws away every backend diagnostic and leaves
+        // the user with an unexplained failure.
+        const errorDetail =
+          error instanceof Error
+            ? error.message
+            : typeof error === 'string' && error.trim()
+            ? error
+            : 'Configuration failed';
+        const errorSummary = summarizeDeviceError(errorDetail);
 
         setDeviceProgress((prev) => {
           const next = new Map(prev);
@@ -114,23 +154,33 @@ export function TherapyProgress({
             devicePath: device.path,
             stage: 'error',
             progress: 0,
-            message: errorMessage,
+            message: errorSummary,
           });
           return next;
         });
 
-        addLog(`✗ Error configuring ${device.label}: ${errorMessage}`);
+        // Card gets the one-line summary; the log keeps every byte the device
+        // sent back, so it stays diagnosable and copyable after the fact.
+        addLog(`✗ Error configuring ${device.label}: ${errorSummary}`);
+        if (errorDetail !== errorSummary) {
+          addLog(`   Detail: ${errorDetail.replace(/\n/g, '\n   ')}`);
+        }
         setShowLogs(true); // Auto-expand logs on error
 
         results.push({
           device,
           success: false,
-          error: errorMessage,
+          error: errorSummary,
         });
       }
     }
 
-    const allSuccess = results.every((r) => r.success);
+    const allSuccess = results.every(
+      (r) => r.success && r.outcome?.status !== 'partial'
+    );
+    const allSecondary =
+      results.length > 0 &&
+      results.every((r) => r.outcome?.status === 'success_secondary');
 
     if (cancelledRef.current) {
       addLog('Configuration cancelled');
@@ -146,13 +196,16 @@ export function TherapyProgress({
     onComplete({
       success: allSuccess,
       message: allSuccess
-        ? `All devices configured with ${profileInfo?.name} profile`
+        ? allSecondary
+          ? 'Custom parameters were not applied — no glove answered as primary.'
+          : `All devices configured with ${profileInfo?.name} profile`
         : 'Some devices failed to configure',
       deviceConfigs: results.map((r) => ({
         device: r.device,
         success: r.success,
         profile: r.success ? profile : undefined,
         error: r.error,
+        outcome: r.outcome,
       })),
     });
   };
@@ -165,6 +218,7 @@ export function TherapyProgress({
     switch (progress.stage) {
       case 'complete':
         return <CheckCircle2 className="h-5 w-5 text-primary" />;
+      case 'partial':
       case 'error':
         return <XCircle className="h-5 w-5 text-destructive" />;
       default:
@@ -216,7 +270,7 @@ export function TherapyProgress({
             <Card
               key={device.path}
               className={
-                progress?.stage === 'error'
+                progress?.stage === 'error' || progress?.stage === 'partial'
                   ? 'border-destructive/50'
                   : progress?.stage === 'complete'
                   ? 'border-primary/50'
@@ -234,25 +288,44 @@ export function TherapyProgress({
                       </CardDescription>
                     </div>
                   </div>
-                  {getStageIcon(progress)}
+                  <div className="flex items-center gap-2">
+                    {progress?.stage === 'error' && (
+                      <Badge variant="destructive">Failed</Badge>
+                    )}
+                    {progress?.stage === 'partial' && (
+                      <Badge variant="destructive">Partial</Badge>
+                    )}
+                    {progress?.stage === 'complete' && (
+                      <Badge variant="secondary">Configured</Badge>
+                    )}
+                    {getStageIcon(progress)}
+                  </div>
                 </div>
               </CardHeader>
               <CardContent>
                 <Progress
                   value={progress?.progress ?? 0}
                   className={`h-2 ${
-                    progress?.stage === 'error' ? '[&>div]:bg-destructive' : ''
+                    progress?.stage === 'error' || progress?.stage === 'partial'
+                      ? '[&>div]:bg-destructive'
+                      : ''
                   }`}
                 />
                 <p
                   className={`text-sm mt-2 ${
-                    progress?.stage === 'error'
+                    progress?.stage === 'error' || progress?.stage === 'partial'
                       ? 'text-destructive'
                       : 'text-muted-foreground'
                   }`}
                 >
                   {progress?.message ?? 'Waiting...'}
                 </p>
+                {(progress?.stage === 'error' ||
+                  progress?.stage === 'partial') && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Full device output is in the configuration log below.
+                  </p>
+                )}
               </CardContent>
             </Card>
           );

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useSettingsStore } from './settingsStore';
 import { invoke } from '@tauri-apps/api/core';
+import { CUSTOM_DEFAULTS } from '@/lib/therapy-bounds';
 
 describe('settingsStore', () => {
   beforeEach(() => {
@@ -67,6 +68,19 @@ describe('settingsStore', () => {
       useSettingsStore.getState().reset();
 
       expect(useSettingsStore.getState().loadError).toBeNull();
+    });
+  });
+
+  describe('custom profile persistence', () => {
+    it('stores custom profile params in settings', () => {
+      const params = { ...CUSTOM_DEFAULTS, on: 120, mirror: true };
+      useSettingsStore.getState().setSettings({ customProfile: params });
+      expect(useSettingsStore.getState().settings.customProfile).toEqual(params);
+    });
+
+    it('accepts CUSTOM as a selected profile', () => {
+      useSettingsStore.getState().setSelectedProfile('CUSTOM');
+      expect(useSettingsStore.getState().settings.selectedProfile).toBe('CUSTOM');
     });
   });
 });

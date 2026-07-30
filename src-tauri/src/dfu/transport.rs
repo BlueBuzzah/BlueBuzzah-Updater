@@ -10,10 +10,10 @@ use serialport::SerialPort;
 
 #[allow(unused_imports)]
 use super::config::{
-    get_touch_wait_multiplier, DFU_BAUD_RATE, MAX_BOOTLOADER_RESET_RETRIES,
-    MAX_PORT_OPEN_RETRIES, MAX_TOUCH_OPEN_RETRIES, MAX_TOUCH_RETRIES,
-    PORT_OPEN_BASE_DELAY_MS, PORT_OPEN_MAX_DELAY_MS, PORT_OPEN_TIMEOUT_MS,
-    SERIAL_READ_TIMEOUT, TOUCH_RETRY_DELAY_MS, BOOTLOADER_RESET_RETRY_DELAY_MS,
+    get_touch_wait_multiplier, BOOTLOADER_RESET_RETRY_DELAY_MS, DFU_BAUD_RATE,
+    MAX_BOOTLOADER_RESET_RETRIES, MAX_PORT_OPEN_RETRIES, MAX_TOUCH_OPEN_RETRIES, MAX_TOUCH_RETRIES,
+    PORT_OPEN_BASE_DELAY_MS, PORT_OPEN_MAX_DELAY_MS, PORT_OPEN_TIMEOUT_MS, SERIAL_READ_TIMEOUT,
+    TOUCH_RETRY_DELAY_MS,
 };
 use super::error::{DfuError, DfuResult};
 
@@ -67,12 +67,61 @@ impl SerialTransport {
         Self::open_with_baud(port_name, DFU_BAUD_RATE)
     }
 
+    /// Open a serial port for a read-only query, without pulsing the device's
+    /// auto-reset line.
+    ///
+    /// `open_with_baud` deliberately toggles DTR because the DFU flow *wants* a
+    /// reset — it is how the bootloader is made ready. DTR drives the auto-reset
+    /// path on these boards, so that toggle reboots the glove on every open,
+    /// which is pure cost for a query that only reads parameters: the caller
+    /// then has to sit through a boot it caused itself.
+    ///
+    /// This variant asserts neither DTR nor RTS. On the classic ESP auto-reset
+    /// circuit those two lines drive GPIO0 and EN, so leaving both low is the
+    /// "don't touch the reset pins" posture.
+    ///
+    /// Caveat worth knowing before trusting it: some platforms (macOS in
+    /// particular) assert DTR themselves when a tty is opened, before any of
+    /// this code runs. Removing the explicit pulse removes *our* reset; whether
+    /// the device still reboots from the OS-level assert has to be confirmed on
+    /// hardware. v2 and v3 may also differ here — the ESP32-S3's native
+    /// USB-JTAG/Serial has the ROM interpret DTR/RTS rather than wiring them to
+    /// a physical reset pin.
+    pub fn open_for_query(port_name: &str) -> DfuResult<Self> {
+        let normalized_name = normalize_port_name(port_name);
+
+        let mut port = open_port_with_retry(
+            &normalized_name,
+            DFU_BAUD_RATE,
+            Some(SERIAL_READ_TIMEOUT),
+            MAX_PORT_OPEN_RETRIES,
+            port_name,
+        )?;
+
+        // Drop both control lines rather than pulsing them.
+        if let Err(e) = port.write_data_terminal_ready(false) {
+            eprintln!("[DFU] Warning: clearing DTR failed during query open: {}", e);
+        }
+        if let Err(e) = port.write_request_to_send(false) {
+            eprintln!("[DFU] Warning: clearing RTS failed during query open: {}", e);
+        }
+
+        // Brief settle, then discard anything the open itself shook loose.
+        std::thread::sleep(Duration::from_millis(100));
+        port.clear(serialport::ClearBuffer::Input).ok();
+
+        Ok(Self { port })
+    }
+
     /// Open a serial port with a specific baud rate.
     ///
     /// Includes retry logic to handle transient connectivity failures during
     /// USB device re-enumeration (e.g., entering bootloader mode). This is
     /// especially important on Windows where devices appear in port enumeration
     /// before the driver is fully ready, but benefits all platforms.
+    ///
+    /// NOTE: this pulses DTR and therefore **resets the device**. That is
+    /// intentional for the DFU flow. Use `open_for_query` for read-only work.
     pub fn open_with_baud(port_name: &str, baud_rate: u32) -> DfuResult<Self> {
         let normalized_name = normalize_port_name(port_name);
 
@@ -86,11 +135,17 @@ impl SerialTransport {
 
         // DTR toggle to reset connection state — ensures bootloader is ready
         if let Err(e) = port.write_data_terminal_ready(false) {
-            eprintln!("[DFU] Warning: DTR toggle (false) failed during port open: {}", e);
+            eprintln!(
+                "[DFU] Warning: DTR toggle (false) failed during port open: {}",
+                e
+            );
         }
         std::thread::sleep(Duration::from_millis(50));
         if let Err(e) = port.write_data_terminal_ready(true) {
-            eprintln!("[DFU] Warning: DTR toggle (true) failed during port open: {}", e);
+            eprintln!(
+                "[DFU] Warning: DTR toggle (true) failed during port open: {}",
+                e
+            );
         }
 
         // Allow port to stabilize after DTR toggle
@@ -146,13 +201,15 @@ impl SerialTransport {
         )?;
 
         // Set DTR=True immediately after opening
-        port.write_data_terminal_ready(true).map_err(DfuError::Serial)?;
+        port.write_data_terminal_ready(true)
+            .map_err(DfuError::Serial)?;
 
         // Wait 50ms for the signal to be recognized
         std::thread::sleep(Duration::from_millis(50));
 
         // Set DTR=False - the high-to-low transition triggers the bootloader
-        port.write_data_terminal_ready(false).map_err(DfuError::Serial)?;
+        port.write_data_terminal_ready(false)
+            .map_err(DfuError::Serial)?;
 
         // Close the port
         drop(port);
@@ -214,15 +271,24 @@ impl SerialTransport {
 
         // Toggle DTR to reset the bootloader state
         if let Err(e) = port.write_data_terminal_ready(false) {
-            eprintln!("[DFU] Warning: DTR toggle (false) failed during bootloader reset: {}", e);
+            eprintln!(
+                "[DFU] Warning: DTR toggle (false) failed during bootloader reset: {}",
+                e
+            );
         }
         std::thread::sleep(Duration::from_millis(50));
         if let Err(e) = port.write_data_terminal_ready(true) {
-            eprintln!("[DFU] Warning: DTR toggle (true) failed during bootloader reset: {}", e);
+            eprintln!(
+                "[DFU] Warning: DTR toggle (true) failed during bootloader reset: {}",
+                e
+            );
         }
         std::thread::sleep(Duration::from_millis(50));
         if let Err(e) = port.write_data_terminal_ready(false) {
-            eprintln!("[DFU] Warning: DTR toggle (false) failed during bootloader reset: {}", e);
+            eprintln!(
+                "[DFU] Warning: DTR toggle (false) failed during bootloader reset: {}",
+                e
+            );
         }
 
         // Close the port
@@ -255,7 +321,12 @@ impl DfuTransport for SerialTransport {
             Ok(n) => Ok(n),
             Err(e) if e.kind() == std::io::ErrorKind::TimedOut => Ok(0),
             Err(e) => {
-                eprintln!("[DFU] [read] os_code_hint={:?} kind={:?} msg={}", e.raw_os_error(), e.kind(), e);
+                eprintln!(
+                    "[DFU] [read] os_code_hint={:?} kind={:?} msg={}",
+                    e.raw_os_error(),
+                    e.kind(),
+                    e
+                );
                 Err(DfuError::Io(e))
             }
         }
@@ -266,7 +337,9 @@ impl DfuTransport for SerialTransport {
     }
 
     fn clear_input(&mut self) -> DfuResult<()> {
-        self.port.clear(serialport::ClearBuffer::Input).map_err(DfuError::Serial)
+        self.port
+            .clear(serialport::ClearBuffer::Input)
+            .map_err(DfuError::Serial)
     }
 
     fn keep_alive(&mut self) -> DfuResult<()> {
@@ -400,12 +473,10 @@ fn open_port_with_timeout(
 
         match rx.recv_timeout(Duration::from_millis(PORT_OPEN_TIMEOUT_MS)) {
             Ok(result) => result,
-            Err(_) => {
-                Err(serialport::Error::new(
-                    serialport::ErrorKind::Io(std::io::ErrorKind::TimedOut),
-                    "Port open timed out (Windows driver initialization delay)",
-                ))
-            }
+            Err(_) => Err(serialport::Error::new(
+                serialport::ErrorKind::Io(std::io::ErrorKind::TimedOut),
+                "Port open timed out (Windows driver initialization delay)",
+            )),
         }
     }
 
@@ -451,18 +522,30 @@ fn open_port_with_retry(
                 if attempt > 0 {
                     eprintln!(
                         "[DFU] Port {} opened successfully on attempt {}/{}",
-                        display_port, attempt + 1, max_retries
+                        display_port,
+                        attempt + 1,
+                        max_retries
                     );
                 }
                 return Ok(port);
             }
             Err(e) => {
-                eprintln!("[DFU] {}", describe_serial_error(&format!("open {display_port} attempt {}/{}", attempt + 1, max_retries), &e));
+                eprintln!(
+                    "[DFU] {}",
+                    describe_serial_error(
+                        &format!(
+                            "open {display_port} attempt {}/{}",
+                            attempt + 1,
+                            max_retries
+                        ),
+                        &e
+                    )
+                );
                 let err_str = e.to_string().to_lowercase();
 
                 // Check if error is transient (includes timeout from our wrapper)
-                let is_transient = is_transient_port_error(&err_str)
-                    || err_str.contains("timed out");
+                let is_transient =
+                    is_transient_port_error(&err_str) || err_str.contains("timed out");
 
                 if is_transient && attempt < max_retries - 1 {
                     // Exponential backoff: 200, 400, 800, 1000, 1000, ...
@@ -473,7 +556,11 @@ fn open_port_with_retry(
                     if attempt >= 2 {
                         eprintln!(
                             "[DFU] Port {} open attempt {}/{} failed ({}), retrying in {}ms...",
-                            display_port, attempt + 1, max_retries, err_str, delay
+                            display_port,
+                            attempt + 1,
+                            max_retries,
+                            err_str,
+                            delay
                         );
                     }
                     std::thread::sleep(Duration::from_millis(delay));
@@ -545,19 +632,27 @@ mod tests {
         );
         let out = describe_serial_error("role-config open", &err);
         assert!(out.contains("role-config open"), "missing context: {out}");
-        assert!(out.contains("semaphore timeout period has expired"), "missing msg: {out}");
+        assert!(
+            out.contains("semaphore timeout period has expired"),
+            "missing msg: {out}"
+        );
         assert!(out.contains("kind="), "missing kind: {out}");
     }
 
     #[test]
     fn semaphore_timeout_is_transient_port_error() {
         // Windows ERROR_SEM_TIMEOUT surfaces as this exact message.
-        assert!(is_transient_port_error("the semaphore timeout period has expired"));
+        assert!(is_transient_port_error(
+            "the semaphore timeout period has expired"
+        ));
     }
 
     #[test]
     fn test_normalize_port_name_passthrough() {
-        assert_eq!(normalize_port_name("/dev/cu.usbmodem1234"), "/dev/cu.usbmodem1234");
+        assert_eq!(
+            normalize_port_name("/dev/cu.usbmodem1234"),
+            "/dev/cu.usbmodem1234"
+        );
         assert_eq!(normalize_port_name("COM1"), "COM1");
     }
 

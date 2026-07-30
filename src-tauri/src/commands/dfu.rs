@@ -10,8 +10,10 @@ use std::time::Duration;
 use tauri::ipc::Channel;
 
 use crate::dfu::{
-    configure_device_with_settings, find_nrf52_devices, find_supported_devices, upload_firmware,
-    DeviceIdentifier, DfuStage, Nrf52Device,
+    configure_custom_profile, configure_device_with_settings, find_nrf52_devices,
+    find_supported_devices, read_custom_profile_from, upload_firmware, CustomProfileRead,
+    DeviceIdentifier, DfuError, DfuStage, DfuTransport, Nrf52Device, ProfileConfigOutcome,
+    SerialTransport,
 };
 use crate::settings::AdvancedSettings;
 
@@ -82,10 +84,7 @@ fn is_operation_retriable(error: &str) -> bool {
 /// then falls back to port match, then any single compatible device.
 ///
 /// Polls briefly (3 attempts, 500ms apart) in case the device is still re-enumerating.
-fn find_device_port_for_retry(
-    original_port: &str,
-    serial_number: Option<&str>,
-) -> Option<String> {
+fn find_device_port_for_retry(original_port: &str, serial_number: Option<&str>) -> Option<String> {
     // Platform-aware polling budget: Windows USB driver re-enumeration is slower
     // and needs more time, especially with multiple devices on the same host controller.
     #[cfg(target_os = "windows")]
@@ -253,10 +252,7 @@ pub async fn detect_dfu_devices() -> Result<Vec<DfuDevice>, String> {
             }
         };
 
-        let mut devices: Vec<DfuDevice> = raw_devices
-            .into_iter()
-            .map(DfuDevice::from)
-            .collect();
+        let mut devices: Vec<DfuDevice> = raw_devices.into_iter().map(DfuDevice::from).collect();
 
         // Count occurrences of each label
         let mut label_counts: std::collections::HashMap<String, usize> =
@@ -382,8 +378,7 @@ pub async fn flash_dfu_firmware(
                         sent: None,
                         total: None,
                         percent: -1.0,
-                        message: "Device not found during re-scan, using original port"
-                            .to_string(),
+                        message: "Device not found during re-scan, using original port".to_string(),
                     });
                     serial_port.clone()
                 }
@@ -607,6 +602,19 @@ pub async fn cancel_dfu_flash() -> Result<(), String> {
     Ok(())
 }
 
+/// Pick the device to configure, by port, from the enumerated candidates.
+///
+/// Callers must pass `find_supported_devices()`, NOT `find_nrf52_devices()`.
+/// Therapy configuration speaks the firmware menu over app-mode serial, and that
+/// protocol is identical on v2 (nRF52) and v3 (ESP32-S3) — there is nothing
+/// Nordic-specific about it. Narrowing the candidates to `board == "nrf52"`
+/// makes every v3 glove fail with "Device not found" before the command emits a
+/// single progress event, which reads to the user as an instant, unexplained
+/// "Configuration failed".
+fn select_device_for_config(devices: Vec<Nrf52Device>, port: &str) -> Option<Nrf52Device> {
+    devices.into_iter().find(|d| d.port == port)
+}
+
 /// Progress event sent to the frontend during profile configuration.
 #[derive(Debug, Clone, Serialize)]
 pub struct ProfileProgressEvent {
@@ -638,15 +646,11 @@ pub async fn set_device_profile(
     profile: String,
     advanced_settings: Option<AdvancedSettings>,
     progress: Channel<ProfileProgressEvent>,
-) -> Result<(), String> {
+) -> Result<ProfileConfigOutcome, String> {
     // Get device info and create identifier for tracking
     let device = tokio::task::spawn_blocking({
         let port = serial_port.clone();
-        move || {
-            find_nrf52_devices()
-                .into_iter()
-                .find(|d| d.port == port)
-        }
+        move || select_device_for_config(find_supported_devices(), &port)
     })
     .await
     .map_err(|e| format!("Failed to find device: {}", e))?
@@ -702,6 +706,8 @@ pub async fn set_device_profile(
             .map(|s| s.has_non_default_settings())
             .unwrap_or(false);
 
+    let custom_params = advanced_settings.as_ref().and_then(|s| s.custom_profile);
+
     // Run profile configuration in a blocking task
     let result = tokio::task::spawn_blocking({
         let serial_port = serial_port.clone();
@@ -731,14 +737,25 @@ pub async fn set_device_profile(
                 });
             };
 
-            // Configure the profile (with or without advanced settings)
-            let config_result = if pre_commands.is_empty() {
-                // No advanced settings - use original function with logging
-                let identifier = device_identifier.clone();
-                configure_device_with_settings(&serial_port, &profile, &[], &identifier, log)
+            // Configure the profile: Custom takes its own two-phase path,
+            // since configure_device_with_settings only matches the four
+            // preset names and would reject "CUSTOM".
+            let identifier = device_identifier.clone();
+            let config_result = if profile.eq_ignore_ascii_case("CUSTOM") {
+                match custom_params {
+                    Some(params) => configure_custom_profile(
+                        &serial_port,
+                        &params,
+                        &pre_commands,
+                        &identifier,
+                        log,
+                    ),
+                    None => Err(DfuError::ProfileConfigFailed {
+                        reason: "Custom profile selected but no parameters were provided"
+                            .to_string(),
+                    }),
+                }
             } else {
-                // Has advanced settings - use new function with logging
-                let identifier = device_identifier.clone();
                 configure_device_with_settings(
                     &serial_port,
                     &profile,
@@ -746,22 +763,31 @@ pub async fn set_device_profile(
                     &identifier,
                     log,
                 )
+                .map(|()| ProfileConfigOutcome::success(format!("Profile set to {}", profile)))
             };
 
             match &config_result {
-                Ok(()) => {
-                    // Send progress: rebooting (already handled internally, but we signal it)
-                    let _ = tx.send(ProfileProgressEvent {
-                        stage: "rebooting".to_string(),
-                        percent: 70.0,
-                        message: "Waiting for device to restart...".to_string(),
-                    });
+                Ok(outcome) => {
+                    // No "rebooting" event here: by this point the operation has
+                    // finished, and a glove that answered SECONDARY was never
+                    // rebooted at all. Announcing a restart after the fact is
+                    // both stale and, for that case, simply untrue. The reboot
+                    // is already reported from inside the flow, where it happens.
 
-                    // Send progress: complete
+                    // A partial gets its own stage. Reporting it as "complete"
+                    // let the progress screen badge it "Configured" - an
+                    // explicit success claim for a glove that is running its
+                    // previous override. success_secondary IS a success and
+                    // stays complete.
+                    let stage = if outcome.status == "partial" {
+                        "partial"
+                    } else {
+                        "complete"
+                    };
                     let _ = tx.send(ProfileProgressEvent {
-                        stage: "complete".to_string(),
+                        stage: stage.to_string(),
                         percent: 100.0,
-                        message: format!("Profile set to {}", profile),
+                        message: outcome.message.clone(),
                     });
                 }
                 Err(e) => {
@@ -786,6 +812,59 @@ pub async fn set_device_profile(
     result.map_err(|e| format!("{}", e))
 }
 
+/// Read Custom therapy profile values from the first connected PRIMARY glove.
+///
+/// Opens each enumerated application-mode device at the normal DFU baud rate
+/// (115200 — NEVER 1200, which is the nRF52 bootloader touch reset) and asks it
+/// INFO. The first device answering ROLE:PRIMARY decides the result.
+///
+/// Never errors on "nothing plugged in": the frontend needs to distinguish
+/// no-glove from read-failure, and both map to the "no_device" case.
+#[tauri::command]
+pub async fn read_custom_profile() -> Result<CustomProfileRead, String> {
+    tokio::task::spawn_blocking(|| {
+        for device in find_supported_devices() {
+            if device.in_bootloader {
+                continue;
+            }
+
+            // Read-only: open without pulsing DTR, so querying a glove does not
+            // reboot it. `SerialTransport::open` resets the device by design
+            // (the DFU flow needs that); this query has no reason to.
+            let mut transport = match SerialTransport::open_for_query(&device.port) {
+                Ok(transport) => transport,
+                Err(e) => {
+                    eprintln!("[read_custom_profile] {} not readable: {}", device.port, e);
+                    continue;
+                }
+            };
+
+            // Boot logs can contain the word ERROR; clear them before parsing.
+            if let Err(e) = transport.clear_input() {
+                eprintln!("[read_custom_profile] clear_input failed: {}", e);
+            }
+
+            match read_custom_profile_from(&mut transport) {
+                Ok(read) if read.case != "no_device" => return read,
+                Ok(_) => continue,
+                Err(e) => {
+                    eprintln!("[read_custom_profile] {} read failed: {}", device.port, e);
+                    continue;
+                }
+            }
+        }
+
+        CustomProfileRead {
+            case: "no_device".to_string(),
+            values: None,
+            profile_name: None,
+            motors: None,
+        }
+    })
+    .await
+    .map_err(|e| format!("Custom profile read task panicked: {}", e))
+}
+
 /// Information about a firmware package.
 #[derive(Debug, Clone, Serialize)]
 pub struct FirmwareInfo {
@@ -805,25 +884,82 @@ pub struct FirmwareInfo {
 mod tests {
     use super::*;
 
+    fn device_on(port: &str, board: &str) -> Nrf52Device {
+        Nrf52Device {
+            port: port.to_string(),
+            vid: 0x303A,
+            pid: 0x1001,
+            serial_number: None,
+            in_bootloader: false,
+            product_name: None,
+            manufacturer: None,
+            board: board.to_string(),
+        }
+    }
+
+    /// Therapy configuration talks to the firmware menu over app-mode serial,
+    /// which is identical on v2 (nRF52) and v3 (ESP32-S3). Selecting the device
+    /// to configure must therefore accept every supported board — narrowing it
+    /// to Nordic makes `set_device_profile` fail on a v3 glove with
+    /// "Device not found" before it emits a single progress event.
+    #[test]
+    fn therapy_device_selection_accepts_a_v3_board() {
+        let devices = vec![
+            device_on("/dev/cu.usbmodem1101", "esp32s3"),
+            device_on("/dev/cu.usbmodem9999", "nrf52"),
+        ];
+
+        let found = select_device_for_config(devices, "/dev/cu.usbmodem1101");
+
+        assert!(
+            found.is_some(),
+            "a v3 (esp32s3) glove must be configurable for therapy"
+        );
+        assert_eq!(found.unwrap().board, "esp32s3");
+    }
+
+    #[test]
+    fn therapy_device_selection_still_accepts_a_v2_board() {
+        let devices = vec![device_on("/dev/cu.usbmodem5678", "nrf52")];
+        let found = select_device_for_config(devices, "/dev/cu.usbmodem5678");
+        assert_eq!(
+            found.expect("v2 glove must stay configurable").board,
+            "nrf52"
+        );
+    }
+
+    #[test]
+    fn therapy_device_selection_returns_none_for_an_absent_port() {
+        let devices = vec![device_on("/dev/cu.usbmodem1101", "esp32s3")];
+        assert!(select_device_for_config(devices, "/dev/cu.usbmodemZZZZ").is_none());
+    }
+
     #[test]
     fn role_config_failure_does_not_trigger_reflash() {
         // A role-config-phase failure means the flash already succeeded.
         // It must NOT be operation-retriable (which would re-erase + re-transfer).
         let msg = "Failed to configure device role: Serial port error: The semaphore timeout period has expired";
-        assert!(!is_operation_retriable(msg), "role-config failure must not re-flash");
+        assert!(
+            !is_operation_retriable(msg),
+            "role-config failure must not re-flash"
+        );
     }
 
     #[test]
     fn role_config_failed_display_is_not_operation_retriable() {
         // Locks the Display("Failed to configure device role: ...") -> guard contract.
-        let err = crate::dfu::DfuError::RoleConfigFailed { reason: "semaphore timeout".to_string() };
+        let err = crate::dfu::DfuError::RoleConfigFailed {
+            reason: "semaphore timeout".to_string(),
+        };
         assert!(!is_operation_retriable(&err.to_string()));
     }
 
     #[test]
     fn genuine_bootloader_timeout_still_retriable() {
         // Regression guard: real flash-phase failures must still retry.
-        assert!(is_operation_retriable("Bootloader not found within 30000ms"));
+        assert!(is_operation_retriable(
+            "Bootloader not found within 30000ms"
+        ));
     }
 
     #[test]
