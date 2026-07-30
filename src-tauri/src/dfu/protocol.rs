@@ -1351,7 +1351,8 @@ pub fn configure_custom_profile<L: Fn(&str) + Clone>(
     // ignores it and answers nothing — asking the role afterwards would mean
     // the load times out before we ever learn we were talking to a secondary.
     if let Some(outcome) = preflight_primary_check(&mut transport) {
-        log(&outcome.message);
+        // Not logged here: the caller reports every outcome once, and echoing
+        // it from inside the flow duplicated every line in the user's log.
         return Ok(outcome);
     }
 
@@ -1404,7 +1405,6 @@ pub fn configure_custom_profile<L: Fn(&str) + Clone>(
 
     log("Writing custom parameters...");
     let outcome = write_custom_params(&mut transport, params)?;
-    log(&outcome.message);
     Ok(outcome)
 }
 

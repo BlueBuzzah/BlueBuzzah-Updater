@@ -84,10 +84,7 @@ fn is_operation_retriable(error: &str) -> bool {
 /// then falls back to port match, then any single compatible device.
 ///
 /// Polls briefly (3 attempts, 500ms apart) in case the device is still re-enumerating.
-fn find_device_port_for_retry(
-    original_port: &str,
-    serial_number: Option<&str>,
-) -> Option<String> {
+fn find_device_port_for_retry(original_port: &str, serial_number: Option<&str>) -> Option<String> {
     // Platform-aware polling budget: Windows USB driver re-enumeration is slower
     // and needs more time, especially with multiple devices on the same host controller.
     #[cfg(target_os = "windows")]
@@ -255,10 +252,7 @@ pub async fn detect_dfu_devices() -> Result<Vec<DfuDevice>, String> {
             }
         };
 
-        let mut devices: Vec<DfuDevice> = raw_devices
-            .into_iter()
-            .map(DfuDevice::from)
-            .collect();
+        let mut devices: Vec<DfuDevice> = raw_devices.into_iter().map(DfuDevice::from).collect();
 
         // Count occurrences of each label
         let mut label_counts: std::collections::HashMap<String, usize> =
@@ -384,8 +378,7 @@ pub async fn flash_dfu_firmware(
                         sent: None,
                         total: None,
                         percent: -1.0,
-                        message: "Device not found during re-scan, using original port"
-                            .to_string(),
+                        message: "Device not found during re-scan, using original port".to_string(),
                     });
                     serial_port.clone()
                 }
@@ -775,12 +768,11 @@ pub async fn set_device_profile(
 
             match &config_result {
                 Ok(outcome) => {
-                    // Send progress: rebooting (already handled internally, but we signal it)
-                    let _ = tx.send(ProfileProgressEvent {
-                        stage: "rebooting".to_string(),
-                        percent: 70.0,
-                        message: "Waiting for device to restart...".to_string(),
-                    });
+                    // No "rebooting" event here: by this point the operation has
+                    // finished, and a glove that answered SECONDARY was never
+                    // rebooted at all. Announcing a restart after the fact is
+                    // both stale and, for that case, simply untrue. The reboot
+                    // is already reported from inside the flow, where it happens.
 
                     // Send progress: complete
                     let _ = tx.send(ProfileProgressEvent {
@@ -918,7 +910,10 @@ mod tests {
     fn therapy_device_selection_still_accepts_a_v2_board() {
         let devices = vec![device_on("/dev/cu.usbmodem5678", "nrf52")];
         let found = select_device_for_config(devices, "/dev/cu.usbmodem5678");
-        assert_eq!(found.expect("v2 glove must stay configurable").board, "nrf52");
+        assert_eq!(
+            found.expect("v2 glove must stay configurable").board,
+            "nrf52"
+        );
     }
 
     #[test]
@@ -932,20 +927,27 @@ mod tests {
         // A role-config-phase failure means the flash already succeeded.
         // It must NOT be operation-retriable (which would re-erase + re-transfer).
         let msg = "Failed to configure device role: Serial port error: The semaphore timeout period has expired";
-        assert!(!is_operation_retriable(msg), "role-config failure must not re-flash");
+        assert!(
+            !is_operation_retriable(msg),
+            "role-config failure must not re-flash"
+        );
     }
 
     #[test]
     fn role_config_failed_display_is_not_operation_retriable() {
         // Locks the Display("Failed to configure device role: ...") -> guard contract.
-        let err = crate::dfu::DfuError::RoleConfigFailed { reason: "semaphore timeout".to_string() };
+        let err = crate::dfu::DfuError::RoleConfigFailed {
+            reason: "semaphore timeout".to_string(),
+        };
         assert!(!is_operation_retriable(&err.to_string()));
     }
 
     #[test]
     fn genuine_bootloader_timeout_still_retriable() {
         // Regression guard: real flash-phase failures must still retry.
-        assert!(is_operation_retriable("Bootloader not found within 30000ms"));
+        assert!(is_operation_retriable(
+            "Bootloader not found within 30000ms"
+        ));
     }
 
     #[test]

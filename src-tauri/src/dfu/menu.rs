@@ -85,6 +85,14 @@ pub fn send_menu_command<T: DfuTransport>(
     command: &str,
     timeout_ms: u64,
 ) -> DfuResult<MenuResponse> {
+    // Drop anything already buffered before asking. Serial is a shared stream
+    // with no request IDs, so a reply can only be attributed to this command if
+    // nothing older is still queued. Readiness probes in particular leave
+    // surplus answers behind: every timed-out probe still wrote its command,
+    // and the device answers all of them once it finishes booting. Without this
+    // each later command reads the previous one's response.
+    transport.clear_input().ok();
+
     let line = format!("{}\n", command);
     transport.write(line.as_bytes())?;
     transport.flush()?;
@@ -282,20 +290,13 @@ impl ProfileConfigOutcome {
         }
     }
 
-    /// A partial outcome whose diagnostic text is kept out of the card.
+    /// A partial outcome. The card shows `message`; the raw diagnostic text
+    /// goes to `detail`, so echoed serial output never lands on the UI.
     pub fn partial_with_detail(message: impl Into<String>, detail: impl Into<String>) -> Self {
         Self {
             status: "partial".to_string(),
             message: message.into(),
             detail: Some(detail.into()),
-        }
-    }
-
-    pub fn partial(message: impl Into<String>) -> Self {
-        Self {
-            status: "partial".to_string(),
-            message: message.into(),
-            detail: None,
         }
     }
 }
@@ -403,11 +404,24 @@ fn trim_float(value: f32) -> String {
 fn echo_mismatches(sent: &CustomProfileParams, echo: &MenuResponse) -> Vec<String> {
     let mut mismatches = Vec::new();
 
+    // "absent" and "different" are very different faults and must not read
+    // alike: a frame missing EVERY key means we are looking at the wrong
+    // response entirely, whereas differing values mean the write was rejected
+    // or partially applied. Collapsing both into a bare field name hid a
+    // desynchronised request/response exchange behind a plausible-looking
+    // "all seven values differ".
+    let note =
+        |key: &str, actual: Option<&str>, expected: String, out: &mut Vec<String>| match actual {
+            Some(raw) => out.push(format!("{key} (expected {expected}, got {})", raw.trim())),
+            None => out.push(format!("{key} (no value returned)")),
+        };
+
     let check_float = |key: &str, expected: f32, out: &mut Vec<String>| {
-        let actual = echo.get(key).and_then(|v| v.trim().parse::<f32>().ok());
-        match actual {
+        let raw = echo.get(key);
+        let parsed = raw.and_then(|v| v.trim().parse::<f32>().ok());
+        match parsed {
             Some(actual) if (actual - expected).abs() <= ECHO_FLOAT_TOLERANCE => {}
-            _ => out.push(key.to_string()),
+            _ => note(key, raw, trim_float(expected), out),
         }
     };
 
@@ -415,21 +429,26 @@ fn echo_mismatches(sent: &CustomProfileParams, echo: &MenuResponse) -> Vec<Strin
     check_float("OFF", sent.off, &mut mismatches);
     check_float("JITTER", sent.jitter, &mut mismatches);
 
-    if echo.get("AMPMIN").and_then(|v| v.trim().parse::<u8>().ok()) != Some(sent.amp_min) {
-        mismatches.push("AMPMIN".to_string());
+    let raw = echo.get("AMPMIN");
+    if raw.and_then(|v| v.trim().parse::<u8>().ok()) != Some(sent.amp_min) {
+        note("AMPMIN", raw, sent.amp_min.to_string(), &mut mismatches);
     }
-    if echo.get("AMPMAX").and_then(|v| v.trim().parse::<u8>().ok()) != Some(sent.amp_max) {
-        mismatches.push("AMPMAX".to_string());
+    let raw = echo.get("AMPMAX");
+    if raw.and_then(|v| v.trim().parse::<u8>().ok()) != Some(sent.amp_max) {
+        note("AMPMAX", raw, sent.amp_max.to_string(), &mut mismatches);
     }
-    if echo
-        .get("SESSION")
-        .and_then(|v| v.trim().parse::<u16>().ok())
-        != Some(sent.session)
-    {
-        mismatches.push("SESSION".to_string());
+    let raw = echo.get("SESSION");
+    if raw.and_then(|v| v.trim().parse::<u16>().ok()) != Some(sent.session) {
+        note("SESSION", raw, sent.session.to_string(), &mut mismatches);
     }
-    if echo.get("MIRROR").map(|v| v.trim() != "0") != Some(sent.mirror) {
-        mismatches.push("MIRROR".to_string());
+    let raw = echo.get("MIRROR");
+    if raw.map(|v| v.trim() != "0") != Some(sent.mirror) {
+        note(
+            "MIRROR",
+            raw,
+            if sent.mirror { "1" } else { "0" }.to_string(),
+            &mut mismatches,
+        );
     }
 
     mismatches
@@ -554,11 +573,20 @@ pub fn write_custom_params<T: DfuTransport>(
             "Custom profile loaded and parameters applied.",
         ))
     } else {
-        Ok(ProfileConfigOutcome::partial(format!(
-            "Profile loaded, but the glove reported different values for: {}. \
-             It may still be running its previous custom settings.",
-            mismatches.join(", ")
-        )))
+        // Card gets bare field names; the specifics (and "no value returned",
+        // which means we read the wrong frame) go to the log.
+        let fields: Vec<&str> = mismatches
+            .iter()
+            .map(|m| m.split(" (").next().unwrap_or(m.as_str()))
+            .collect();
+        Ok(ProfileConfigOutcome::partial_with_detail(
+            format!(
+                "Profile loaded, but the glove reported different values for: {}. \
+                 It may still be running its previous custom settings.",
+                fields.join(", ")
+            ),
+            mismatches.join("; "),
+        ))
     }
 }
 
@@ -571,6 +599,9 @@ pub fn write_custom_params<T: DfuTransport>(
 pub struct ScriptedTransport {
     replies: std::collections::VecDeque<String>,
     written: Vec<String>,
+    /// Ordered record of transport operations ("clear", "write", "read"), so a
+    /// test can prove stale input is discarded *before* a command is sent.
+    ops: Vec<&'static str>,
 }
 
 #[cfg(test)]
@@ -579,6 +610,7 @@ impl ScriptedTransport {
         Self {
             replies: replies.into_iter().map(String::from).collect(),
             written: Vec::new(),
+            ops: Vec::new(),
         }
     }
 
@@ -586,11 +618,17 @@ impl ScriptedTransport {
     pub fn written(&self) -> &[String] {
         &self.written
     }
+
+    /// Ordered transport operations, for asserting clear-before-write.
+    pub fn ops(&self) -> &[&'static str] {
+        &self.ops
+    }
 }
 
 #[cfg(test)]
 impl DfuTransport for ScriptedTransport {
     fn write(&mut self, data: &[u8]) -> DfuResult<()> {
+        self.ops.push("write");
         self.written.push(String::from_utf8_lossy(data).to_string());
         Ok(())
     }
@@ -625,6 +663,7 @@ impl DfuTransport for ScriptedTransport {
     }
 
     fn clear_input(&mut self) -> DfuResult<()> {
+        self.ops.push("clear");
         Ok(())
     }
 
@@ -914,6 +953,26 @@ SESSION:90\nAMPMIN:70\nAMPMAX:100\nPATTERN:rndp\nMIRROR:1\nJITTER:23.5\nFINGERS:
         assert_eq!(transport.written(), &["INFO\n".to_string()]);
     }
 
+    /// Every timed-out readiness probe still WRITES an INFO. Once the glove
+    /// finishes booting it answers all of them, so the surplus replies sit in
+    /// the buffer and each later command reads the PREVIOUS command's response.
+    /// On hardware that desynchronised the whole exchange: the verifying
+    /// PROFILE_GET read the leftover PROFILE_CUSTOM ack, which contains none of
+    /// the seven keys, and every field was reported as mismatched.
+    #[test]
+    fn each_command_discards_stale_input_before_it_is_sent() {
+        let mut transport = ScriptedTransport::new(vec!["[MENU-TX] ROLE:PRIMARY\u{4}"]);
+
+        send_menu_command(&mut transport, "INFO", 500).unwrap();
+
+        assert_eq!(
+            transport.ops().iter().take(2).copied().collect::<Vec<_>>(),
+            vec!["clear", "write"],
+            "stale bytes must be dropped before the command is written, or the \
+             reply that comes back may belong to an earlier command"
+        );
+    }
+
     /// v3 boot emits motor diagnostics in bursts with gaps longer than
     /// drain_boot_output's 500ms silence threshold, so the drain returns while
     /// the glove is still booting and the first INFO is swallowed. Readiness
@@ -1001,6 +1060,47 @@ SESSION:90\nAMPMIN:70\nAMPMAX:100\nPATTERN:rndp\nMIRROR:1\nJITTER:23.5\nFINGERS:
         assert_eq!(transport.written().len(), 4);
         assert!(transport.written()[2].starts_with("PROFILE_CUSTOM:"));
         assert_eq!(transport.written()[3], "PROFILE_GET\n");
+    }
+
+    /// "absent" and "different" must not read alike. Every field reported as
+    /// mismatched with no value returned means we are looking at the wrong
+    /// frame entirely, not that the device rejected seven values.
+    #[test]
+    fn mismatch_report_distinguishes_a_missing_key_from_a_differing_value() {
+        // The PROFILE_CUSTOM ack - none of the seven keys are in it.
+        let wrong_frame = "[MENU-TX] STATUS:CUSTOM_LOADED\u{4}";
+        let mut transport = ScriptedTransport::new(vec![
+            "[MENU-TX] ROLE:PRIMARY\nMOTORS:4\nPROFILE:4:custom_vcr\u{4}",
+            ECHO_MATCHING_FRAME,
+            "[MENU-TX] STATUS:CUSTOM_LOADED\u{4}",
+            wrong_frame,
+        ]);
+
+        let outcome = write_custom_params(&mut transport, &target_params()).unwrap();
+
+        assert_eq!(outcome.status, "partial");
+        let detail = outcome.detail.expect("mismatches belong in the detail");
+        assert!(
+            detail.contains("no value returned"),
+            "a frame with none of the keys must say so, not imply seven bad values: {detail}"
+        );
+
+        // A genuinely differing value reads differently.
+        let differing = "[MENU-TX] ON:100.0\nOFF:67.0\nSESSION:90\nAMPMIN:70\nAMPMAX:100\n\
+MIRROR:1\nJITTER:23.5\u{4}";
+        let mut transport = ScriptedTransport::new(vec![
+            "[MENU-TX] ROLE:PRIMARY\nMOTORS:4\nPROFILE:4:custom_vcr\u{4}",
+            ECHO_MATCHING_FRAME,
+            "[MENU-TX] STATUS:CUSTOM_LOADED\u{4}",
+            differing,
+        ]);
+
+        let outcome = write_custom_params(&mut transport, &target_params()).unwrap();
+        let detail = outcome.detail.expect("mismatches belong in the detail");
+        assert!(
+            detail.contains("expected 120, got 100"),
+            "a differing value must name both sides: {detail}"
+        );
     }
 
     #[test]
