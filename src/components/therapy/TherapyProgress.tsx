@@ -124,8 +124,16 @@ export function TherapyProgress({
         results.push({ device, success: true, outcome });
         setConfiguredCount((c) => c + 1);
       } catch (error) {
+        // Tauri rejects an invoke with the command's Err payload verbatim — a
+        // plain string for `Result<_, String>`, never an Error. Testing only
+        // for Error therefore throws away every backend diagnostic and leaves
+        // the user with an unexplained failure.
         const errorMessage =
-          error instanceof Error ? error.message : 'Configuration failed';
+          error instanceof Error
+            ? error.message
+            : typeof error === 'string' && error.trim()
+            ? error
+            : 'Configuration failed';
 
         setDeviceProgress((prev) => {
           const next = new Map(prev);

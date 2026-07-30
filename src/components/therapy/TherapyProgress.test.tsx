@@ -21,6 +21,48 @@ describe('TherapyProgress outcome reporting', () => {
     useTherapyStore.getState().reset();
   });
 
+  // Tauri rejects an `invoke` with a plain string, not an Error, so an
+  // `instanceof Error` guard silently swallows every backend message and
+  // reports a generic failure instead. That is how a v3 glove's "Device not
+  // found" surfaced to a user as an unexplained "Configuration failed".
+  it('reports the backend message when the rejection is a bare string', async () => {
+    mockConfigure.mockRejectedValue('Device not found');
+    const onComplete = vi.fn();
+
+    render(
+      <TherapyProgress
+        profile="CUSTOM"
+        devices={[device('/dev/cu.a', 'Glove A')]}
+        onComplete={onComplete}
+        onProgressUpdate={vi.fn()}
+      />
+    );
+
+    await waitFor(() => expect(onComplete).toHaveBeenCalled());
+    expect(onComplete.mock.calls[0][0].deviceConfigs[0].error).toBe(
+      'Device not found'
+    );
+  });
+
+  it('still reports the message when the rejection is a real Error', async () => {
+    mockConfigure.mockRejectedValue(new Error('Serial port busy'));
+    const onComplete = vi.fn();
+
+    render(
+      <TherapyProgress
+        profile="CUSTOM"
+        devices={[device('/dev/cu.a', 'Glove A')]}
+        onComplete={onComplete}
+        onProgressUpdate={vi.fn()}
+      />
+    );
+
+    await waitFor(() => expect(onComplete).toHaveBeenCalled());
+    expect(onComplete.mock.calls[0][0].deviceConfigs[0].error).toBe(
+      'Serial port busy'
+    );
+  });
+
   it('carries the backend outcome into the per-device result', async () => {
     const outcome = { status: 'partial' as const, message: 'not confirmed' };
     mockConfigure.mockResolvedValue(outcome);
