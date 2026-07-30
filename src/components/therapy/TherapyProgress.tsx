@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Card,
@@ -9,6 +10,7 @@ import {
 } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
+import { summarizeDeviceError } from '@/lib/error-messages';
 import { getProfileInfo } from '@/lib/therapy-profiles';
 import { therapyService } from '@/services/TherapyService';
 import { useTherapyStore } from '@/stores/therapyStore';
@@ -128,12 +130,13 @@ export function TherapyProgress({
         // plain string for `Result<_, String>`, never an Error. Testing only
         // for Error therefore throws away every backend diagnostic and leaves
         // the user with an unexplained failure.
-        const errorMessage =
+        const errorDetail =
           error instanceof Error
             ? error.message
             : typeof error === 'string' && error.trim()
             ? error
             : 'Configuration failed';
+        const errorSummary = summarizeDeviceError(errorDetail);
 
         setDeviceProgress((prev) => {
           const next = new Map(prev);
@@ -141,18 +144,23 @@ export function TherapyProgress({
             devicePath: device.path,
             stage: 'error',
             progress: 0,
-            message: errorMessage,
+            message: errorSummary,
           });
           return next;
         });
 
-        addLog(`✗ Error configuring ${device.label}: ${errorMessage}`);
+        // Card gets the one-line summary; the log keeps every byte the device
+        // sent back, so it stays diagnosable and copyable after the fact.
+        addLog(`✗ Error configuring ${device.label}: ${errorSummary}`);
+        if (errorDetail !== errorSummary) {
+          addLog(`   Detail: ${errorDetail.replace(/\n/g, '\n   ')}`);
+        }
         setShowLogs(true); // Auto-expand logs on error
 
         results.push({
           device,
           success: false,
-          error: errorMessage,
+          error: errorSummary,
         });
       }
     }
@@ -269,7 +277,15 @@ export function TherapyProgress({
                       </CardDescription>
                     </div>
                   </div>
-                  {getStageIcon(progress)}
+                  <div className="flex items-center gap-2">
+                    {progress?.stage === 'error' && (
+                      <Badge variant="destructive">Failed</Badge>
+                    )}
+                    {progress?.stage === 'complete' && (
+                      <Badge variant="secondary">Configured</Badge>
+                    )}
+                    {getStageIcon(progress)}
+                  </div>
                 </div>
               </CardHeader>
               <CardContent>
@@ -288,6 +304,11 @@ export function TherapyProgress({
                 >
                   {progress?.message ?? 'Waiting...'}
                 </p>
+                {progress?.stage === 'error' && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Full device output is in the configuration log below.
+                  </p>
+                )}
               </CardContent>
             </Card>
           );

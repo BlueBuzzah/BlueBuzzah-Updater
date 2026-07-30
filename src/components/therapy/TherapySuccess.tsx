@@ -120,6 +120,11 @@ export function TherapySuccess({
                         {config.outcome?.message}
                       </p>
                     )}
+                    {!config.success && config.error && (
+                      <p className="text-xs text-destructive mt-1">
+                        {config.error}
+                      </p>
+                    )}
                   </div>
                 </div>
                 {isPartial ? (
@@ -131,9 +136,7 @@ export function TherapySuccess({
                   <CheckCircle2 className="h-5 w-5 text-primary" />
                 ) : (
                   <div className="flex items-center gap-2">
-                    <span className="text-xs text-destructive">
-                      {config.error || 'Failed'}
-                    </span>
+                    <Badge variant="destructive">Failed</Badge>
                     <XCircle className="h-5 w-5 text-destructive" />
                   </div>
                 )}

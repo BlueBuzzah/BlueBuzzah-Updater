@@ -1,4 +1,4 @@
-import { render, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockDevice } from '@/test/factories';
 import { therapyService } from '@/services/TherapyService';
@@ -61,6 +61,43 @@ describe('TherapyProgress outcome reporting', () => {
     expect(onComplete.mock.calls[0][0].deviceConfigs[0].error).toBe(
       'Serial port busy'
     );
+  });
+
+  // The firmware echoes its whole serial stream back inside a timeout message.
+  // The card must stay readable; the raw text has to survive somewhere the user
+  // can copy it afterwards.
+  it('shows a short summary on the card and keeps the full text in the log', async () => {
+    const noisy =
+      'Timeout waiting for menu response to PROFILE_LOAD:4. Received: [BLE] UART service discovered\n [STATUS] Role: SECONDARY | State: READY';
+    mockConfigure.mockRejectedValue(noisy);
+    const onComplete = vi.fn();
+
+    render(
+      <TherapyProgress
+        profile="CUSTOM"
+        devices={[device('/dev/cu.a', 'Glove A')]}
+        onComplete={onComplete}
+        onProgressUpdate={vi.fn()}
+      />
+    );
+
+    await waitFor(() => expect(onComplete).toHaveBeenCalled());
+
+    // Card: the concise line only — the echoed device chatter must not be
+    // rendered as the device's status text.
+    const cardStatus = screen.getByText(
+      'Timeout waiting for menu response to PROFILE_LOAD:4.'
+    );
+    expect(cardStatus.textContent).not.toContain('[BLE]');
+    expect(screen.getByText('Failed')).toBeInTheDocument();
+    expect(
+      screen.getByText('Full device output is in the configuration log below.')
+    ).toBeInTheDocument();
+
+    // Log: the raw text, retained for copying.
+    const logged = useTherapyStore.getState().logs.join('\n');
+    expect(logged).toContain('[BLE] UART service discovered');
+    expect(logged).toContain('Role: SECONDARY');
   });
 
   it('carries the backend outcome into the per-device result', async () => {
