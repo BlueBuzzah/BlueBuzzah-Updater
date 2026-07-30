@@ -42,8 +42,36 @@ export function TherapySuccess({
   const [showLogs, setShowLogs] = useState(false);
 
   const profileInfo = getProfileInfo(profile);
-  const successCount = result.deviceConfigs.filter((c) => c.success).length;
+  // A partial device reports `success: true` — the profile change really did
+  // land — so it must be counted as its own outcome rather than folded into
+  // either bucket. Counting only `!success` produced "0 of 2 devices failed" on
+  // a screen that was simultaneously showing a Partial badge.
+  const partialCount = result.deviceConfigs.filter(
+    (c) => c.outcome?.status === 'partial'
+  ).length;
   const failCount = result.deviceConfigs.filter((c) => !c.success).length;
+  const successCount = result.deviceConfigs.filter(
+    (c) => c.success && c.outcome?.status !== 'partial'
+  ).length;
+
+  // Agrees with the total in "1 of 2 devices", not with the count.
+  const plural = (n: number) => (n === 1 ? 'device' : 'devices');
+
+  /** One sentence covering whichever problems actually occurred. */
+  const outcomeSummary = (() => {
+    const total = devices.length;
+
+    if (failCount > 0 && partialCount > 0) {
+      return `${failCount} of ${total} ${plural(total)} failed, and ${partialCount} finished only partially.`;
+    }
+    if (partialCount > 0) {
+      return `${partialCount} of ${total} ${plural(total)} finished only partially — the profile changed, but the parameters were not confirmed.`;
+    }
+    if (failCount === total) {
+      return 'All devices failed to configure.';
+    }
+    return `${failCount} of ${total} ${plural(total)} failed to configure.`;
+  })();
 
   const exportLogs = async () => {
     await copyToClipboard(logs.join('\n'), 'Configuration logs');
@@ -70,10 +98,8 @@ export function TherapySuccess({
               <XCircle className="h-10 w-10 text-destructive" />
             </div>
             <h2 className="text-2xl font-bold mb-2">Configuration Issues</h2>
-            <p className="text-muted-foreground">
-              {failCount === devices.length
-                ? 'All devices failed to configure.'
-                : `${failCount} of ${devices.length} device${failCount !== 1 ? 's' : ''} failed to configure.`}
+            <p className="text-muted-foreground" data-testid="outcome-summary">
+              {outcomeSummary}
             </p>
           </>
         )}
