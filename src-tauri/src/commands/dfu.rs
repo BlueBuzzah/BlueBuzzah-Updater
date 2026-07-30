@@ -609,6 +609,19 @@ pub async fn cancel_dfu_flash() -> Result<(), String> {
     Ok(())
 }
 
+/// Pick the device to configure, by port, from the enumerated candidates.
+///
+/// Callers must pass `find_supported_devices()`, NOT `find_nrf52_devices()`.
+/// Therapy configuration speaks the firmware menu over app-mode serial, and that
+/// protocol is identical on v2 (nRF52) and v3 (ESP32-S3) — there is nothing
+/// Nordic-specific about it. Narrowing the candidates to `board == "nrf52"`
+/// makes every v3 glove fail with "Device not found" before the command emits a
+/// single progress event, which reads to the user as an instant, unexplained
+/// "Configuration failed".
+fn select_device_for_config(devices: Vec<Nrf52Device>, port: &str) -> Option<Nrf52Device> {
+    devices.into_iter().find(|d| d.port == port)
+}
+
 /// Progress event sent to the frontend during profile configuration.
 #[derive(Debug, Clone, Serialize)]
 pub struct ProfileProgressEvent {
@@ -644,11 +657,7 @@ pub async fn set_device_profile(
     // Get device info and create identifier for tracking
     let device = tokio::task::spawn_blocking({
         let port = serial_port.clone();
-        move || {
-            find_nrf52_devices()
-                .into_iter()
-                .find(|d| d.port == port)
-        }
+        move || select_device_for_config(find_supported_devices(), &port)
     })
     .await
     .map_err(|e| format!("Failed to find device: {}", e))?
@@ -870,6 +879,53 @@ pub struct FirmwareInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn device_on(port: &str, board: &str) -> Nrf52Device {
+        Nrf52Device {
+            port: port.to_string(),
+            vid: 0x303A,
+            pid: 0x1001,
+            serial_number: None,
+            in_bootloader: false,
+            product_name: None,
+            manufacturer: None,
+            board: board.to_string(),
+        }
+    }
+
+    /// Therapy configuration talks to the firmware menu over app-mode serial,
+    /// which is identical on v2 (nRF52) and v3 (ESP32-S3). Selecting the device
+    /// to configure must therefore accept every supported board — narrowing it
+    /// to Nordic makes `set_device_profile` fail on a v3 glove with
+    /// "Device not found" before it emits a single progress event.
+    #[test]
+    fn therapy_device_selection_accepts_a_v3_board() {
+        let devices = vec![
+            device_on("/dev/cu.usbmodem1101", "esp32s3"),
+            device_on("/dev/cu.usbmodem9999", "nrf52"),
+        ];
+
+        let found = select_device_for_config(devices, "/dev/cu.usbmodem1101");
+
+        assert!(
+            found.is_some(),
+            "a v3 (esp32s3) glove must be configurable for therapy"
+        );
+        assert_eq!(found.unwrap().board, "esp32s3");
+    }
+
+    #[test]
+    fn therapy_device_selection_still_accepts_a_v2_board() {
+        let devices = vec![device_on("/dev/cu.usbmodem5678", "nrf52")];
+        let found = select_device_for_config(devices, "/dev/cu.usbmodem5678");
+        assert_eq!(found.expect("v2 glove must stay configurable").board, "nrf52");
+    }
+
+    #[test]
+    fn therapy_device_selection_returns_none_for_an_absent_port() {
+        let devices = vec![device_on("/dev/cu.usbmodem1101", "esp32s3")];
+        assert!(select_device_for_config(devices, "/dev/cu.usbmodemZZZZ").is_none());
+    }
 
     #[test]
     fn role_config_failure_does_not_trigger_reflash() {
