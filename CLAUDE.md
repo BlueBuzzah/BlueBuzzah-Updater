@@ -19,7 +19,7 @@ Tauri 2.0 desktop app that flashes BlueBuzzah firmware over serial to two hardwa
 
 ## Architecture
 
-Frontend flow: `src/components/wizard/` (FirmwareSelection → DeviceSelection → InstallationProgress → SuccessScreen) → Zustand stores (`src/stores/`: `wizardStore`, `therapyStore`, `settingsStore`, `updaterStore`) → services (`src/services/`: `DeviceService`, `FirmwareService`, `TherapyService`, `UpdaterService`, each implementing an `I*Repository` interface) → Rust via `invoke()` + `Channel` progress events.
+Two wizards off `components/home/HomeScreen`: **flash** (`components/wizard/`: FirmwareSelection → DeviceSelection → InstallationProgress → SuccessScreen) and **therapy config** (`components/therapy/`: ProfileSelection → CustomProfilePanel → TherapyDeviceSelection → TherapyProgress → TherapySuccess). Both → Zustand stores (`src/stores/`: `wizardStore`, `therapyStore`, `settingsStore`, `updaterStore`) → services (`src/services/`: `DeviceService`, `FirmwareService`, `TherapyService`, `UpdaterService`, each implementing an `I*Repository` interface) → Rust via `invoke()` + `Channel` progress events.
 
 | Rust module (`src-tauri/src/`) | Purpose |
 |--------------------------------|---------|
@@ -28,6 +28,7 @@ Frontend flow: `src/components/wizard/` (FirmwareSelection → DeviceSelection �
 | `dfu/device.rs` | Device detection; `DeviceIdentifier` tracks devices across re-enumeration (serial number preferred, VID/PID+port-pattern fallback) |
 | `dfu/slip.rs`, `dfu/packet.rs` | SLIP/HCI framing, CRC16 |
 | `dfu/firmware_reader.rs` | Nordic DFU zip parsing (`manifest.json`, `firmware.bin`/`.dat`) |
+| `dfu/menu.rs` | App-mode menu protocol — `[MENU-TX]` frame parsing, `PROFILE_GET`/`PROFILE_CUSTOM` batching (`build_custom_batch`) |
 | `dfu/config.rs` | VID/PIDs, opcodes, all timing/retry constants |
 | `dfu/error.rs` | `DfuError` taxonomy — `is_retriable()`, `is_operation_retriable()`, stable `error_code()` (DFU-0xx) |
 | `esp/manifest.rs` | v3 (ESP32-S3/PentaBuzzer) firmware zip parsing — validates `manifest_version` 1, board `pentabuzzer_esp32s3`, chip `esp32s3`, per-part SHA256; parses manifest flash offsets |
@@ -54,7 +55,7 @@ Frontend flow: `src/components/wizard/` (FirmwareSelection → DeviceSelection �
 - Firmware distribution: `FirmwareService.ts` fetches `https://api.github.com/repos/BlueBuzzah/BlueBuzzah-Firmware/releases`; asset name determines board — `NRF_ASSET_PATTERN` (`BlueBuzzah-Firmware-<tag>-<sha>.zip`) is the Nordic DFU package (v2), `V3_ASSET_PATTERN` (`BlueBuzzah-Firmware-v3-<tag>-<sha>.zip`) is the v3 package. 60 req/hr unauthenticated.
 - v3 manifest schema (`esp/manifest.rs`) is produced by BlueBuzzah-Firmware `scripts/package_penta.py`; keep the two in sync on any manifest field change.
 - Menu protocol (Custom therapy profile): the Updater sends `INFO`, `PROFILE_LOAD:4`, `PROFILE_GET`, and `PROFILE_CUSTOM:KEY:VALUE…` over app-mode serial and parses the `[MENU-TX] KEY:VALUE\n…\x04` frame (`dfu/menu.rs`). This works only because those commands are absent from firmware `INTERNAL_MESSAGES` (`include/internal_messages.h` — the single definition site, shared by `src/menu_controller.cpp` and the native test) — adding any of them there silently severs the Updater from the device, which is why `test_menu_controller` guards it.
-- Custom parameter bounds are duplicated in `src/lib/therapy-bounds.ts` from firmware `include/config.h:197-206`. Firmware remains the sole validator; the TS table only constrains inputs and cannot widen what the device accepts.
+- Custom parameter bounds are duplicated in `src/lib/therapy-bounds.ts` from the firmware `PARAM_MIN_*`/`PARAM_MAX_*` constants in `include/config.h`. Firmware remains the sole validator; the TS table only constrains inputs and cannot widen what the device accepts.
 - `PROFILE_GET` does not identify which profile its values belong to. Always ask `INFO` first and only read values when it reports `PROFILE:4:…`.
 - `setParameter` validates `AMPMIN` against the stored `amplitudeMax` and vice versa, so `build_custom_batch` orders the two keys from the device's current values. Reordering them unconditionally reintroduces a rejected batch.
 
