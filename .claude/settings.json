@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo test:*)",
+      "Bash(cargo check:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npm run test)",
+      "Bash(npm run build)",
+      "Bash(npm run tauri:build)",
+      "Bash(npm run tauri:test)"
+    ],
+    "deny": [],
+    "ask": []
+  },
+  "enableAllProjectMcpServers": true
+}

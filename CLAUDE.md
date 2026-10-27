@@ -11,7 +11,7 @@ Tauri 2.0 desktop app that flashes BlueBuzzah firmware over serial to two hardwa
 |------|---------|
 | Dev (hot reload) | `npm run tauri:dev` |
 | Frontend typecheck + build | `npm run build` |
-| Production build | `npm run tauri:build` (loads signing env via dotenv; CI uses `tauri:build:ci`) |
+| Production build | `npm run tauri:build` (loads updater signing keys from `.env`, see `.env.example`; CI uses `tauri:build:ci`) |
 | Frontend tests | `npm test` (Vitest + Testing Library) |
 | One frontend test file | `npx vitest run src/services/DeviceService.test.ts` |
 | Rust tests | `npm run tauri:test` |
@@ -19,12 +19,12 @@ Tauri 2.0 desktop app that flashes BlueBuzzah firmware over serial to two hardwa
 
 ## Architecture
 
-Two wizards off `components/home/HomeScreen`: **flash** (`components/wizard/`: FirmwareSelection → DeviceSelection → InstallationProgress → SuccessScreen) and **therapy config** (`components/therapy/`: ProfileSelection → CustomProfilePanel → TherapyDeviceSelection → TherapyProgress → TherapySuccess). Both → Zustand stores (`src/stores/`: `wizardStore`, `therapyStore`, `settingsStore`, `updaterStore`) → services (`src/services/`: `DeviceService`, `FirmwareService`, `TherapyService`, `UpdaterService`, each implementing an `I*Repository` interface) → Rust via `invoke()` + `Channel` progress events.
+`HomeScreen` picks a mode; `App.tsx` routes the step switch for two wizards: **flash** (`components/wizard/`: FirmwareSelection → DeviceSelection → InstallationProgress → SuccessScreen) and **therapy config** (`components/therapy/`, steps 0–2: ProfileSelection (renders `CustomProfilePanel` inline when Custom is picked) → TherapyDeviceSelection → TherapyProgress, swapped for TherapySuccess once a result exists). Both → Zustand stores (`src/stores/`: `wizardStore`, `therapyStore`, `settingsStore`, `updaterStore`) → services (`src/services/`: `DeviceService`, `FirmwareService`, `UpdaterService` implement `I*Repository`; `TherapyService` implements `ITherapyService`) → Rust via `invoke()` + `Channel` progress events.
 
 | Rust module (`src-tauri/src/`) | Purpose |
 |--------------------------------|---------|
 | `dfu/protocol.rs` | DFU state machine — `upload_firmware()`, `configure_device_role_flexible()`, `configure_device_with_settings()`, `drain_boot_output()` |
-| `dfu/transport.rs` | Serial transport, 1200-baud touch reset, port-open retry |
+| `dfu/transport.rs` | Serial transport, 1200-baud touch reset, port-open retry; `open()` (resets board) vs `open_for_query()` (doesn't) |
 | `dfu/device.rs` | Device detection; `DeviceIdentifier` tracks devices across re-enumeration (serial number preferred, VID/PID+port-pattern fallback) |
 | `dfu/slip.rs`, `dfu/packet.rs` | SLIP/HCI framing, CRC16 |
 | `dfu/firmware_reader.rs` | Nordic DFU zip parsing (`manifest.json`, `firmware.bin`/`.dat`) |
@@ -45,7 +45,7 @@ Two wizards off `components/home/HomeScreen`: **flash** (`components/wizard/`: F
 
 - VID `0x239A` (Adafruit); app PIDs `0x8029`/`0x802A`; bootloader PIDs `0x0029`/`0x002A`
 - DFU protocol at 115200 baud; bootloader entry via 1200-baud touch
-- VID `0x303A` (Espressif) / PID `0x1001` (ESP32-S3 USB-JTAG/Serial) identifies PentaBuzzer v3 boards; the same PID is used in both app and download mode, so `in_bootloader` is always `false` for v3 devices. Device labels are fixed per hardware revision by `find_supported_devices()`: "BlueBuzzah v2 (port)" for nRF52840, "BlueBuzzah v3 (port)" for ESP32-S3.
+- VID `0x303A` (Espressif) / PID `0x1001` (ESP32-S3 USB-JTAG/Serial) identifies PentaBuzzer v3 boards; the same PID is used in both app and download mode, so `in_bootloader` is always `false` for v3 devices. Both boards use the `Nrf52Device` struct (v3 has `board == "esp32s3"`); `display_label()` yields "BlueBuzzah v3 (port)", "BlueBuzzah v2 (port)", or "nRF52840 Bootloader (port)".
 
 ## Cross-Repo Contract (must match BlueBuzzah-Firmware)
 
@@ -69,21 +69,24 @@ Two wizards off `components/home/HomeScreen`: **flash** (`components/wizard/`: F
 - **Boot noise**: firmware boot logs can contain `ERROR` text; always `drain_boot_output` before sending a command or responses get misparsed.
 - **`[SETTING]` ack timeout = success**: `send_setting_command` treats no-ack as success for backward compat with older firmware.
 - **Format detection**: a firmware zip's `manifest.json` has `manifest_version` for v3 or a top-level `manifest` key for Nordic — never feed one reader the other's zip.
-- **Cache keying**: `cache.rs` keys entries `(version, board)` as `version::board`; nrf52 keeps legacy `{version}.zip` filenames on disk, other boards use `{version}-{board}.zip`.
+- **Cache keying**: `cache.rs` keys entries `(version, board)` as `version::board`; on disk, `commands/firmware.rs::firmware_filename` keeps legacy `{version}.zip` for nrf52 and `{version}-{board}.zip` for other boards.
+- **Opening a port can reboot the glove**: `SerialTransport::open` pulses DTR, which resets the board (deliberate for DFU). Read-only menu paths must use `open_for_query` (no DTR/RTS), as `read_custom_profile` does. macOS may still assert DTR on open by itself.
+- **Serial menu replies have no request IDs**: `send_menu_command` calls `clear_input()` before every write. Removing it lets stale `INFO` replies from timed-out readiness probes be read as the answer to the next command.
 - **Batch flashing is single-board only**: mixing hardware versions (one v2 + one v3) in the same run is unsupported — enforced by a UI guard in `DeviceSelection` and a defensive guard in `InstallationProgress`. Two devices of the same version flash fine.
-- **Custom profile writes are two-phase and reboot the device**: `PROFILE_CUSTOM` is rejected unless Custom is already loaded, and `PROFILE_LOAD` reboots. Phase 2 therefore reacquires the port via `wait_for_application_flexible` between the two. A partial outcome (profile loaded, parameters unconfirmed) must never be reported as success.
+- **Custom profile writes are two-phase and reboot the device**: `PROFILE_CUSTOM` is rejected unless Custom is already loaded, and `PROFILE_LOAD` reboots. Phase 2 therefore reacquires the port via `wait_for_application_flexible` between the two. A partial outcome (profile loaded, parameters unconfirmed) must never be reported as success: `commands/dfu.rs` emits a distinct `partial` progress stage (not `complete`) because the frontend badge keys on stage. `preflight_primary_check` runs before `PROFILE_LOAD` so a SECONDARY or silent glove stops the flow.
 
 ## Conventions
 
 - Rust retry naming: public retrying fn wraps `*_inner`; single attempt = `*_once`; re-enumeration-tolerant = `*_flexible`
 - Tests colocated: `*.test.ts(x)` beside source (global Tauri mocks in `src/test/setup.ts`, factories in `src/test/factories.ts`); Rust `#[cfg(test)]` at file bottom
-- Strict TypeScript (no `any`); shadcn/ui components exclusively; Tailwind only (no inline styles)
+- Strict TypeScript (no `any`); shadcn/ui components exclusively; Tailwind only (no inline styles outside generated `components/ui/`)
 - Blue for success states (brand); loading states for all async ops; errors via toast or destructive card (`src/lib/error-messages.ts` maps DFU errors to user guidance)
 
 ## Docs
 
 | Document | Purpose |
 |----------|---------|
+| `SETUP.md` | Per-OS toolchain prerequisites |
 | `docs/TAURI_DFU_FLASH_GUIDE.MD` | DFU flashing implementation guide |
 | `docs/DESIGN_GUIDE.md` | UI/visual design guide |
 | `docs/superpowers/plans/` | TDD implementation plans (e.g. Windows re-enum/role-config resilience) |
