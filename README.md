@@ -50,7 +50,7 @@ npm run tauri:build
 
 ## ✨ Features
 
-- **Modern UI**: Beautiful dark-themed interface with BlueBuzzah brand colors (#35B6F2, #05212D)
+- **Guided UI**: Step-by-step wizards for flashing and therapy configuration
 - **4-Step Wizard**: Intuitive workflow from firmware selection to successful installation
 - **GitHub Integration**: Automatically fetches latest firmware releases, with the right package per hardware revision
 - **Multi-Hardware Support**: Flashes both v2 (nRF52840) and v3 (ESP32-S3) devices with the matching protocol
@@ -109,13 +109,7 @@ mindmap
 
 ## 🎨 UI/UX
 
-The application features a modern dark theme with BlueBuzzah brand colors:
-
-- **Primary Blue** (#35B6F2) - Highlights, buttons, progress indicators
-- **Dark Navy** (#05212D) - Cards, secondary surfaces
-- **Smooth animations** and **glow effects** for a polished user experience
-
-For complete design system documentation, see [docs/DESIGN_GUIDE.md](docs/DESIGN_GUIDE.md).
+All UI/UX follows the BlueBuzzah design system, which lives in the [BlueBuzzah-Workspace](https://github.com/BlueBuzzah/BlueBuzzah-Workspace) repo (`.claude/skills/bluebuzzah-design-system/`).
 
 ## 📦 Technology Stack
 
@@ -133,7 +127,6 @@ For complete design system documentation, see [docs/DESIGN_GUIDE.md](docs/DESIGN
 ## 📚 Documentation
 
 - **[SETUP.md](SETUP.md)** - Complete setup guide, prerequisites, and troubleshooting
-- **[docs/DESIGN_GUIDE.md](docs/DESIGN_GUIDE.md)** - Complete design system, UI/UX patterns, and component guidelines
 - **[docs/TAURI_DFU_FLASH_GUIDE.MD](docs/TAURI_DFU_FLASH_GUIDE.MD)** - DFU flashing implementation guide
 
 ## 🔧 Development
