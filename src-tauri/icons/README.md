@@ -44,17 +44,6 @@ Use online tools or software like:
 - GIMP (with ICO plugin)
 - Online converters
 
-## Design Guidelines
+## Icon Art
 
-- Use a square aspect ratio (1:1)
-- Keep the design simple and recognizable at small sizes
-- Use a transparent background for PNG files
-- Test the icon at different sizes to ensure clarity
-- Follow platform-specific icon design guidelines (macOS HIG, Windows UX guidelines)
-
-## BlueBuzzah Branding
-
-For the BlueBuzzah Updater, consider using:
-- BlueBuzzah brand colors
-- A recognizable symbol related to firmware updates or devices
-- Simple, bold shapes that scale well
+Never draw new icon art. Take it from the BlueBuzzah design system in the [BlueBuzzah-Workspace](https://github.com/BlueBuzzah/BlueBuzzah-Workspace) repo (`.claude/skills/bluebuzzah-design-system/assets/`). The `Web` and `Logos` groups hold the mark and squircle app-icon masters, and each group's README says which file to use where.

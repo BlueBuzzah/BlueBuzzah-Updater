@@ -5,6 +5,24 @@ Tauri 2.0 desktop app that flashes BlueBuzzah firmware over serial to two hardwa
 **Frontend**: React 18 + TypeScript + Vite | Zustand, shadcn/ui, Tailwind, Lucide
 **Backend**: Rust + Tauri 2.0 | Nordic DFU protocol (nRF52840) and espflash (ESP32-S3) over serial
 
+## Design System — required for every UI/UX change
+
+Any change a person can see, hear or touch follows the **BlueBuzzah design system**. That includes layout, color, type, spacing, components, icons, logos and app icons, motion, accessibility, and copy (voice, error messages, the disclaimer). The design system lives in the BlueBuzzah workspace repo as the `bluebuzzah-design-system` skill, at `../../.claude/skills/bluebuzzah-design-system/` from this repo's root.
+
+Before making a UI/UX change:
+
+1. **Load it.** Invoke the `bluebuzzah-design-system` skill. If it isn't in your skill list (e.g. Claude was started in this repo instead of the workspace root), read `../../.claude/skills/bluebuzzah-design-system/SKILL.md` directly and follow it.
+2. **If that path doesn't exist, stop.** This repo isn't checked out inside the workspace. Ask the user to set it up: clone `https://github.com/BlueBuzzah/BlueBuzzah-Workspace`, then run `npm run workspace:setup` to clone this repo under its `projects/`. Don't work from memory.
+3. **Read what applies:** `README.md` and `accessibility.md`, then `updater.md` (this app's surface guide), then the README of every design-system component you touch.
+
+Rules:
+
+- **The design system wins any conflict.** That includes existing styling and anything else in this file. Much of the current UI predates it. Build new and changed UI to the design system rather than copying the surrounding legacy styles.
+- **Take every value from the design system's tokens.** Use `tokens.css`, or `tokens.json` for the Tailwind theme. Never hand-type a hex color, size, radius, duration or font. Build the design system's components with this repo's shadcn/ui + Tailwind, themed from those tokens.
+- **Copy, don't link.** Copy fonts, icons and logos from the design system into this repo. Never reference the workspace path at build or run time, because this repo builds and ships on its own.
+- **Don't invent rules.** If the design system doesn't cover something, ask rather than inventing a rule.
+- **Full migrations:** a whole-app pass is the `/implement-design-system` command, run from the workspace.
+
 ## Quick Reference
 
 | Task | Command |
@@ -80,7 +98,7 @@ Tauri 2.0 desktop app that flashes BlueBuzzah firmware over serial to two hardwa
 - Rust retry naming: public retrying fn wraps `*_inner`; single attempt = `*_once`; re-enumeration-tolerant = `*_flexible`
 - Tests colocated: `*.test.ts(x)` beside source (global Tauri mocks in `src/test/setup.ts`, factories in `src/test/factories.ts`); Rust `#[cfg(test)]` at file bottom
 - Strict TypeScript (no `any`); shadcn/ui components exclusively; Tailwind only (no inline styles outside generated `components/ui/`)
-- Blue for success states (brand); loading states for all async ops; errors via toast or destructive card (`src/lib/error-messages.ts` maps DFU errors to user guidance)
+- Loading states for all async ops; `src/lib/error-messages.ts` maps DFU errors to user guidance
 
 ## Docs
 
@@ -88,5 +106,3 @@ Tauri 2.0 desktop app that flashes BlueBuzzah firmware over serial to two hardwa
 |----------|---------|
 | `SETUP.md` | Per-OS toolchain prerequisites |
 | `docs/TAURI_DFU_FLASH_GUIDE.MD` | DFU flashing implementation guide |
-| `docs/DESIGN_GUIDE.md` | UI/visual design guide |
-| `docs/superpowers/plans/` | TDD implementation plans (e.g. Windows re-enum/role-config resilience) |
