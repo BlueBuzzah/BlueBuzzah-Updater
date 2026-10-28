@@ -587,9 +587,6 @@ where
         },
         &is_cancelled,
     );
-    if let Err(DfuError::Cancelled) = &role_result {
-        on_progress(DfuStage::Cancelled);
-    }
     on_progress(DfuStage::Log {
         message: format!(
             "Role config finished in {}ms (ok={}) | snapshot: {}",
@@ -598,6 +595,9 @@ where
             snapshot_ports()
         ),
     });
+    if let Err(DfuError::Cancelled) = &role_result {
+        on_progress(DfuStage::Cancelled);
+    }
     role_result?;
 
     on_progress(DfuStage::Complete);
@@ -886,7 +886,10 @@ fn configure_device_role_flexible_inner<L: Fn(&str), C: Fn() -> bool>(
         }
     };
 
-    // Open port and send command
+    // Opening pulses DTR, which resets the glove: never do it once stopped.
+    if is_cancelled() {
+        return Err(DfuError::Cancelled);
+    }
     let transport = SerialTransport::open(port_name)?;
     send_role_command(transport, command, identifier, log, is_cancelled)
 }
@@ -904,7 +907,7 @@ fn send_role_command<L: Fn(&str), C: Fn() -> bool>(
     }
 
     // Drain boot output using enhanced detection
-    drain_boot_output(&mut transport)?;
+    drain_boot_output_until(&mut transport, is_cancelled)?;
 
     // Clear any remaining input
     transport.clear_input().ok();
@@ -981,6 +984,14 @@ fn send_role_command<L: Fn(&str), C: Fn() -> bool>(
 ///
 /// Returns true if a boot completion marker was detected.
 fn drain_boot_output(transport: &mut SerialTransport) -> DfuResult<bool> {
+    drain_boot_output_until(transport, &|| false)
+}
+
+/// `drain_boot_output` that returns `Cancelled` between reads once stopped.
+fn drain_boot_output_until<C: Fn() -> bool>(
+    transport: &mut SerialTransport,
+    is_cancelled: &C,
+) -> DfuResult<bool> {
     let mut buffer = [0u8; 256];
     let drain_timeout = Duration::from_millis(5000);
     let drain_start = Instant::now();
@@ -993,6 +1004,9 @@ fn drain_boot_output(transport: &mut SerialTransport) -> DfuResult<bool> {
     let mut accumulated = String::new();
 
     while drain_start.elapsed() < drain_timeout {
+        if is_cancelled() {
+            return Err(DfuError::Cancelled);
+        }
         let bytes_read = transport.read(&mut buffer, 200)?;
         if bytes_read > 0 {
             last_data_time = Instant::now();
@@ -1559,6 +1573,68 @@ pub fn configure_custom_profile<L: Fn(&str) + Clone>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Opening the port pulses DTR (resets the glove), so a stopped attempt must
+    /// not open it at all: a new flash may already be restarting that glove.
+    #[test]
+    fn stopped_role_attempt_never_opens_port() {
+        let id = DeviceIdentifier::Serial {
+            serial: "X".into(),
+            vid: 0x239A,
+            pid: 0x8029,
+            port_pattern: String::new(),
+        };
+        let start = Instant::now();
+        let stop = || true;
+        let err = configure_device_role_flexible_inner(
+            "/dev/cu.does-not-exist",
+            "PRIMARY",
+            &id,
+            &|_: &str| {},
+            &stop,
+        )
+        .unwrap_err();
+        assert!(matches!(err, DfuError::Cancelled), "got {err:?}");
+        assert!(start.elapsed() < Duration::from_millis(100));
+    }
+
+    /// A stop during the boot-output drain must release the port promptly, not
+    /// after the drain's 5 s budget, or a quick Try Again finds the port busy.
+    #[cfg(unix)]
+    #[test]
+    fn stop_during_boot_drain_returns_promptly() {
+        use std::io::Write;
+        use std::sync::atomic::AtomicUsize;
+        let (mut master, slave) = serialport::TTYPort::pair().unwrap();
+        let transport = SerialTransport::from_port(Box::new(slave));
+        let noisy = Arc::new(AtomicBool::new(true));
+        let still_noisy = Arc::clone(&noisy);
+        std::thread::spawn(move || {
+            while still_noisy.load(Ordering::SeqCst) {
+                let _ = master.write_all(b"[BOOT] diagnostics\n");
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        });
+        let id = DeviceIdentifier::Serial {
+            serial: "X".into(),
+            vid: 0x239A,
+            pid: 0x8029,
+            port_pattern: String::new(),
+        };
+        // Not stopped at the first check, stopped from then on.
+        let calls = AtomicUsize::new(0);
+        let stop = || calls.fetch_add(1, Ordering::SeqCst) > 0;
+        let start = Instant::now();
+        let err = send_role_command(transport, ROLE_PRIMARY_COMMAND, &id, &|_: &str| {}, &stop)
+            .unwrap_err();
+        noisy.store(false, Ordering::SeqCst);
+        assert!(matches!(err, DfuError::Cancelled), "got {err:?}");
+        assert!(
+            start.elapsed() < Duration::from_millis(1500),
+            "took {:?}",
+            start.elapsed()
+        );
+    }
 
     /// A stopped role attempt must let go of the port without sending SET_ROLE,
     /// or Try Again finds the port busy and the stopped role still gets written.
