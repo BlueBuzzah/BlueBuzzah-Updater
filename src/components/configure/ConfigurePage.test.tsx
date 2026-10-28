@@ -34,7 +34,9 @@ describe('ConfigurePage choose phase', () => {
 
   it('explains why Apply is unavailable', () => {
     render(<ConfigurePage />);
-    expect(screen.getByRole('button', { name: 'Apply to Devices' })).toBeDisabled();
+    const apply = screen.getByRole('button', { name: 'Apply to Devices' });
+    expect(apply).toBeDisabled();
+    expect(apply.parentElement).toHaveClass('justify-items-end');
     expect(screen.getByText('Choose a pattern and at least one device first.')).toBeInTheDocument();
   });
 

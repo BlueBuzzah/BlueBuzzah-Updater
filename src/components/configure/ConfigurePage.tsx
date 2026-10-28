@@ -33,11 +33,11 @@ export function ConfigurePage() {
         </Banner>
         <ProfileSelection />
         <DeviceSelection mode="configure" selectedDevices={selectedDevices} onDevicesChange={setDevices} />
-        <div className="grid justify-items-start gap-3">
+        <div className="grid justify-items-end gap-3">
           <Button size="xl" disabled={!!blocked} aria-describedby={blocked ? 'apply-blocked' : undefined} onClick={() => setStep(2)}>
             {selectedDevices.length === 1 ? 'Apply to Device' : 'Apply to Devices'}
           </Button>
-          {blocked && <p id="apply-blocked" className="body-s text-ink-muted">{blocked}</p>}
+          {blocked && <p id="apply-blocked" className="body-s text-right text-ink-muted">{blocked}</p>}
         </div>
       </div>
     );
