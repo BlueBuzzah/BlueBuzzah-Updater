@@ -53,11 +53,6 @@ vi.mock('./components/therapy', () => ({
   TherapySuccess: () => <div data-testid="therapy-success" />,
 }));
 
-// Mock toast components
-vi.mock('./components/ui/toaster', () => ({
-  Toaster: () => <div data-testid="toaster" />,
-}));
-
 vi.mock('@tauri-apps/api/app', () => ({ getVersion: vi.fn(() => Promise.resolve('1.0.0')) }));
 
 function setPlatform(p: string) {

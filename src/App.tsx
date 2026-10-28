@@ -3,7 +3,6 @@ import { ConfigurePage } from './components/configure/ConfigurePage';
 import { FirmwarePage } from './components/firmware/FirmwarePage';
 import { SettingsPage } from './components/settings/SettingsPage';
 import { AppShell } from './components/shell/AppShell';
-import { Toaster } from './components/ui/toaster';
 import { UpdateDialog } from './components/updater/UpdateDialog';
 import { ConfirmDialog } from './components/ui/alert-dialog';
 import { useAppUpdater } from './hooks/useAppUpdater';
@@ -49,7 +48,6 @@ function App() {
           ? 'Closing now can leave the device half set up. Wait for it to finish.'
           : 'Closing now can leave the device unable to start. Wait for it to finish.'}
       </ConfirmDialog>
-      <Toaster />
       <UpdateDialog />
     </>
   );

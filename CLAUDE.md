@@ -35,6 +35,12 @@ cp $DS/components/bundle.css src/styles/bundle.css
 cp $DS/favicons/favicon.ico public/favicon.ico
 ```
 
+Before committing UI work, this check must print nothing (hand-typed sizes, colors, legacy icons, plurals like "device(s)", exclamation marks):
+
+```bash
+grep -rnE "text-(xs|sm|base|lg|[0-9]?xl)\b|text-\[|#[0-9a-fA-F]{3,8}\b|rgba?\(|hsl\(|-(red|amber|yellow|emerald|zinc|blue|green|gray|slate)-[0-9]{2,3}|(bg|text|border|ring|from|to|shadow)-[a-z-]+/[0-9]{1,2}\b|animate-|duration-[0-9]|shadow-(sm|md|lg|xl)|space-y-6|XCircle|AlertCircle|CircuitBoard|\bBan\b|device\(s\)|!['\"]" src --include='*.tsx' --include='*.ts' --include='*.css' | grep -v "src/styles/" | grep -v "\.test\."
+```
+
 ## Quick Reference
 
 | Task | Command |

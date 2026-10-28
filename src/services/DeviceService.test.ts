@@ -296,7 +296,7 @@ describe('DeviceService', () => {
         expect.objectContaining({
           stage: 'complete',
           progress: 100,
-          message: 'Update complete!',
+          message: 'Update complete',
         })
       );
     });

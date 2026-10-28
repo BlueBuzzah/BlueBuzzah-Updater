@@ -32,16 +32,3 @@ export function Card({ as: Tag = 'section', title, eyebrow, actions, padding = '
     </Tag>
   );
 }
-
-// ponytail: legacy shadcn sub-parts, kept until the screen tasks stop using
-// them (removed in the cleanup task).
-type DivProps = React.HTMLAttributes<HTMLDivElement>;
-export const CardHeader = ({ className, ...p }: DivProps) => <div className={cn('mb-4', className)} {...p} />;
-export const CardTitle = ({ className, ...p }: React.HTMLAttributes<HTMLHeadingElement>) => (
-  <h3 className={cn('title-m', className)} {...p} />
-);
-export const CardDescription = ({ className, ...p }: React.HTMLAttributes<HTMLParagraphElement>) => (
-  <p className={cn('body-s text-ink-muted', className)} {...p} />
-);
-export const CardContent = (p: DivProps) => <div {...p} />;
-export const CardFooter = ({ className, ...p }: DivProps) => <div className={cn('mt-4 flex items-center', className)} {...p} />;

@@ -67,7 +67,7 @@ function getStageDisplayMessage(stage: UpdateStage, dfuProgress: DfuProgress): s
     case 'configuring':
       return 'Configuring device...';
     case 'complete':
-      return 'Update complete!';
+      return 'Update complete';
     case 'error':
     case 'cancelled':
       return dfuProgress.message;
@@ -191,7 +191,7 @@ export class DeviceService implements IDeviceRepository {
           devicePath: device.path,
           stage: 'complete',
           progress: 100,
-          message: 'Update complete!',
+          message: 'Update complete',
         });
       }
     } catch (error) {
