@@ -1,0 +1,42 @@
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { UpdateDialog } from './UpdateDialog';
+import { useUpdaterStore } from '@/stores/updaterStore';
+import { useWizardStore } from '@/stores/wizardStore';
+import { updaterService } from '@/services/UpdaterService';
+
+vi.mock('@/services/UpdaterService', async (orig) => ({
+  ...(await orig<typeof import('@/services/UpdaterService')>()),
+  updaterService: { checkForUpdate: vi.fn(), downloadAndInstall: vi.fn(), relaunchApp: vi.fn() },
+}));
+
+const info = { version: '9.9.9', currentVersion: '1.0.0', releaseNotes: 'Faster flashing.', releaseDate: null };
+
+describe('UpdateDialog', () => {
+  beforeEach(() => {
+    useUpdaterStore.getState().reset();
+    useWizardStore.getState().reset();
+  });
+
+  it('offers the app update in plain words', () => {
+    act(() => useUpdaterStore.getState().setUpdateAvailable(info));
+    render(<UpdateDialog />);
+    expect(screen.getByRole('alertdialog', { name: 'A new BlueBuzzah Updater is ready' })).toHaveTextContent('Version 9.9.9 is ready. You have 1.0.0.');
+    expect(screen.getByText("What's new")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Not now' }));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+
+  it('shows a failed install with next steps, the detail in code and a retry of the install', async () => {
+    vi.mocked(updaterService.downloadAndInstall).mockRejectedValueOnce(new Error('signature mismatch')).mockResolvedValue(undefined);
+    act(() => useUpdaterStore.getState().setUpdateAvailable(info));
+    render(<UpdateDialog />);
+    fireEvent.click(screen.getByRole('button', { name: 'Install and restart' }));
+    expect(await screen.findByText("The update didn't install")).toBeInTheDocument();
+    expect(screen.getByText('Check your internet connection, then select Try again.')).toBeInTheDocument();
+    expect(screen.getByText(/signature mismatch/)).toHaveClass('code-s');
+    expect(screen.getByRole('button', { name: 'Copy details' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(updaterService.downloadAndInstall).toHaveBeenCalledTimes(2));
+  });
+});

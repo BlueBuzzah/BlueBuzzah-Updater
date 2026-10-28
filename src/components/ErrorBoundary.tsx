@@ -1,7 +1,7 @@
 import { Component, ErrorInfo, ReactNode } from 'react';
-import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { AlertTriangle } from 'lucide-react';
+import { Copy, OctagonAlert } from 'lucide-react';
+import { ICON } from '@/components/ui/icon';
 
 interface ErrorBoundaryProps {
   children: ReactNode;
@@ -30,35 +30,31 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     window.location.reload();
   };
 
+  copyDetails = (): void => {
+    navigator.clipboard?.writeText(this.state.error?.stack ?? this.state.error?.message ?? '').catch(() => {});
+  };
+
   render(): ReactNode {
     if (this.state.hasError) {
       return (
-        <div className="flex items-center justify-center min-h-screen p-4 bg-background">
-          <Card className="max-w-md w-full">
-            <CardHeader className="text-center">
-              <AlertTriangle className="h-12 w-12 mx-auto text-destructive mb-2" />
-              <CardTitle>Something Went Wrong</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-muted-foreground text-center">
-                An unexpected error occurred. Please restart the application to continue.
-              </p>
-              {this.state.error && (
-                <p className="mt-3 text-xs text-muted-foreground/70 text-center font-mono break-all">
-                  {this.state.error.message}
-                </p>
-              )}
-            </CardContent>
-            <CardFooter className="justify-center">
-              <Button onClick={this.handleRestart}>
-                Restart Application
+        <main className="grid min-h-screen place-items-center bg-surface p-10 text-ink">
+          <div className="grid w-full max-w-prose gap-6">
+            <OctagonAlert size={ICON.l} className="text-danger" />
+            <h1 className="headline">Something went wrong</h1>
+            <p className="body">The Updater hit a problem it couldn&apos;t recover from. Restart it to continue.</p>
+            {this.state.error && (
+              <p className="code-s whitespace-pre-wrap rounded-md bg-surface-sunken p-4 text-ink-muted">{this.state.error.message}</p>
+            )}
+            <div className="flex flex-wrap gap-target-gap">
+              <Button variant="secondary" icon={Copy} onClick={this.copyDetails}>
+                Copy details
               </Button>
-            </CardFooter>
-          </Card>
-        </div>
+              <Button onClick={this.handleRestart}>Restart the Updater</Button>
+            </div>
+          </div>
+        </main>
       );
     }
-
     return this.props.children;
   }
 }

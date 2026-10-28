@@ -1,345 +1,167 @@
-// Error message mapping and troubleshooting guidance
+// Error message mapping and troubleshooting guidance.
+// Copy follows the design system's voice: say what happened, then what to do;
+// codes and raw detail go underneath in code-s, never in the title.
 
 export interface ErrorGuidance {
   title: string;
   description: string;
   resolutionSteps: string[];
+  /** Stable DFU-0xx code from the backend, shown in the detail line */
+  code?: string;
 }
+
+const REPLUG = 'Unplug the device, wait 5 seconds, then plug it back in.';
+const TRY_AGAIN = 'Select Try again.';
+const NO_HUB = 'Plug the device straight into your computer, not into a hub.';
 
 export const ERROR_GUIDANCE: Record<string, ErrorGuidance> = {
   DEVICE_NOT_FOUND: {
-    title: 'Device Not Found',
-    description: 'The selected device is no longer connected or accessible.',
-    resolutionSteps: [
-      'Check that the device is properly connected via USB',
-      'Ensure the device is mounted and visible in your file manager',
-      'Try unplugging and reconnecting the device',
-      'Click "Refresh" to detect devices again',
-    ],
-  },
-  DEVICE_NOT_WRITABLE: {
-    title: 'Device Not Writable',
-    description: 'Cannot write to the device due to permissions or write protection.',
-    resolutionSteps: [
-      'Check if the device has a physical write-protect switch',
-      'macOS: Grant Full Disk Access in System Settings → Privacy & Security → Full Disk Access',
-      'Windows: Ensure no other application is accessing the device',
-      'Ensure the device is not mounted as read-only',
-      'Try ejecting and reconnecting the device',
-    ],
-  },
-  INSUFFICIENT_SPACE: {
-    title: 'Insufficient Disk Space',
-    description: 'The device does not have enough free space for the firmware.',
-    resolutionSteps: [
-      'Free up space on the device by deleting unnecessary files',
-      'Typical firmware requires ~10 MB of free space',
-      'Check available space in your file manager',
-    ],
+    title: "Can't find your device",
+    description: 'The device was unplugged or stopped responding.',
+    resolutionSteps: ['Check the USB cable is plugged in at both ends.', REPLUG, 'Select Rescan.'],
   },
   PERMISSION_DENIED: {
-    title: 'Permission Denied',
-    description: 'You do not have permission to access or modify the device.',
+    title: 'Your computer blocked the device',
+    description: "The Updater isn't allowed to open the device's USB port.",
     resolutionSteps: [
-      'macOS: System Settings → Privacy & Security → Full Disk Access → Add your Terminal or IDE',
-      'Windows: Try running the application as Administrator',
-      'Ensure you have admin/root privileges if required',
-      'Try running the application with elevated permissions',
+      'Close any other app that uses the device, such as a serial monitor.',
+      'Unplug the device, then plug it back in.',
+      'Restart the Updater.',
     ],
   },
   NETWORK_ERROR: {
-    title: 'Network Error',
-    description: 'Failed to download firmware from GitHub.',
+    title: "Can't reach GitHub",
+    description: "We download firmware from GitHub, and the connection didn't work.",
     resolutionSteps: [
-      'Check your internet connection',
-      'Verify GitHub is accessible (not blocked by firewall)',
-      'Try again later if GitHub is experiencing issues',
-      'Check if you have reached GitHub API rate limits (60 requests/hour)',
+      'Check your internet connection.',
+      'Wait a minute, then select Try again.',
+      'Firmware you downloaded before is still available.',
     ],
   },
   FIRMWARE_DOWNLOAD_FAILED: {
-    title: 'Firmware Download Failed',
-    description: 'Could not download or extract the firmware file.',
-    resolutionSteps: [
-      'Check your internet connection',
-      'Ensure you have enough disk space for the download',
-      'Try selecting a different firmware version',
-      'Clear browser cache and try again',
-    ],
+    title: "Firmware download didn't finish",
+    description: "The firmware file couldn't be downloaded or opened.",
+    resolutionSteps: ['Check your internet connection.', TRY_AGAIN, 'If it fails again, choose a different version.'],
   },
-  COPY_FAILED: {
-    title: 'File Copy Failed',
-    description: 'Failed to copy firmware files to the device.',
-    resolutionSteps: [
-      'Ensure the device is still connected',
-      'Check that the device has enough free space',
-      'Verify the device is not write-protected',
-      'Close any programs that might be accessing the device',
-    ],
-  },
-  CONFIG_WRITE_FAILED: {
-    title: 'Configuration Write Failed',
-    description: 'Failed to write configuration file to the device.',
-    resolutionSteps: [
-      'Ensure the device is still connected',
-      'Check write permissions on the device',
-      'Verify the device is not full',
-      'Try manually creating a config.py file if needed',
-    ],
-  },
-  // DFU-specific errors
   DFU_BOOTLOADER_FAILED: {
-    title: 'Bootloader Entry Failed',
-    description: 'Could not enter DFU bootloader mode on the device.',
-    resolutionSteps: [
-      'Ensure the device is connected and powered on',
-      'Press the reset button twice quickly to manually enter DFU mode',
-      'Look for a pulsing LED indicating bootloader mode',
-      'Try a different USB cable or port',
-    ],
+    title: "Couldn't get the device ready",
+    description: "The device didn't switch into update mode.",
+    resolutionSteps: [REPLUG, 'Try a different USB cable or port.', TRY_AGAIN],
   },
   DFU_TRANSFER_FAILED: {
-    title: 'Firmware Transfer Failed',
-    description: 'The firmware upload was interrupted.',
-    resolutionSteps: [
-      'Do not disconnect the device during firmware transfer',
-      'Ensure the device has stable power',
-      'Try resetting the device and starting over',
-      'Check USB connection stability',
-    ],
+    title: 'Firmware transfer stopped',
+    description: 'The connection broke while firmware was being written.',
+    resolutionSteps: ['Keep the device plugged in and still during the flash.', 'Try a different USB cable or port.', TRY_AGAIN],
   },
   DFU_VALIDATION_FAILED: {
-    title: 'Firmware Validation Failed',
-    description: 'The device rejected the firmware after transfer.',
-    resolutionSteps: [
-      'Ensure you are using the correct firmware for your device',
-      'Check that the firmware file is not corrupted',
-      'Try downloading the firmware again',
-      'Contact support if the issue persists',
-    ],
+    title: "The device didn't accept the firmware",
+    description: 'The firmware arrived, but the device rejected it.',
+    resolutionSteps: ['Check that you chose firmware for this device.', 'Delete the download, then flash again to get a fresh copy.'],
   },
   SERIAL_PORT_ERROR: {
-    title: 'Serial Port Error',
-    description: 'Cannot communicate with the device serial port.',
+    title: "Can't talk to the device",
+    description: "Another app may be using the device's USB port.",
     resolutionSteps: [
-      'Check that no other application is using the serial port',
-      'Ensure device drivers are properly installed',
-      'Try unplugging and reconnecting the device',
-      'Restart the application',
+      'Close other apps that use the device, such as a serial monitor.',
+      'Unplug the device, then plug it back in.',
+      'Restart the Updater.',
     ],
   },
   DFU_TIMEOUT: {
-    title: 'DFU Timeout',
-    description: 'Device did not respond within expected time.',
-    resolutionSteps: [
-      'The device may have disconnected - check USB connection',
-      'Try resetting the device and starting over',
-      'Ensure the device is not in a locked or frozen state',
-      'Use a shorter or higher-quality USB cable',
-    ],
+    title: 'The device stopped answering',
+    description: "The device didn't reply in time.",
+    resolutionSteps: ['Check the USB cable is plugged in at both ends.', REPLUG, TRY_AGAIN],
   },
   ROLE_CONFIG_FAILED: {
-    title: 'Role Configuration Failed',
-    description: 'Failed to configure device role after firmware update.',
-    resolutionSteps: [
-      'The firmware was installed but role configuration failed',
-      'Try manually configuring the device role via serial terminal',
-      'Restart the device and try the update again',
-    ],
+    title: "Firmware installed, but the role wasn't set",
+    description: "The new firmware is on the device. Setting it as Primary or Secondary didn't finish.",
+    resolutionSteps: ['Unplug the device, then plug it back in.', 'Flash it again. The firmware is already downloaded.'],
   },
   INVALID_FIRMWARE_FORMAT: {
-    title: 'Invalid Firmware Format',
-    description: 'The firmware package is not in the expected Nordic DFU format.',
-    resolutionSteps: [
-      'Ensure the firmware zip contains manifest.json, firmware.bin, and firmware.dat',
-      'Download the correct DFU firmware package from the releases page',
-      'Contact support if you need a compatible firmware package',
-    ],
+    title: "This firmware can't be used",
+    description: "The download isn't a firmware package the Updater can flash.",
+    resolutionSteps: ['Choose a different version.'],
   },
   DFU_CANCELLED: {
-    title: 'Installation Cancelled',
-    description: 'The firmware update was cancelled before completion.',
-    resolutionSteps: [
-      'Your device may be in bootloader mode',
-      'Double-tap the reset button to enter DFU mode',
-      'Reconnect and restart the update to complete installation',
-      'If the device is unresponsive, unplug and reconnect it',
-    ],
+    title: 'Flash stopped',
+    description: 'The flash stopped before it finished. The device may not start until you flash it again.',
+    resolutionSteps: ['Keep the device plugged in.', 'Select Flash firmware to start again.'],
   },
   DFU_MAX_RETRIES: {
-    title: 'Maximum Retries Exceeded',
-    description: 'The firmware transfer failed after multiple automatic retry attempts.',
-    resolutionSteps: [
-      'The connection to the device is unstable',
-      'Try using a different USB cable (prefer shorter, high-quality cables)',
-      'Connect directly to your computer instead of through a USB hub',
-      'Make sure the device has stable power',
-      'Try a different USB port',
-      'Restart both the device and the application',
-    ],
+    title: 'Flash failed after several tries',
+    description: 'The USB connection kept dropping.',
+    resolutionSteps: [NO_HUB, 'Try a shorter USB cable or a different port.', TRY_AGAIN],
   },
   DFU_DEVICE_DISCONNECTED: {
-    title: 'Device Disconnected',
-    description: 'The device was disconnected or became unresponsive during the update.',
-    resolutionSteps: [
-      'Ensure the device is securely connected via USB',
-      'Do not move or bump the device during the update',
-      'Try a different USB port or cable',
-      'If the device is in bootloader mode, double-tap reset to restart it',
-      'Restart the update process',
-    ],
+    title: 'The device was unplugged during the flash',
+    description: 'The connection was lost before the flash finished.',
+    resolutionSteps: ['Plug the device back in.', 'Keep it still until the flash finishes.', TRY_AGAIN],
   },
   DFU_CRC_ERROR: {
-    title: 'Data Transfer Error',
-    description: 'Data corruption was detected during the firmware transfer.',
-    resolutionSteps: [
-      'This is usually caused by an unstable USB connection',
-      'Try using a shorter or higher-quality USB cable',
-      'Connect directly to your computer (avoid USB hubs)',
-      'Ensure no other applications are using the device',
-      'Restart the update - the application will automatically retry',
-    ],
+    title: 'Some firmware data arrived damaged',
+    description: 'This usually means the USB connection is unreliable.',
+    resolutionSteps: [NO_HUB, 'Try a shorter USB cable.', TRY_AGAIN],
   },
   DFU_CONNECTION_UNSTABLE: {
-    title: 'Unstable Connection',
-    description: 'The connection to the device is experiencing intermittent issues.',
-    resolutionSteps: [
-      'Check that the USB cable is firmly connected',
-      'Try a different USB port (prefer USB 3.0 ports)',
-      'Use a shorter USB cable if possible',
-      'Close other applications that may be using USB bandwidth',
-      'The update may still succeed with automatic retries',
-    ],
+    title: 'The USB connection is unreliable',
+    description: 'The flash may still finish. The Updater tries again on its own.',
+    resolutionSteps: ['Check the USB cable is pushed in firmly.', 'If it fails, try a different cable or port.'],
   },
   DFU_SERIAL_NUMBER_MISSING: {
-    title: 'Device Identification Failed',
-    description: 'Unable to track the device through mode changes due to missing serial number.',
-    resolutionSteps: [
-      'Try disconnecting and reconnecting the device',
-      'Restart the application',
-      'If this persists, the device may need to have its serial number programmed',
-      'Contact support for assistance',
-    ],
+    title: "Can't keep track of this device",
+    description: "The device doesn't report a serial number, so the Updater loses it when it restarts.",
+    resolutionSteps: ['Unplug the device, then plug it back in.', 'Restart the Updater, then try again.'],
   },
   DFU_WINDOWS_DRIVER: {
-    title: 'Windows Driver Issue',
-    description: 'Windows USB driver encountered a temporary issue communicating with the device.',
-    resolutionSteps: [
-      'The application will automatically retry the operation',
-      'If retries fail, try unplugging and reconnecting the device',
-      'Ensure no other applications are using the device',
-      'Try a different USB port (prefer USB 3.0 ports)',
-      'Avoid USB hubs - connect directly to your computer',
-      'Restart the application if the issue persists',
-    ],
+    title: 'Windows lost the USB connection for a moment',
+    description: 'The Updater tries again on its own.',
+    resolutionSteps: ['If it fails, unplug the device and plug it back in.', 'Plug it straight into your computer, not into a hub.'],
   },
   DFU_RETRYING: {
-    title: 'Automatic Retry in Progress',
-    description: 'The operation encountered a temporary issue and is being retried automatically.',
-    resolutionSteps: [
-      'This is normal behavior for intermittent USB communication issues',
-      'Keep the device connected and wait for the retry to complete',
-      'If multiple retries fail, try a different USB cable or port',
-      'The update may still succeed after one or more retries',
-    ],
+    title: 'Trying again',
+    description: 'The connection dropped for a moment. The Updater is trying again.',
+    resolutionSteps: ['Keep the device plugged in.'],
   },
   RATE_LIMITED: {
-    title: 'GitHub Rate Limit Exceeded',
-    description: 'Too many requests have been made to the GitHub API.',
-    resolutionSteps: [
-      'Wait a few minutes before trying again',
-      'GitHub allows 60 requests per hour for unauthenticated users',
-      'Cached firmware versions are still available for installation',
-      'Try again after the rate limit resets',
-    ],
+    title: 'GitHub asked us to wait',
+    description: 'There were too many firmware checks in the last hour.',
+    resolutionSteps: ['Wait a few minutes, then select Try again.', 'Firmware you downloaded before is still available.'],
   },
 };
 
-export function getErrorGuidance(errorMessage: string): ErrorGuidance | null {
-  // Match error patterns to guidance
-  const lowerError = errorMessage.toLowerCase();
+function matchGuidance(lower: string): ErrorGuidance | null {
+  const has = (...words: string[]) => words.some((w) => lower.includes(w));
+  const word = (w: string) => new RegExp(`\\b${w}\\b`).test(lower);
 
-  // Check specific firmware format errors first (before generic "not found")
-  if (lowerError.includes('missing file') || lowerError.includes('manifest.json') ||
-      lowerError.includes('firmware.bin') || lowerError.includes('firmware.dat')) {
-    return ERROR_GUIDANCE.INVALID_FIRMWARE_FORMAT;
-  }
-
-  if (lowerError.includes('not found') || lowerError.includes('does not exist')) {
-    return ERROR_GUIDANCE.DEVICE_NOT_FOUND;
-  }
-  if (lowerError.includes('not writable') || lowerError.includes('read-only')) {
-    return ERROR_GUIDANCE.DEVICE_NOT_WRITABLE;
-  }
-  if (lowerError.includes('insufficient') || lowerError.includes('no space') || lowerError.includes('disk space')) {
-    return ERROR_GUIDANCE.INSUFFICIENT_SPACE;
-  }
-  if (lowerError.includes('permission denied') || lowerError.includes('access denied')) {
-    return ERROR_GUIDANCE.PERMISSION_DENIED;
-  }
-  if (lowerError.includes('rate limit')) {
-    return ERROR_GUIDANCE.RATE_LIMITED;
-  }
-  if (lowerError.includes('network') || lowerError.includes('connection')) {
-    return ERROR_GUIDANCE.NETWORK_ERROR;
-  }
-  if (lowerError.includes('download') || lowerError.includes('fetch')) {
-    return ERROR_GUIDANCE.FIRMWARE_DOWNLOAD_FAILED;
-  }
-  if (lowerError.includes('copy') || lowerError.includes('transfer')) {
-    return ERROR_GUIDANCE.COPY_FAILED;
-  }
-  if (lowerError.includes('config')) {
-    return ERROR_GUIDANCE.CONFIG_WRITE_FAILED;
-  }
-
-  // DFU-specific error patterns - check more specific patterns first
-
-  // Windows driver issues
-  if (lowerError.includes('not functioning') ||
-      (lowerError.includes('windows') && lowerError.includes('driver'))) {
-    return ERROR_GUIDANCE.DFU_WINDOWS_DRIVER;
-  }
-
-  if (lowerError.includes('max retries') || lowerError.includes('retries exceeded') ||
-      lowerError.includes('retry attempt')) {
-    return ERROR_GUIDANCE.DFU_MAX_RETRIES;
-  }
-  if (lowerError.includes('disconnected') || lowerError.includes('health check')) {
-    return ERROR_GUIDANCE.DFU_DEVICE_DISCONNECTED;
-  }
-  if (lowerError.includes('crc') || lowerError.includes('checksum') ||
-      lowerError.includes('data corruption')) {
-    return ERROR_GUIDANCE.DFU_CRC_ERROR;
-  }
-  if (lowerError.includes('no serial number') || lowerError.includes('serial number')) {
-    return ERROR_GUIDANCE.DFU_SERIAL_NUMBER_MISSING;
-  }
-  if (lowerError.includes('bootloader') || lowerError.includes('dfu mode')) {
-    return ERROR_GUIDANCE.DFU_BOOTLOADER_FAILED;
-  }
-  if (lowerError.includes('serial') || lowerError.includes('port')) {
-    return ERROR_GUIDANCE.SERIAL_PORT_ERROR;
-  }
-  if (lowerError.includes('timeout') || lowerError.includes('timed out')) {
-    return ERROR_GUIDANCE.DFU_TIMEOUT;
-  }
-  if (lowerError.includes('validation') || lowerError.includes('rejected')) {
-    return ERROR_GUIDANCE.DFU_VALIDATION_FAILED;
-  }
-  if (lowerError.includes('role') && lowerError.includes('config')) {
-    return ERROR_GUIDANCE.ROLE_CONFIG_FAILED;
-  }
-  if (lowerError.includes('cancelled') || lowerError.includes('canceled')) {
-    return ERROR_GUIDANCE.DFU_CANCELLED;
-  }
-  // Catch-all for general connection issues with retry indicators
-  if ((lowerError.includes('retry') || lowerError.includes('recovered')) &&
-      lowerError.includes('connection')) {
-    return ERROR_GUIDANCE.DFU_CONNECTION_UNSTABLE;
-  }
-
+  // Specific firmware format errors first (before generic "not found")
+  if (has('missing file', 'manifest.json', 'firmware.bin', 'firmware.dat')) return ERROR_GUIDANCE.INVALID_FIRMWARE_FORMAT;
+  if (has('role') && has('config')) return ERROR_GUIDANCE.ROLE_CONFIG_FAILED;
+  if (has('not found', 'does not exist')) return ERROR_GUIDANCE.DEVICE_NOT_FOUND;
+  if (has('permission denied', 'access denied')) return ERROR_GUIDANCE.PERMISSION_DENIED;
+  if (has('rate limit')) return ERROR_GUIDANCE.RATE_LIMITED;
+  // A flaky USB link is not a GitHub problem: check it before the network rule.
+  if (has('connection') && has('unstable', 'usb', 'retry', 'recovered', 'intermittent')) return ERROR_GUIDANCE.DFU_CONNECTION_UNSTABLE;
+  if (has('network', 'connection')) return ERROR_GUIDANCE.NETWORK_ERROR;
+  if (has('download', 'fetch')) return ERROR_GUIDANCE.FIRMWARE_DOWNLOAD_FAILED;
+  if (has('not functioning') || (has('windows') && has('driver'))) return ERROR_GUIDANCE.DFU_WINDOWS_DRIVER;
+  if (has('max retries', 'retries exceeded', 'retry attempt')) return ERROR_GUIDANCE.DFU_MAX_RETRIES;
+  if (has('disconnected', 'health check')) return ERROR_GUIDANCE.DFU_DEVICE_DISCONNECTED;
+  if (has('crc', 'checksum', 'data corruption')) return ERROR_GUIDANCE.DFU_CRC_ERROR;
+  if (has('serial number')) return ERROR_GUIDANCE.DFU_SERIAL_NUMBER_MISSING;
+  if (has('bootloader', 'dfu mode')) return ERROR_GUIDANCE.DFU_BOOTLOADER_FAILED;
+  if (has('transfer')) return ERROR_GUIDANCE.DFU_TRANSFER_FAILED;
+  if (word('serial') || word('port')) return ERROR_GUIDANCE.SERIAL_PORT_ERROR;
+  if (has('timeout', 'timed out')) return ERROR_GUIDANCE.DFU_TIMEOUT;
+  if (has('validation', 'rejected')) return ERROR_GUIDANCE.DFU_VALIDATION_FAILED;
+  if (has('cancelled', 'canceled')) return ERROR_GUIDANCE.DFU_CANCELLED;
   return null;
+}
+
+export function getErrorGuidance(errorMessage: string): ErrorGuidance | null {
+  const guidance = matchGuidance(errorMessage.toLowerCase());
+  if (!guidance) return null;
+  const code = errorMessage.match(/DFU-0\d{2}/)?.[0];
+  return code ? { ...guidance, code } : guidance;
 }
 
 export function formatValidationErrors(errors: string[]): string {
@@ -350,7 +172,7 @@ export function formatValidationErrors(errors: string[]): string {
 
 export function formatValidationWarnings(warnings: string[]): string {
   if (warnings.length === 0) return '';
-  return warnings.map((warn) => `⚠️ ${warn}`).join('\n');
+  return warnings.map((warn) => `Warning: ${warn}`).join('\n');
 }
 
 /**
@@ -406,21 +228,11 @@ export function getErrorGuidanceForPlatform(
   };
 }
 
-/** Longest device-card error summary before it gets an ellipsis. */
-const MAX_SUMMARY_LENGTH = 160;
+const FALLBACK_SUMMARY = "Setup didn't finish. Open the log for details.";
 
-/**
- * Condense a raw backend error into one short line fit for a device card.
- *
- * Firmware timeouts embed the device's entire echoed serial stream after
- * `Received:` — boot banners, BLE chatter, status blocks. That detail is
- * genuinely useful when diagnosing, but it belongs in the copyable log, not
- * splashed across a status card where it buries the one line that says what
- * actually went wrong. Callers should log the raw text and display this.
- */
 export function summarizeDeviceError(raw: string): string {
   const text = (raw ?? '').trim();
-  if (!text) return 'Configuration failed';
+  if (!text) return FALLBACK_SUMMARY;
 
   // Cut the echoed device output, keeping the sentence that introduces it.
   // Coupled to the exact ". Received:" wording that `dfu/menu.rs` builds its
@@ -430,10 +242,6 @@ export function summarizeDeviceError(raw: string): string {
   const echoIndex = text.search(/\.\s*Received:/i);
   const withoutEcho = echoIndex >= 0 ? text.slice(0, echoIndex + 1) : text;
 
-  const firstLine = withoutEcho.split('\n')[0].trim();
-  if (!firstLine) return 'Configuration failed';
-
-  return firstLine.length > MAX_SUMMARY_LENGTH
-    ? `${firstLine.slice(0, MAX_SUMMARY_LENGTH - 1).trimEnd()}…`
-    : firstLine;
+  // Nothing truncates (README Type): the first line is shown whole and wraps.
+  return withoutEcho.split('\n')[0].trim() || FALLBACK_SUMMARY;
 }

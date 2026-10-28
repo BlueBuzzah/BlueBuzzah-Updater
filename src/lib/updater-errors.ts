@@ -4,6 +4,8 @@ import { UpdaterErrorInfo, UpdaterErrorStage } from '@/types';
  * Extracts detailed error information from Tauri updater errors.
  * Captures message, cause, and stack trace for debugging.
  */
+const FALLBACK = 'Something went wrong with the update.';
+
 export function extractUpdaterError(
   error: unknown,
   stage: UpdaterErrorStage
@@ -12,7 +14,7 @@ export function extractUpdaterError(
   let details: string;
 
   if (error instanceof Error) {
-    message = error.message || 'Unknown error';
+    message = error.message || FALLBACK;
 
     const parts: string[] = [];
 
@@ -51,13 +53,13 @@ export function extractUpdaterError(
       message =
         (error as Record<string, unknown>).message?.toString() ||
         (error as Record<string, unknown>).error?.toString() ||
-        'Update error';
+        FALLBACK;
     } catch {
-      message = 'Update error';
+      message = FALLBACK;
       details = String(error);
     }
   } else {
-    message = 'Unknown error';
+    message = FALLBACK;
     details = String(error) || 'No error details available';
   }
 
@@ -102,11 +104,11 @@ export function getStageDescription(stage: UpdaterErrorStage): string {
     case 'check':
       return 'checking for updates';
     case 'download':
-      return 'downloading update';
+      return 'downloading the update';
     case 'install':
-      return 'installing update';
+      return 'installing the update';
     case 'relaunch':
-      return 'relaunching application';
+      return 'restarting the Updater';
     default:
       return 'updating';
   }

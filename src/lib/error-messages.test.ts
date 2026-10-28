@@ -21,31 +21,6 @@ describe('getErrorGuidance', () => {
     });
   });
 
-  describe('DEVICE_NOT_WRITABLE pattern', () => {
-    it('matches "not writable" errors', () => {
-      expect(getErrorGuidance('Device is not writable')).toBe(ERROR_GUIDANCE.DEVICE_NOT_WRITABLE);
-    });
-
-    it('matches "read-only" errors', () => {
-      expect(getErrorGuidance('File system is read-only')).toBe(ERROR_GUIDANCE.DEVICE_NOT_WRITABLE);
-      expect(getErrorGuidance('Read-only file system')).toBe(ERROR_GUIDANCE.DEVICE_NOT_WRITABLE);
-    });
-  });
-
-  describe('INSUFFICIENT_SPACE pattern', () => {
-    it('matches "insufficient" errors', () => {
-      expect(getErrorGuidance('Insufficient space on device')).toBe(ERROR_GUIDANCE.INSUFFICIENT_SPACE);
-    });
-
-    it('matches "no space" errors', () => {
-      expect(getErrorGuidance('No space left on device')).toBe(ERROR_GUIDANCE.INSUFFICIENT_SPACE);
-    });
-
-    it('matches "disk space" errors', () => {
-      expect(getErrorGuidance('Not enough disk space')).toBe(ERROR_GUIDANCE.INSUFFICIENT_SPACE);
-    });
-  });
-
   describe('PERMISSION_DENIED pattern', () => {
     it('matches "permission denied" errors', () => {
       expect(getErrorGuidance('Permission denied')).toBe(ERROR_GUIDANCE.PERMISSION_DENIED);
@@ -93,25 +68,11 @@ describe('getErrorGuidance', () => {
     });
   });
 
-  describe('COPY_FAILED pattern', () => {
-    it('matches "copy" errors', () => {
-      expect(getErrorGuidance('Failed to copy file')).toBe(ERROR_GUIDANCE.COPY_FAILED);
-      expect(getErrorGuidance('Copy operation failed')).toBe(ERROR_GUIDANCE.COPY_FAILED);
-    });
-
-    it('matches "transfer" errors', () => {
-      expect(getErrorGuidance('Transfer failed')).toBe(ERROR_GUIDANCE.COPY_FAILED);
-      expect(getErrorGuidance('File transfer error')).toBe(ERROR_GUIDANCE.COPY_FAILED);
+  describe('DFU_TRANSFER_FAILED pattern', () => {
+    it('matches transfer errors', () => {
+      expect(getErrorGuidance('Transfer failed')).toBe(ERROR_GUIDANCE.DFU_TRANSFER_FAILED);
     });
   });
-
-  describe('CONFIG_WRITE_FAILED pattern', () => {
-    it('matches "config" errors', () => {
-      expect(getErrorGuidance('Failed to write config')).toBe(ERROR_GUIDANCE.CONFIG_WRITE_FAILED);
-      expect(getErrorGuidance('Config file error')).toBe(ERROR_GUIDANCE.CONFIG_WRITE_FAILED);
-    });
-  });
-
   describe('INVALID_FIRMWARE_FORMAT pattern', () => {
     it('matches "missing file" errors', () => {
       expect(getErrorGuidance('Missing file in firmware.zip: manifest.json')).toBe(ERROR_GUIDANCE.INVALID_FIRMWARE_FORMAT);
@@ -182,17 +143,17 @@ describe('formatValidationWarnings', () => {
 
   it('formats single warning with emoji', () => {
     const result = formatValidationWarnings(['Warning one']);
-    expect(result).toBe('⚠️ Warning one');
+    expect(result).toBe('Warning: Warning one');
   });
 
   it('formats multiple warnings with emoji prefix', () => {
     const result = formatValidationWarnings(['Warning one', 'Warning two']);
-    expect(result).toBe('⚠️ Warning one\n⚠️ Warning two');
+    expect(result).toBe('Warning: Warning one\nWarning: Warning two');
   });
 
   it('handles three warnings', () => {
     const result = formatValidationWarnings(['First', 'Second', 'Third']);
-    expect(result).toBe('⚠️ First\n⚠️ Second\n⚠️ Third');
+    expect(result).toBe('Warning: First\nWarning: Second\nWarning: Third');
   });
 });
 
@@ -226,40 +187,10 @@ describe('getErrorGuidanceForPlatform', () => {
     expect(getErrorGuidanceForPlatform('completely random error', 'macos')).toBeNull();
   });
 
-  it('returns all steps when platform is undefined', () => {
-    const guidance = getErrorGuidanceForPlatform('Permission denied');
-    expect(guidance).not.toBeNull();
-    const hasMacStep = guidance!.resolutionSteps.some(s => s.includes('macOS:') || s.includes('System Settings'));
-    expect(hasMacStep).toBe(true);
-  });
-
-  it('filters out Windows steps on macOS', () => {
-    const guidance = getErrorGuidanceForPlatform('Permission denied', 'macos');
-    expect(guidance).not.toBeNull();
-    const hasWindowsStep = guidance!.resolutionSteps.some(s => s.startsWith('Windows:'));
-    expect(hasWindowsStep).toBe(false);
-  });
-
-  it('filters out macOS steps on Windows', () => {
-    const guidance = getErrorGuidanceForPlatform('Permission denied', 'windows');
-    expect(guidance).not.toBeNull();
-    const hasMacStep = guidance!.resolutionSteps.some(s => s.startsWith('macOS:'));
-    expect(hasMacStep).toBe(false);
-  });
-
-  it('strips platform prefix for matching platform', () => {
-    const guidance = getErrorGuidanceForPlatform('Permission denied', 'macos');
-    expect(guidance).not.toBeNull();
-    const macStep = guidance!.resolutionSteps.find(s => s.includes('System Settings'));
-    expect(macStep).toBeDefined();
-    expect(macStep).not.toMatch(/^macOS:/);
-  });
-
-  it('keeps generic steps on all platforms', () => {
-    const macGuidance = getErrorGuidanceForPlatform('Permission denied', 'macos');
-    const winGuidance = getErrorGuidanceForPlatform('Permission denied', 'windows');
-    expect(macGuidance!.resolutionSteps.some(s => s.includes('admin/root'))).toBe(true);
-    expect(winGuidance!.resolutionSteps.some(s => s.includes('admin/root'))).toBe(true);
+  it('keeps generic steps on every platform', () => {
+    const steps = getErrorGuidance('Permission denied')!.resolutionSteps;
+    expect(getErrorGuidanceForPlatform('Permission denied', 'macos')!.resolutionSteps).toEqual(steps);
+    expect(getErrorGuidanceForPlatform('Permission denied', 'windows')!.resolutionSteps).toEqual(steps);
   });
 });
 
@@ -291,15 +222,54 @@ describe('summarizeDeviceError', () => {
     );
   });
 
-  it('truncates an overlong single line', () => {
+  it('never truncates a long line (nothing truncates mid-word)', () => {
     const long = `Failed because ${'x'.repeat(400)}`;
-    const summary = summarizeDeviceError(long);
-    expect(summary.length).toBeLessThanOrEqual(160);
-    expect(summary.endsWith('…')).toBe(true);
+    expect(summarizeDeviceError(long)).toBe(long);
   });
 
   it('falls back for an empty or whitespace-only message', () => {
-    expect(summarizeDeviceError('   ')).toBe('Configuration failed');
-    expect(summarizeDeviceError('')).toBe('Configuration failed');
+    expect(summarizeDeviceError('   ')).toBe("Setup didn't finish. Open the log for details.");
+    expect(summarizeDeviceError('')).toBe("Setup didn't finish. Open the log for details.");
+  });
+});
+
+describe('catalog voice', () => {
+  const entries = Object.values(ERROR_GUIDANCE);
+
+  it('uses sentence case for every title', () => {
+    for (const { title } of entries) {
+      expect(title.replace(/\b(BlueBuzzah|GitHub|USB|Primary|Secondary|Windows)\b/g, '').trim().slice(1)).not.toMatch(/[A-Z]/);
+    }
+  });
+
+  it('has no exclamation marks, emoji, obsolete advice or double-tap steps', () => {
+    const text = JSON.stringify(ERROR_GUIDANCE);
+    for (const banned of ['!', '⚠', 'config.py', 'file manager', 'twice', 'double-tap']) {
+      expect(text).not.toContain(banned);
+    }
+  });
+
+  it('dropped the mass-storage era entries', () => {
+    for (const key of ['DEVICE_NOT_WRITABLE', 'INSUFFICIENT_SPACE', 'COPY_FAILED', 'CONFIG_WRITE_FAILED']) {
+      expect(ERROR_GUIDANCE).not.toHaveProperty(key);
+    }
+  });
+});
+
+describe('matcher fixes', () => {
+  it('reaches ROLE_CONFIG_FAILED', () => {
+    expect(getErrorGuidance('Role configuration failed after config write')).toBe(ERROR_GUIDANCE.ROLE_CONFIG_FAILED);
+  });
+
+  it('sends an unstable USB connection to DFU_CONNECTION_UNSTABLE, not the GitHub message', () => {
+    expect(getErrorGuidance('USB connection unstable')).toBe(ERROR_GUIDANCE.DFU_CONNECTION_UNSTABLE);
+  });
+
+  it('does not read "unsupported" as a port error', () => {
+    expect(getErrorGuidance('unsupported board')).not.toBe(ERROR_GUIDANCE.SERIAL_PORT_ERROR);
+  });
+
+  it('extracts a DFU error code for the detail line', () => {
+    expect(getErrorGuidance('DFU-014 timeout waiting for device')?.code).toBe('DFU-014');
   });
 });
