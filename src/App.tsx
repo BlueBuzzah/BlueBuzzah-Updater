@@ -1,308 +1,43 @@
-import { useState } from 'react';
-import { useWizardStore } from './stores/wizardStore';
-import { useTherapyStore } from './stores/therapyStore';
-import { WizardLayout } from './components/layout/WizardLayout';
-import { TherapyWizardLayout } from './components/layout/TherapyWizardLayout';
-import { FirmwareSelection } from './components/wizard/FirmwareSelection';
-import { DeviceSelection } from './components/wizard/DeviceSelection';
-import { InstallationProgress } from './components/wizard/InstallationProgress';
-import { SuccessScreen } from './components/wizard/SuccessScreen';
-import {
-  ProfileSelection,
-  TherapyDeviceSelection,
-  TherapyProgress,
-  TherapySuccess,
-} from './components/therapy';
-import { HomeScreen, AppMode } from './components/home/HomeScreen';
+import { useCallback, useState } from 'react';
+import { ConfigurePage } from './components/configure/ConfigurePage';
+import { FirmwarePage } from './components/firmware/FirmwarePage';
+import { SettingsPage } from './components/settings/SettingsPage';
+import { AppShell } from './components/shell/AppShell';
 import { Toaster } from './components/ui/toaster';
 import { UpdateDialog } from './components/updater/UpdateDialog';
 import { useAppUpdater } from './hooks/useAppUpdater';
+import { useShortcuts, type Section } from './hooks/useShortcuts';
 import { useTheme } from './hooks/useTheme';
-import type { FirmwareRelease, TherapyProfile, UpdateResult } from './types';
+import { useIsBusy } from './stores/busy';
+
+const TITLES: Record<Section, string> = {
+  firmware: 'Flash firmware',
+  configure: 'Configure devices',
+  settings: 'Settings',
+};
 
 function App() {
-  const [appMode, setAppMode] = useState<AppMode>('home');
+  const [section, setSection] = useState<Section>('firmware');
+  const { busy, kind } = useIsBusy();
   useTheme();
-
-  // Initialize app updater (checks on startup)
   useAppUpdater();
 
-  // Firmware wizard store
-  const {
-    currentStep: firmwareStep,
-    selectedRelease,
-    selectedDevices: firmwareDevices,
-    selectRelease,
-    setDevices: setFirmwareDevices,
-    updateDeviceRole,
-    nextStep: nextFirmwareStep,
-    previousStep: previousFirmwareStep,
-    setUpdateProgress,
-    setUpdateResult,
-    setStep: setFirmwareStep,
-    reset: resetFirmware,
-  } = useWizardStore();
+  const rescan = useCallback(() => window.dispatchEvent(new Event('bb:rescan')), []);
+  useShortcuts({ onSection: setSection, onRescan: rescan, enabled: !busy });
 
-  // Therapy wizard store
-  const {
-    step: therapyStep,
-    selectedProfile,
-    selectedDevices: therapyDevices,
-    result: therapyResult,
-    toggleDevice,
-    nextStep: nextTherapyStep,
-    previousStep: previousTherapyStep,
-    setProgress: setTherapyProgress,
-    setResult: setTherapyResult,
-    setStep: setTherapyStep,
-    reset: resetTherapy,
-  } = useTherapyStore();
+  const title = kind === 'flash' ? 'Flashing firmware' : kind === 'configure' ? 'Setting up devices' : TITLES[section];
 
-  // =========================================================================
-  // Firmware Wizard Logic
-  // =========================================================================
-
-  const canGoNextFirmware = () => {
-    switch (firmwareStep) {
-      case 0:
-        return selectedRelease !== null;
-      case 1: {
-        if (firmwareDevices.length === 0) return false;
-        if (!firmwareDevices.every((d) => d.role !== undefined)) return false;
-        // When 2 devices selected, require complementary PRIMARY + SECONDARY roles
-        if (firmwareDevices.length === 2) {
-          const hasPrimary = firmwareDevices.some((d) => d.role === 'PRIMARY');
-          const hasSecondary = firmwareDevices.some((d) => d.role === 'SECONDARY');
-          return hasPrimary && hasSecondary;
-        }
-        return true;
-      }
-      case 2:
-        return false; // Can't manually proceed during installation
-      case 3:
-        return false; // No next on complete screen
-      default:
-        return false;
-    }
-  };
-
-  const canGoBackFirmware = () => {
-    return firmwareStep > 0 && firmwareStep < 2;
-  };
-
-  const handleNextFirmware = () => {
-    if (canGoNextFirmware()) {
-      nextFirmwareStep();
-    }
-  };
-
-  const handleBackFirmware = () => {
-    if (canGoBackFirmware()) {
-      previousFirmwareStep();
-    }
-  };
-
-  const handleInstallationComplete = (result: UpdateResult) => {
-    setUpdateResult(result);
-    if (result.success) {
-      setTimeout(() => {
-        setFirmwareStep(3);
-      }, 1000);
-    }
-  };
-
-  const handleFirmwareSelect = (release: FirmwareRelease) => {
-    selectRelease(release);
-    nextFirmwareStep();
-  };
-
-  // =========================================================================
-  // Therapy Wizard Logic
-  // =========================================================================
-
-  const canGoNextTherapy = () => {
-    switch (therapyStep) {
-      case 0:
-        return selectedProfile !== null;
-      case 1:
-        return therapyDevices.length > 0;
-      case 2:
-        return false; // Can't manually proceed during configuration
-      default:
-        return false;
-    }
-  };
-
-  const canGoBackTherapy = () => {
-    return therapyStep > 0 && therapyStep < 2;
-  };
-
-  const handleNextTherapy = () => {
-    if (canGoNextTherapy()) {
-      nextTherapyStep();
-    }
-  };
-
-  const handleBackTherapy = () => {
-    if (canGoBackTherapy()) {
-      previousTherapyStep();
-    }
-  };
-
-  const handleProfileSelect = (_profile: TherapyProfile) => {
-    // ProfileSelection handles syncing to therapyStore internally
-    // We just need to navigate to device selection step
-    nextTherapyStep();
-  };
-
-  // =========================================================================
-  // Navigation Handlers
-  // =========================================================================
-
-  const handleBackToHome = () => {
-    resetFirmware();
-    resetTherapy();
-    setAppMode('home');
-  };
-
-  const handleResetFirmware = () => {
-    resetFirmware();
-  };
-
-  const handleResetTherapy = () => {
-    resetTherapy();
-    setTherapyStep(0);
-  };
-
-  // =========================================================================
-  // Render Logic
-  // =========================================================================
-
-  // Home Screen
-  if (appMode === 'home') {
-    return (
-      <>
-        <HomeScreen onSelectMode={setAppMode} />
-        <Toaster />
-        <UpdateDialog />
-      </>
-    );
-  }
-
-  // Firmware Wizard
-  if (appMode === 'firmware') {
-    const renderFirmwareStep = () => {
-      switch (firmwareStep) {
-        case 0:
-          return <FirmwareSelection onSelect={handleFirmwareSelect} />;
-        case 1:
-          return (
-            <DeviceSelection
-              selectedDevices={firmwareDevices}
-              onDevicesChange={setFirmwareDevices}
-              onRoleChange={updateDeviceRole}
-            />
-          );
-        case 2:
-          return selectedRelease ? (
-            <InstallationProgress
-              release={selectedRelease}
-              devices={firmwareDevices}
-              onComplete={handleInstallationComplete}
-              onProgressUpdate={setUpdateProgress}
-            />
-          ) : null;
-        case 3:
-          return selectedRelease ? (
-            <SuccessScreen
-              release={selectedRelease}
-              devices={firmwareDevices}
-              onReset={handleResetFirmware}
-              onClose={handleBackToHome}
-            />
-          ) : null;
-        default:
-          return null;
-      }
-    };
-
-    return (
-      <>
-        <WizardLayout
-          currentStep={firmwareStep}
-          canGoNext={canGoNextFirmware()}
-          canGoBack={canGoBackFirmware()}
-          onNext={handleNextFirmware}
-          onBack={handleBackFirmware}
-          onBackToHome={handleBackToHome}
-        >
-          {renderFirmwareStep()}
-        </WizardLayout>
-        <Toaster />
-        <UpdateDialog />
-      </>
-    );
-  }
-
-  // Therapy Wizard
-  if (appMode === 'therapy') {
-    const renderTherapyStep = () => {
-      switch (therapyStep) {
-        case 0:
-          return (
-            <ProfileSelection onSelect={handleProfileSelect} />
-          );
-        case 1:
-          return selectedProfile ? (
-            <TherapyDeviceSelection
-              selectedProfile={selectedProfile}
-              selectedDevices={therapyDevices}
-              onToggleDevice={toggleDevice}
-            />
-          ) : null;
-        case 2:
-          return selectedProfile && therapyResult ? (
-            <TherapySuccess
-              profile={selectedProfile}
-              devices={therapyDevices}
-              result={therapyResult}
-              onReset={handleResetTherapy}
-              onClose={handleBackToHome}
-            />
-          ) : selectedProfile ? (
-            <TherapyProgress
-              profile={selectedProfile}
-              devices={therapyDevices}
-              onComplete={(result) => {
-                setTherapyResult(result);
-              }}
-              onProgressUpdate={setTherapyProgress}
-            />
-          ) : null;
-        default:
-          return null;
-      }
-    };
-
-    return (
-      <>
-        <TherapyWizardLayout
-          currentStep={therapyStep}
-          canGoNext={canGoNextTherapy()}
-          canGoBack={canGoBackTherapy()}
-          onNext={handleNextTherapy}
-          onBack={handleBackTherapy}
-          onBackToHome={handleBackToHome}
-        >
-          {renderTherapyStep()}
-        </TherapyWizardLayout>
-        <Toaster />
-        <UpdateDialog />
-      </>
-    );
-  }
-
-  return null;
+  return (
+    <>
+      <AppShell section={section} onSectionChange={setSection} title={title} busy={kind}>
+        {section === 'firmware' && <FirmwarePage />}
+        {section === 'configure' && <ConfigurePage />}
+        {section === 'settings' && <SettingsPage />}
+      </AppShell>
+      <Toaster />
+      <UpdateDialog />
+    </>
+  );
 }
 
 export default App;
