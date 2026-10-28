@@ -1522,7 +1522,7 @@ pub fn configure_custom_profile<L: Fn(&str) + Clone>(
         Ok(device) => device,
         Err(e) => {
             return Ok(ProfileConfigOutcome::partial_with_detail(
-                "Profile loaded, but the glove did not reappear after rebooting. \
+                "Profile loaded, but the device did not reappear after rebooting. \
                  It may still be running its previous custom settings.",
                 e.to_string(),
             ))
