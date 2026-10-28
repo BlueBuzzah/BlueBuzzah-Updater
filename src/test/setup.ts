@@ -33,6 +33,14 @@ if (!window.matchMedia) {
     }) as MediaQueryList;
 }
 
+// Mock the Tauri window (plain functions so resetAllMocks keeps them working)
+vi.mock('@tauri-apps/api/window', () => ({
+  getCurrentWindow: () => ({
+    onCloseRequested: () => Promise.resolve(() => {}),
+    destroy: () => Promise.resolve(),
+  }),
+}));
+
 // Mock fetch for GitHub API calls
 global.fetch = vi.fn();
 

@@ -15,6 +15,7 @@ import { useUpdaterStore } from '@/stores/updaterStore';
 import { updaterService, UpdaterError } from '@/services/UpdaterService';
 import { useToast } from '@/components/ui/use-toast';
 import { extractUpdaterError, getStageDescription } from '@/lib/updater-errors';
+import { useIsBusy } from '@/stores/busy';
 
 export function UpdateDialog() {
   const {
@@ -31,13 +32,15 @@ export function UpdateDialog() {
   } = useUpdaterStore();
 
   const { toast } = useToast();
+  const { busy } = useIsBusy();
   const [isInstalling, setIsInstalling] = useState(false);
   const [copied, setCopied] = useState(false);
 
   // Show dialog for updates OR errors
   const showUpdateDialog = updateAvailable && !dismissed && !error;
   const showErrorDialog = error !== null;
-  const isOpen = showUpdateDialog || showErrorDialog;
+  // Never offer a relaunch while a flash or setup runs (updater.md)
+  const isOpen = !busy && (showUpdateDialog || showErrorDialog);
 
   const handleInstall = async () => {
     setIsInstalling(true);
