@@ -575,7 +575,7 @@ where
     on_progress(DfuStage::ConfiguringRole);
     let role_started = std::time::Instant::now();
     let role_result =
-        configure_device_role_flexible(&app_device.port, device_role, &device_identifier).map_err(
+        configure_device_role_flexible(&app_device.port, device_role, &device_identifier, |_| {}, || false).map_err(
             |e| match e {
                 DfuError::RoleConfigFailed { .. } => e,
                 other => DfuError::RoleConfigFailed {
@@ -708,15 +708,21 @@ fn configure_device_role(port_name: &str, role: &str, serial_number: &str) -> Df
 ///
 /// Works with both serial number and VID/PID+port pattern tracking.
 /// Includes automatic retry for timing-related failures.
-pub(crate) fn configure_device_role_flexible(
+pub(crate) fn configure_device_role_flexible<L: Fn(&str), C: Fn() -> bool>(
     port_name: &str,
     role: &str,
     identifier: &DeviceIdentifier,
+    log: L,
+    is_cancelled: C,
 ) -> DfuResult<()> {
     let mut last_error: Option<DfuError> = None;
     let mut current_port = port_name.to_string();
 
     for attempt in 0..=MAX_CONFIG_RETRIES {
+        if is_cancelled() {
+            return Err(DfuError::Cancelled);
+        }
+
         // On retry, wait for device to stabilize and update port
         if attempt > 0 {
             std::thread::sleep(Duration::from_millis(CONFIG_RETRY_DELAY_MS));
@@ -732,9 +738,20 @@ pub(crate) fn configure_device_role_flexible(
             }
         }
 
-        match configure_device_role_flexible_inner(&current_port, role, identifier) {
+        log(&format!(
+            "Role config attempt {}/{} on {}",
+            attempt + 1,
+            MAX_CONFIG_RETRIES + 1,
+            current_port
+        ));
+        match configure_device_role_flexible_inner(&current_port, role, identifier, &log) {
             Ok(()) => return Ok(()),
             Err(e) if e.is_retriable() && attempt < MAX_CONFIG_RETRIES => {
+                log(&format!(
+                    "Role config attempt {} failed: {}",
+                    attempt + 1,
+                    e
+                ));
                 last_error = Some(e);
             }
             Err(e) => return Err(e),
@@ -747,11 +764,23 @@ pub(crate) fn configure_device_role_flexible(
     }))
 }
 
+/// Wrap a role-step error as `RoleConfigFailed` so it never triggers a re-flash.
+/// `Cancelled` passes through so a stopped run reads as cancelled.
+pub(crate) fn wrap_role_error(e: DfuError) -> DfuError {
+    match e {
+        DfuError::Cancelled | DfuError::RoleConfigFailed { .. } => e,
+        other => DfuError::RoleConfigFailed {
+            reason: other.to_string(),
+        },
+    }
+}
+
 /// Inner implementation of role configuration without retry logic.
-fn configure_device_role_flexible_inner(
+fn configure_device_role_flexible_inner<L: Fn(&str)>(
     port_name: &str,
     role: &str,
     identifier: &DeviceIdentifier,
+    log: &L,
 ) -> DfuResult<()> {
     let command = match role.to_uppercase().as_str() {
         "PRIMARY" => ROLE_PRIMARY_COMMAND,
@@ -774,6 +803,7 @@ fn configure_device_role_flexible_inner(
 
     // Small delay then send command
     std::thread::sleep(Duration::from_millis(100));
+    log(&format!("Sending {}", command.trim_end()));
     transport.write(command.as_bytes())?;
     transport.flush()?;
 
@@ -798,6 +828,7 @@ fn configure_device_role_flexible_inner(
                 // Success! Device will now reboot.
                 // Close the transport before device disconnects
                 drop(transport);
+                log("Role acknowledged, waiting for device to restart");
 
                 // Wait for device to reboot and reappear
                 std::thread::sleep(Duration::from_millis(get_reboot_settle_delay()));
@@ -1411,6 +1442,41 @@ pub fn configure_custom_profile<L: Fn(&str) + Clone>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn role_config_cancelled_before_touching_port() {
+        let id = DeviceIdentifier::Serial {
+            serial: "X".into(),
+            vid: 0x239A,
+            pid: 0x8029,
+            port_pattern: String::new(),
+        };
+        let logged = std::cell::RefCell::new(Vec::<String>::new());
+        let err = configure_device_role_flexible(
+            "/dev/does-not-exist",
+            "PRIMARY",
+            &id,
+            |m| logged.borrow_mut().push(m.into()),
+            || true,
+        )
+        .unwrap_err();
+        assert!(matches!(err, DfuError::Cancelled));
+        assert!(logged.borrow().iter().all(|m| !m.starts_with("Sending")));
+    }
+
+    #[test]
+    fn wrap_role_error_keeps_cancel_distinct() {
+        assert!(matches!(
+            wrap_role_error(DfuError::Cancelled),
+            DfuError::Cancelled
+        ));
+        let wrapped = wrap_role_error(DfuError::Timeout);
+        assert!(matches!(wrapped, DfuError::RoleConfigFailed { .. }));
+        assert!(wrapped
+            .to_string()
+            .to_lowercase()
+            .contains("failed to configure device role"));
+    }
 
     #[test]
     fn test_dfu_stage_percent() {

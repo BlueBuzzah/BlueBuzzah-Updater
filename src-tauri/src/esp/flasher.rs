@@ -215,7 +215,7 @@ pub fn flash_v3<F: Fn(DfuStage), C: Fn() -> bool>(
         .map_err(|e| format!("Device did not come back up after flashing: {}", e))?;
 
     on_progress(DfuStage::ConfiguringRole);
-    configure_device_role_flexible(&device.port, device_role, &identifier)
+    configure_device_role_flexible(&device.port, device_role, &identifier, |_| {}, || false)
         .map_err(|e| format!("Failed to configure device role: {}", e))?;
 
     on_progress(DfuStage::Complete);
