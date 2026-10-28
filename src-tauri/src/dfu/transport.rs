@@ -60,6 +60,12 @@ pub struct SerialTransport {
 }
 
 impl SerialTransport {
+    /// Wrap an already-open port (tests drive a pseudo-terminal this way).
+    #[cfg(test)]
+    pub(crate) fn from_port(port: Box<dyn SerialPort>) -> Self {
+        Self { port }
+    }
+
     /// Open a serial port for DFU communication.
     ///
     /// Uses the standard DFU baud rate (115200) and typical settings.

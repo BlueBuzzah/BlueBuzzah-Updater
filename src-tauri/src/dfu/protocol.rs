@@ -751,7 +751,13 @@ pub(crate) fn configure_device_role_flexible<L: Fn(&str), C: Fn() -> bool>(
             MAX_CONFIG_RETRIES + 1,
             current_port
         ));
-        match configure_device_role_flexible_inner(&current_port, role, identifier, &log) {
+        match configure_device_role_flexible_inner(
+            &current_port,
+            role,
+            identifier,
+            &log,
+            &is_cancelled,
+        ) {
             Ok(()) => return Ok(()),
             Err(e) if e.is_retriable() && attempt < MAX_CONFIG_RETRIES => {
                 log(&format!(
@@ -860,11 +866,15 @@ pub(crate) fn configure_role_with_deadline<L: Fn(&str), C: Fn() -> bool>(
 }
 
 /// Inner implementation of role configuration without retry logic.
-fn configure_device_role_flexible_inner<L: Fn(&str)>(
+///
+/// Checks `is_cancelled` between steps so a stopped attempt releases the port
+/// and never sends SET_ROLE after the run has ended.
+fn configure_device_role_flexible_inner<L: Fn(&str), C: Fn() -> bool>(
     port_name: &str,
     role: &str,
     identifier: &DeviceIdentifier,
     log: &L,
+    is_cancelled: &C,
 ) -> DfuResult<()> {
     let command = match role.to_uppercase().as_str() {
         "PRIMARY" => ROLE_PRIMARY_COMMAND,
@@ -877,7 +887,21 @@ fn configure_device_role_flexible_inner<L: Fn(&str)>(
     };
 
     // Open port and send command
-    let mut transport = SerialTransport::open(port_name)?;
+    let transport = SerialTransport::open(port_name)?;
+    send_role_command(transport, command, identifier, log, is_cancelled)
+}
+
+/// Send one role command on an open port and wait for the ack and reboot.
+fn send_role_command<L: Fn(&str), C: Fn() -> bool>(
+    mut transport: SerialTransport,
+    command: &str,
+    identifier: &DeviceIdentifier,
+    log: &L,
+    is_cancelled: &C,
+) -> DfuResult<()> {
+    if is_cancelled() {
+        return Err(DfuError::Cancelled);
+    }
 
     // Drain boot output using enhanced detection
     drain_boot_output(&mut transport)?;
@@ -887,6 +911,9 @@ fn configure_device_role_flexible_inner<L: Fn(&str)>(
 
     // Small delay then send command
     std::thread::sleep(Duration::from_millis(100));
+    if is_cancelled() {
+        return Err(DfuError::Cancelled);
+    }
     log(&format!("Sending {}", command.trim_end()));
     transport.write(command.as_bytes())?;
     transport.flush()?;
@@ -899,8 +926,14 @@ fn configure_device_role_flexible_inner<L: Fn(&str)>(
     let mut buffer = [0u8; 256];
 
     while start.elapsed() < timeout {
-        let remaining = timeout.saturating_sub(start.elapsed());
-        let bytes_read = transport.read(&mut buffer, remaining.as_millis() as u64)?;
+        if is_cancelled() {
+            return Err(DfuError::Cancelled);
+        }
+        // Read in short slices so a stop is noticed while waiting for the ack.
+        let wait = timeout
+            .saturating_sub(start.elapsed())
+            .min(Duration::from_millis(100));
+        let bytes_read = transport.read(&mut buffer, wait.as_millis() as u64)?;
 
         if bytes_read > 0 {
             response.extend_from_slice(&buffer[..bytes_read]);
@@ -1526,6 +1559,31 @@ pub fn configure_custom_profile<L: Fn(&str) + Clone>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A stopped role attempt must let go of the port without sending SET_ROLE,
+    /// or Try Again finds the port busy and the stopped role still gets written.
+    #[cfg(unix)]
+    #[test]
+    fn stopped_role_attempt_sends_nothing() {
+        use serialport::SerialPort;
+        use std::io::Read;
+        let (mut master, slave) = serialport::TTYPort::pair().unwrap();
+        let transport = SerialTransport::from_port(Box::new(slave));
+        let id = DeviceIdentifier::Serial {
+            serial: "X".into(),
+            vid: 0x239A,
+            pid: 0x8029,
+            port_pattern: String::new(),
+        };
+        let stop = || true;
+        let err = send_role_command(transport, ROLE_PRIMARY_COMMAND, &id, &|_: &str| {}, &stop)
+            .unwrap_err();
+        assert!(matches!(err, DfuError::Cancelled), "got {err:?}");
+        master.set_timeout(Duration::from_millis(200)).unwrap();
+        let mut buf = [0u8; 64];
+        let sent = master.read(&mut buf).unwrap_or(0);
+        assert_eq!(sent, 0, "SET_ROLE was written after stop");
+    }
 
     #[test]
     fn deadline_runner_forwards_logs_and_result() {

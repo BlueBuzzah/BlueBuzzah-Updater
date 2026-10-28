@@ -142,8 +142,9 @@ pub const ROLE_CONFIG_TIMEOUT_MS: u64 = 5000;
 /// Max wait for the device to take queued serial output before `flush` gives up.
 pub const SERIAL_FLUSH_TIMEOUT_MS: u64 = 1000;
 
-/// Overall bound on the post-flash role step, retries included.
-pub const ROLE_CONFIG_DEADLINE_MS: u64 = 150_000;
+/// Overall bound on the post-flash role step, retries included. Sized for three
+/// attempts at the Windows worst-case port open (~60 s each); Stop ends it sooner.
+pub const ROLE_CONFIG_DEADLINE_MS: u64 = 300_000;
 
 // ============================================================================
 // Retry Configuration
@@ -448,6 +449,22 @@ pub fn is_esp32s3_device(vid: u16, pid: u16) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn role_deadline_covers_worst_case_retries() {
+        // Every role attempt can spend the Windows worst-case port open, the boot
+        // drain (5 s), the flush and the ack wait; the last also waits for reboot.
+        let open = MAX_PORT_OPEN_RETRIES as u64 * (PORT_OPEN_TIMEOUT_MS + PORT_OPEN_MAX_DELAY_MS);
+        let attempt = open + 5000 + SERIAL_FLUSH_TIMEOUT_MS + ROLE_CONFIG_TIMEOUT_MS;
+        let attempts = MAX_CONFIG_RETRIES as u64 + 1;
+        let between = MAX_CONFIG_RETRIES as u64 * (CONFIG_RETRY_DELAY_MS + 5000);
+        let worst =
+            attempts * attempt + between + get_reboot_settle_delay() + get_reboot_timeout();
+        assert!(
+            ROLE_CONFIG_DEADLINE_MS >= worst,
+            "deadline {ROLE_CONFIG_DEADLINE_MS} < worst case {worst}"
+        );
+    }
 
     #[test]
     fn test_is_bootloader_pid() {

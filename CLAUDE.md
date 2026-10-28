@@ -60,7 +60,7 @@ grep -rnE "text-(xs|sm|base|lg|[0-9]?xl)\b|text-\[|#[0-9a-fA-F]{3,8}\b|rgba?\(|h
 
 | Rust module (`src-tauri/src/`) | Purpose |
 |--------------------------------|---------|
-| `dfu/protocol.rs` | DFU state machine — `upload_firmware()`, `configure_device_role_flexible()`, `configure_device_with_settings()`, `drain_boot_output()` |
+| `dfu/protocol.rs` | DFU state machine — `upload_firmware()`, `configure_role_with_deadline()` (wraps `configure_device_role_flexible()` in an overall deadline), `configure_device_with_settings()`, `drain_boot_output()` |
 | `dfu/transport.rs` | Serial transport, 1200-baud touch reset, port-open retry; `open()` (resets board) vs `open_for_query()` (doesn't) |
 | `dfu/device.rs` | Device detection; `DeviceIdentifier` tracks devices across re-enumeration (serial number preferred, VID/PID+port-pattern fallback) |
 | `dfu/slip.rs`, `dfu/packet.rs` | SLIP/HCI framing, CRC16 |
@@ -69,7 +69,7 @@ grep -rnE "text-(xs|sm|base|lg|[0-9]?xl)\b|text-\[|#[0-9a-fA-F]{3,8}\b|rgba?\(|h
 | `dfu/config.rs` | VID/PIDs, opcodes, all timing/retry constants |
 | `dfu/error.rs` | `DfuError` taxonomy — `is_retriable()`, `is_operation_retriable()`, stable `error_code()` (DFU-0xx) |
 | `esp/manifest.rs` | v3 (ESP32-S3/PentaBuzzer) firmware zip parsing — validates `manifest_version` 1, board `pentabuzzer_esp32s3`, chip `esp32s3`, per-part SHA256; parses manifest flash offsets |
-| `esp/flasher.rs` | espflash 4.5-based multi-part flash over the ESP32-S3 USB-JTAG/Serial bootloader; reuses `DfuStage` progress and `configure_device_role_flexible` role config; exposes Tauri command `flash_v3_firmware` |
+| `esp/flasher.rs` | espflash 4.5-based multi-part flash over the ESP32-S3 USB-JTAG/Serial bootloader; reuses `DfuStage` progress and `configure_role_with_deadline` role config; exposes Tauri command `flash_v3_firmware` |
 | `commands/` | Tauri command boundary (`dfu.rs`, `firmware.rs`, `settings.rs`); stringifies errors for frontend |
 | `cache.rs` | Per-version firmware cache with SHA256 verification |
 | `settings.rs` | `AdvancedSettings` persistence + pre-profile serial command generation |
