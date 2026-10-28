@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
 import { useState } from 'react';
 import { FirmwareSelection } from './FirmwareSelection';
 import { firmwareService } from '@/services/FirmwareService';
@@ -32,6 +32,15 @@ function Harness({ onChange = vi.fn() }: { onChange?: (r: FirmwareRelease | null
   );
 }
 
+async function openPicker() {
+  fireEvent.click(await screen.findByRole('button', { name: 'Change version' }));
+  return screen.getByRole('dialog', { name: 'Choose a version' });
+}
+
+function row(dialog: HTMLElement, version: string) {
+  return within(dialog).getByRole('listitem', { name: `Version ${version}` });
+}
+
 describe('FirmwareSelection', () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -43,54 +52,78 @@ describe('FirmwareSelection', () => {
     expect(screen.getByText('Loading firmware versions…')).toBeInTheDocument();
   });
 
-  it('preselects the newest stable release and marks it Latest', async () => {
+  it('starts on the newest stable release, shown compactly with a green Latest badge', async () => {
     vi.mocked(firmwareService.fetchReleases).mockResolvedValue([beta, stable, older]);
     render(<Harness />);
-    const group = await screen.findByRole('radiogroup', { name: 'Choose a version' });
-    expect(group).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole('radio', { name: /2\.0\.4/ })).toHaveAttribute('aria-checked', 'true'));
-    expect(screen.queryByRole('radio', { name: /2\.1\.0-beta/ })).toBeNull();
-    expect(screen.getByRole('radio', { name: /2\.0\.4/ })).toHaveTextContent('Latest');
+    await waitFor(() => expect(screen.getByText('2.0.4')).toHaveClass('code'));
+    expect(screen.getByText('Latest').closest('.bb-badge')).toHaveClass('bb-badge--success');
+    expect(screen.queryByText('2.0.3')).toBeNull();
   });
 
-  it('keeps the stable choice and the Latest badge when experimental versions are shown', async () => {
+  it('lists every version in a dialog and closes it after choosing one', async () => {
+    vi.mocked(firmwareService.fetchReleases).mockResolvedValue([beta, stable, older]);
+    const onChange = vi.fn();
+    render(<Harness onChange={onChange} />);
+    const dialog = await openPicker();
+    expect(within(dialog).queryByText('2.1.0-beta')).toBeNull();
+    expect(within(row(dialog, '2.0.4')).getByText('Latest')).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Choose version 2.0.3' }));
+    expect(onChange).toHaveBeenLastCalledWith(older);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(screen.getByText('2.0.3')).toBeInTheDocument();
+  });
+
+  it('marks the current choice in the list instead of offering Choose', async () => {
+    vi.mocked(firmwareService.fetchReleases).mockResolvedValue([stable, older]);
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('2.0.4')).toBeInTheDocument());
+    const dialog = await openPicker();
+    expect(within(row(dialog, '2.0.4')).getByText('Chosen')).toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: 'Choose version 2.0.4' })).toBeNull();
+  });
+
+  it('shows experimental versions from the switch at the top of the dialog', async () => {
     vi.mocked(firmwareService.fetchReleases).mockResolvedValue([beta, stable, older]);
     render(<Harness />);
-    await waitFor(() => expect(screen.getByRole('radio', { name: /2\.0\.4/ })).toHaveAttribute('aria-checked', 'true'));
-    fireEvent.click(screen.getByRole('switch', { name: 'Show experimental versions' }));
-    const betaRadio = screen.getByRole('radio', { name: /2\.1\.0-beta/ });
-    expect(betaRadio).toHaveTextContent('Experimental');
-    expect(betaRadio).not.toHaveTextContent('Latest');
-    expect(screen.getByRole('radio', { name: /2\.0\.4/ })).toHaveAttribute('aria-checked', 'true');
+    const dialog = await openPicker();
+    fireEvent.click(within(dialog).getByRole('switch', { name: 'Show experimental versions' }));
+    const betaRow = row(dialog, '2.1.0-beta');
+    expect(within(betaRow).getByText('Experimental')).toBeInTheDocument();
+    expect(within(betaRow).queryByText('Latest')).toBeNull();
   });
 
   it('falls back to the newest stable when the chosen experimental version is hidden again', async () => {
     vi.mocked(firmwareService.fetchReleases).mockResolvedValue([beta, stable]);
     const onChange = vi.fn();
     render(<Harness onChange={onChange} />);
-    await screen.findByRole('radiogroup');
-    fireEvent.click(screen.getByRole('switch', { name: 'Show experimental versions' }));
-    fireEvent.click(screen.getByRole('radio', { name: /2\.1\.0-beta/ }));
-    fireEvent.click(screen.getByRole('switch', { name: 'Show experimental versions' }));
+    const dialog = await openPicker();
+    const toggle = within(dialog).getByRole('switch', { name: 'Show experimental versions' });
+    fireEvent.click(toggle);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Choose version 2.1.0-beta' }));
+    const reopened = await openPicker();
+    fireEvent.click(within(reopened).getByRole('switch', { name: 'Show experimental versions' }));
     expect(onChange).toHaveBeenLastCalledWith(stable);
   });
 
-  it('shows release notes for the chosen version behind a disclosure, with underlined links', async () => {
+  it('opens release notes inside a row, with underlined links', async () => {
     vi.mocked(firmwareService.fetchReleases).mockResolvedValue([stable]);
     render(<Harness />);
-    const toggle = await screen.findByRole('button', { name: 'Show release notes' });
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    fireEvent.click(toggle);
-    expect(screen.getByRole('button', { name: 'Hide release notes' })).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByRole('link', { name: 'docs' }).closest('.release-notes')).not.toBeNull();
+    const dialog = await openPicker();
+    const notes = within(row(dialog, '2.0.4')).getByRole('button', { name: 'Release notes' });
+    expect(notes).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(notes);
+    expect(notes).toHaveAttribute('aria-expanded', 'true');
+    expect(within(dialog).getByRole('link', { name: 'docs' }).closest('.release-notes')).not.toBeNull();
   });
 
-  it('deletes a download only after confirming', async () => {
+  it('deletes a download from its row only after confirming', async () => {
     const cached = { ...stable, isCached: true, cachedEntries: [createMockCachedMetadata({ version: '2.0.4' })] };
-    vi.mocked(firmwareService.fetchReleases).mockResolvedValue([cached]);
+    vi.mocked(firmwareService.fetchReleases).mockResolvedValue([cached, older]);
     render(<Harness />);
-    expect(await screen.findByRole('radio', { name: /2\.0\.4/ })).toHaveTextContent('Downloaded');
-    fireEvent.click(screen.getByRole('button', { name: 'Delete download' }));
+    const dialog = await openPicker();
+    expect(within(row(dialog, '2.0.4')).getByText('Downloaded')).toBeInTheDocument();
+    expect(within(row(dialog, '2.0.3')).queryByRole('button', { name: /Delete download/ })).toBeNull();
+    fireEvent.click(within(row(dialog, '2.0.4')).getByRole('button', { name: 'Delete download of version 2.0.4' }));
     expect(screen.getByRole('alertdialog', { name: 'Delete this download?' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     await waitFor(() => expect(firmwareService.deleteCachedFirmware).toHaveBeenCalledWith('2.0.4', 'nrf52'));
@@ -102,6 +135,18 @@ describe('FirmwareSelection', () => {
     expect(await screen.findByText('No firmware found')).toBeInTheDocument();
     expect(screen.getByText('rate limited')).toHaveClass('code-s');
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
-    expect(await screen.findByRole('radio', { name: /2\.0\.4/ })).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Change version' })).toBeInTheDocument();
+  });
+
+  it('returns focus to Change version when the dialog closes', async () => {
+    vi.mocked(firmwareService.fetchReleases).mockResolvedValue([stable, older]);
+    render(<Harness />);
+    const trigger = await screen.findByRole('button', { name: 'Change version' });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole('dialog', { name: 'Choose a version' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Choose version 2.0.3' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Change version' })).toHaveFocus());
   });
 });
