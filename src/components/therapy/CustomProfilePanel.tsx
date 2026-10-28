@@ -118,7 +118,7 @@ export function CustomProfilePanel(): JSX.Element {
   })();
 
   return (
-    <Card title="Custom pattern">
+    <Card title="Custom Pattern">
       <div className="grid gap-6">
         <p className="body">Set your own timing, strength and session length.</p>
         {prefillMessage && <p className="body-s text-ink-muted" aria-live="polite">{prefillMessage}</p>}
@@ -146,7 +146,7 @@ export function CustomProfilePanel(): JSX.Element {
                   setBeforeReset(previous);
                 }}
               >
-                Reset to defaults
+                Reset to Defaults
               </Button>
             )}
           </div>
@@ -190,10 +190,10 @@ export function CustomProfilePanel(): JSX.Element {
             aria-controls={timingId}
             onClick={() => setTimingOpen(!timingOpen)}
           >
-            {timingOpen ? 'Hide timing details' : 'Show timing details'}
+            {timingOpen ? 'Hide Timing Details' : 'Show Timing Details'}
           </Button>
           <Button variant="quiet" icon={RefreshCw} onClick={doRead} disabled={isReading}>
-            Load from device
+            Load from Device
           </Button>
         </div>
         {timingOpen && (

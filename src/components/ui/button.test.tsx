@@ -41,7 +41,7 @@ describe('Button', () => {
   });
 
   it('variant and size classes', () => {
-    render(<Button variant="secondary" size="lg">Copy log</Button>);
+    render(<Button variant="secondary" size="lg">Copy Log</Button>);
     const btn = screen.getByRole('button');
     expect(btn).toHaveClass('bb-btn', 'bb-btn--secondary', 'bb-btn--lg');
     expect(btn).toHaveAttribute('type', 'button');

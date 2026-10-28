@@ -31,9 +31,9 @@ describe('SettingsPage', () => {
     expect(document.documentElement.dataset.theme).toBe('light');
     fireEvent.click(screen.getByRole('switch', { name: 'High contrast' }));
     expect(document.documentElement.dataset.theme).toBe('light-hc');
-    fireEvent.click(screen.getByRole('button', { name: "Use my computer's setting" }));
+    fireEvent.click(screen.getByRole('button', { name: "Use My Computer's Setting" }));
     expect(document.documentElement.dataset.theme).toBeUndefined();
-    expect(screen.queryByRole('button', { name: "Use my computer's setting" })).toBeNull();
+    expect(screen.queryByRole('button', { name: "Use My Computer's Setting" })).toBeNull();
   });
 
   it('shows a failed launch check here, not in a dialog', () => {
@@ -48,7 +48,7 @@ describe('SettingsPage', () => {
     expect(await screen.findByText('1.2.3')).toHaveClass('code');
   });
 
-  it('a manual check offers the update again after "Not now"', async () => {
+  it('a manual check offers the update again after "Not Now"', async () => {
     const info = { version: '9.9.9', currentVersion: '1.0.0', releaseNotes: '', releaseDate: null };
     act(() => {
       useUpdaterStore.getState().setUpdateAvailable(info);
@@ -56,7 +56,7 @@ describe('SettingsPage', () => {
     });
     vi.mocked(updaterService.checkForUpdate).mockResolvedValue(info);
     render(<SettingsPage />);
-    fireEvent.click(screen.getByRole('button', { name: 'Check for updates' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Check for Updates' }));
     await waitFor(() => expect(useUpdaterStore.getState().dismissed).toBe(false));
   });
 });

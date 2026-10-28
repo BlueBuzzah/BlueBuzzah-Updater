@@ -49,7 +49,7 @@ export function FirmwarePage() {
         )}
         <div className="grid justify-items-end gap-3">
           <Button size="xl" disabled={!!blocked} aria-describedby={blocked ? 'flash-blocked' : undefined} onClick={() => setStep(2)}>
-            Update firmware
+            Update Firmware
           </Button>
           {blocked && <p id="flash-blocked" className="body-s text-right text-ink-muted">{blocked}</p>}
         </div>

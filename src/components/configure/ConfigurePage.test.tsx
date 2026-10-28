@@ -32,7 +32,7 @@ describe('ConfigurePage choose phase', () => {
 
   it('explains why Apply is unavailable', () => {
     render(<ConfigurePage />);
-    expect(screen.getByRole('button', { name: 'Apply to devices' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Apply to Devices' })).toBeDisabled();
     expect(screen.getByText('Choose a pattern and at least one device first.')).toBeInTheDocument();
   });
 
@@ -40,7 +40,7 @@ describe('ConfigurePage choose phase', () => {
     useTherapyStore.setState({ selectedProfile: 'CUSTOM', selectedDevices: [createMockDevice()] });
     useSettingsStore.setState({ settings: { disableLedDuringTherapy: false, debugMode: false, customProfile: { ...CUSTOM_DEFAULTS, on: 10 } } });
     render(<ConfigurePage />);
-    expect(screen.getByRole('button', { name: 'Apply to device' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Apply to Device' })).toBeDisabled();
     expect(screen.getByText('Fix the highlighted settings first.')).toBeInTheDocument();
   });
 
@@ -50,7 +50,7 @@ describe('ConfigurePage choose phase', () => {
     useTherapyStore.setState({ selectedProfile: 'REGULAR', selectedDevices: [createMockDevice({ path: 'a' }), createMockDevice({ path: 'b' })] });
     const setStep = vi.spyOn(useTherapyStore.getState(), 'setStep');
     render(<ConfigurePage />);
-    const btn = screen.getByRole('button', { name: 'Apply to devices' });
+    const btn = screen.getByRole('button', { name: 'Apply to Devices' });
     fireEvent.click(btn);
     vi.setSystemTime(1200);
     fireEvent.click(btn);

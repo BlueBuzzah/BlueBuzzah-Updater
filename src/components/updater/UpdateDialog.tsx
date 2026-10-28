@@ -73,8 +73,8 @@ export function UpdateDialog() {
         {error ? (
           <>
             <AlertDialogHeader>
-              <AlertDialogTitle>The update didn&apos;t install</AlertDialogTitle>
-              <AlertDialogDescription>Check your internet connection, then select Try again.</AlertDialogDescription>
+              <AlertDialogTitle>The Update Didn&apos;t Install</AlertDialogTitle>
+              <AlertDialogDescription>Check your internet connection, then select Try Again.</AlertDialogDescription>
             </AlertDialogHeader>
             <p className="code-s whitespace-pre-wrap rounded-md bg-surface-sunken p-4">
               {getStageDescription(error.stage)}: {error.message}
@@ -92,10 +92,10 @@ export function UpdateDialog() {
               </Button>
               <div className="flex flex-wrap gap-target-gap">
                 <Button variant="secondary" icon={Copy} onClick={copyDetails}>
-                  Copy details
+                  Copy Details
                 </Button>
                 <Button icon={RotateCcw} guardRepeat onClick={retry}>
-                  Try again
+                  Try Again
                 </Button>
               </div>
             </AlertDialogFooter>
@@ -103,7 +103,7 @@ export function UpdateDialog() {
         ) : (
           <>
             <AlertDialogHeader>
-              <AlertDialogTitle>A new BlueBuzzah Updater is ready</AlertDialogTitle>
+              <AlertDialogTitle>A New BlueBuzzah Updater Is Ready</AlertDialogTitle>
               <AlertDialogDescription>
                 Version <code className="code">{updateInfo?.version}</code> is ready. You have{' '}
                 <code className="code">{updateInfo?.currentVersion}</code>.
@@ -120,10 +120,10 @@ export function UpdateDialog() {
             {downloading && <ProgressBar label="Downloading the update" value={progress?.percent ?? 0} />}
             <AlertDialogFooter>
               <Button variant="quiet" onClick={dismiss} disabled={isInstalling}>
-                Not now
+                Not Now
               </Button>
               <Button icon={Download} guardRepeat onClick={install} disabled={isInstalling}>
-                Install and restart
+                Install and Restart
               </Button>
             </AlertDialogFooter>
           </>

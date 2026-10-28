@@ -78,24 +78,24 @@ describe('InstallationProgress', () => {
     expect(firmwareService.downloadFirmware).not.toHaveBeenCalled();
   });
 
-  it('shows a failure as a danger banner with steps, the detail underneath and Copy details', async () => {
+  it('shows a failure as a danger banner with steps, the detail underneath and Copy Details', async () => {
     vi.mocked(deviceService.validateDevices).mockResolvedValue(valid([primary.path]));
     vi.mocked(firmwareService.downloadFirmware).mockRejectedValue(new Error('network error: connection refused'));
     const { onComplete } = renderIt();
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent(getErrorGuidance('network error: connection refused')!.title);
-    expect(screen.getByRole('button', { name: 'Copy details' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy Details' })).toBeInTheDocument();
     expect(screen.getByText('network error: connection refused')).toHaveClass('code-s');
     expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({ success: false }));
   });
 
-  it('a tremor double click on Try again starts one retry', async () => {
+  it('a tremor double click on Try Again starts one retry', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(1000);
     vi.mocked(deviceService.validateDevices).mockResolvedValue(valid([primary.path]));
     vi.mocked(firmwareService.downloadFirmware).mockRejectedValueOnce(new Error('boom')).mockImplementation(() => new Promise(() => {}));
     renderIt();
-    const retry = await screen.findByRole('button', { name: 'Try again' });
+    const retry = await screen.findByRole('button', { name: 'Try Again' });
     fireEvent.click(retry);
     vi.setSystemTime(1100);
     fireEvent.click(retry);
@@ -107,9 +107,9 @@ describe('InstallationProgress', () => {
     vi.mocked(deviceService.validateDevices).mockImplementation(() => new Promise(() => {}));
     renderIt();
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
-    const dialog = screen.getByRole('alertdialog', { name: 'Stop the flash?' });
+    const dialog = screen.getByRole('alertdialog', { name: 'Stop the Flash?' });
     expect(dialog).not.toHaveTextContent(/twice/i);
-    fireEvent.click(screen.getByRole('button', { name: 'Stop flash' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Stop Flash' }));
     await waitFor(() => expect(deviceService.cancelFlash).toHaveBeenCalled());
   });
 

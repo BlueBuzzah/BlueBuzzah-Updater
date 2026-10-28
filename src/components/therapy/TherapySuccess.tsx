@@ -59,7 +59,7 @@ export function TherapySuccess({ profile, devices, result, onReset, onClose }: T
           title={`Setup didn't finish on ${failed.length} of ${configs.length} ${configs.length === 1 ? 'device' : 'devices'}`}
           action={
             <Button variant="secondary" icon={Copy} onClick={copyDetails}>
-              Copy details
+              Copy Details
             </Button>
           }
         >
@@ -77,14 +77,14 @@ export function TherapySuccess({ profile, devices, result, onReset, onClose }: T
     if (partial) {
       return (
         <Banner tone="warning" announce title="The pattern changed, but your custom settings may not have saved">
-          Select Apply to devices to try again.
+          Select Apply to Devices to try again.
         </Banner>
       );
     }
     if (noPrimary) {
       return (
         <Banner tone="warning" announce title="Custom settings weren't applied">
-          No device answered as the Primary device. Plug in your Primary device, then select Apply to devices again.
+          No device answered as the Primary device. Plug in your Primary device, then select Apply to Devices again.
         </Banner>
       );
     }
@@ -120,7 +120,7 @@ export function TherapySuccess({ profile, devices, result, onReset, onClose }: T
       </ul>
       <div className="flex flex-wrap gap-target-gap">
         <Button variant="secondary" onClick={onReset}>
-          Set up another device
+          Set Up Another Device
         </Button>
         <Button onClick={onClose}>Done</Button>
       </div>

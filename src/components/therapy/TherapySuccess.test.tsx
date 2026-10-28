@@ -58,10 +58,10 @@ describe('TherapySuccess', () => {
     expect(screen.getByText('Partly done', { selector: '.bb-badge span' })).toBeInTheDocument();
   });
 
-  it('reports failures as a danger banner with Copy details', () => {
+  it('reports failures as a danger banner with Copy Details', () => {
     renderWith([config('a', false), config('b', true, 'success')], false);
     expect(screen.getByRole('alert')).toHaveTextContent("Setup didn't finish on 1 of 2 devices");
-    expect(screen.getByRole('button', { name: 'Copy details' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy Details' })).toBeInTheDocument();
     expect(screen.getByText('Failed', { selector: '.bb-badge span' })).toBeInTheDocument();
   });
 
@@ -77,7 +77,7 @@ describe('TherapySuccess', () => {
         onClose={onClose}
       />
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Set up another device' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Set Up Another Device' }));
     fireEvent.click(screen.getByRole('button', { name: /^Done$/ }));
     expect(onReset).toHaveBeenCalled();
     expect(onClose).toHaveBeenCalled();

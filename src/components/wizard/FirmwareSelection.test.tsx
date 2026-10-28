@@ -33,8 +33,8 @@ function Harness({ onChange = vi.fn() }: { onChange?: (r: FirmwareRelease | null
 }
 
 async function openPicker() {
-  fireEvent.click(await screen.findByRole('button', { name: 'Change version' }));
-  return screen.getByRole('dialog', { name: 'Choose a version' });
+  fireEvent.click(await screen.findByRole('button', { name: 'Change Version' }));
+  return screen.getByRole('dialog', { name: 'Choose a Version' });
 }
 
 function row(dialog: HTMLElement, version: string) {
@@ -67,7 +67,7 @@ describe('FirmwareSelection', () => {
     const dialog = await openPicker();
     expect(within(dialog).queryByText('2.1.0-beta')).toBeNull();
     expect(within(row(dialog, '2.0.4')).getByText('Latest')).toBeInTheDocument();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Choose version 2.0.3' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Choose Version 2.0.3' }));
     expect(onChange).toHaveBeenLastCalledWith(older);
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(screen.getByText('2.0.3')).toBeInTheDocument();
@@ -84,7 +84,7 @@ describe('FirmwareSelection', () => {
     expect(check).toHaveAttribute('width', '24');
     expect(check.parentElement).toHaveClass('justify-between');
     expect(within(row(dialog, '2.0.3')).queryByRole('img', { name: 'Chosen' })).toBeNull();
-    expect(within(dialog).queryByRole('button', { name: 'Choose version 2.0.4' })).toBeNull();
+    expect(within(dialog).queryByRole('button', { name: 'Choose Version 2.0.4' })).toBeNull();
   });
 
   it('shows experimental versions from the switch at the top of the dialog', async () => {
@@ -104,7 +104,7 @@ describe('FirmwareSelection', () => {
     const dialog = await openPicker();
     const toggle = within(dialog).getByRole('switch', { name: 'Show experimental versions' });
     fireEvent.click(toggle);
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Choose version 2.1.0-beta' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Choose Version 2.1.0-beta' }));
     const reopened = await openPicker();
     fireEvent.click(within(reopened).getByRole('switch', { name: 'Show experimental versions' }));
     expect(onChange).toHaveBeenLastCalledWith(stable);
@@ -114,7 +114,7 @@ describe('FirmwareSelection', () => {
     vi.mocked(firmwareService.fetchReleases).mockResolvedValue([stable]);
     render(<Harness />);
     const dialog = await openPicker();
-    const notes = within(row(dialog, '2.0.4')).getByRole('button', { name: 'Release notes' });
+    const notes = within(row(dialog, '2.0.4')).getByRole('button', { name: 'Release Notes' });
     expect(notes).toHaveAttribute('aria-expanded', 'false');
     fireEvent.click(notes);
     expect(notes).toHaveAttribute('aria-expanded', 'true');
@@ -127,32 +127,32 @@ describe('FirmwareSelection', () => {
     render(<Harness />);
     const dialog = await openPicker();
     expect(within(row(dialog, '2.0.4')).getByText('Downloaded')).toBeInTheDocument();
-    expect(within(row(dialog, '2.0.3')).queryByRole('button', { name: /Delete download/ })).toBeNull();
-    fireEvent.click(within(row(dialog, '2.0.4')).getByRole('button', { name: 'Delete download of version 2.0.4' }));
-    expect(screen.getByRole('alertdialog', { name: 'Delete this download?' })).toBeInTheDocument();
+    expect(within(row(dialog, '2.0.3')).queryByRole('button', { name: /Delete Download/ })).toBeNull();
+    fireEvent.click(within(row(dialog, '2.0.4')).getByRole('button', { name: 'Delete Download of Version 2.0.4' }));
+    expect(screen.getByRole('alertdialog', { name: 'Delete This Download?' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     await waitFor(() => expect(firmwareService.deleteCachedFirmware).toHaveBeenCalledWith('2.0.4', 'nrf52'));
   });
 
-  it('offers Try again when nothing can be loaded', async () => {
+  it('offers Try Again when nothing can be loaded', async () => {
     vi.mocked(firmwareService.fetchReleases).mockRejectedValueOnce(new Error('rate limited')).mockResolvedValueOnce([stable]);
     render(<Harness />);
     expect(await screen.findByText('No firmware found')).toBeInTheDocument();
     expect(screen.getByText('rate limited')).toHaveClass('code-s');
-    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
-    expect(await screen.findByRole('button', { name: 'Change version' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Try Again' }));
+    expect(await screen.findByRole('button', { name: 'Change Version' })).toBeInTheDocument();
   });
 
-  it('returns focus to Change version when the dialog closes', async () => {
+  it('returns focus to Change Version when the dialog closes', async () => {
     vi.mocked(firmwareService.fetchReleases).mockResolvedValue([stable, older]);
     render(<Harness />);
-    const trigger = await screen.findByRole('button', { name: 'Change version' });
+    const trigger = await screen.findByRole('button', { name: 'Change Version' });
     trigger.focus();
     fireEvent.click(trigger);
-    const dialog = screen.getByRole('dialog', { name: 'Choose a version' });
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Choose version 2.0.3' }));
+    const dialog = screen.getByRole('dialog', { name: 'Choose a Version' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Choose Version 2.0.3' }));
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Change version' })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Change Version' })).toHaveFocus());
   });
 
   it('drops the Downloaded mark after deleting the chosen version', async () => {
@@ -161,7 +161,7 @@ describe('FirmwareSelection', () => {
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('Downloaded')).toBeInTheDocument());
     const dialog = await openPicker();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete download of version 2.0.4' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete Download of Version 2.0.4' }));
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     await waitFor(() => expect(screen.queryByText('Downloaded')).toBeNull());
   });
@@ -172,18 +172,18 @@ describe('FirmwareSelection', () => {
     vi.mocked(firmwareService.deleteCachedFirmware).mockRejectedValue(new Error('locked'));
     render(<Harness />);
     const dialog = await openPicker();
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete download of version 2.0.4' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete Download of Version 2.0.4' }));
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     expect(await within(screen.getByRole('dialog')).findByText("Couldn't delete the download.")).toBeInTheDocument();
   });
 
-  it('orders row buttons Release notes, Delete download, then a compact primary Choose on the right', async () => {
+  it('orders row buttons Release Notes, Delete Download, then a compact primary Choose on the right', async () => {
     const cached = { ...older, isCached: true, cachedEntries: [createMockCachedMetadata({ version: '2.0.3' })] };
     vi.mocked(firmwareService.fetchReleases).mockResolvedValue([stable, cached]);
     render(<Harness />);
     const dialog = await openPicker();
     const buttons = within(row(dialog, '2.0.3')).getAllByRole('button');
-    expect(buttons.map((b) => b.textContent)).toEqual(['Release notes', 'Delete download', 'Choose']);
+    expect(buttons.map((b) => b.textContent)).toEqual(['Release Notes', 'Delete Download', 'Choose']);
     buttons.forEach((b) => expect(b).toHaveClass('bb-btn--compact'));
     const choose = buttons[2];
     expect(choose).toHaveClass('bb-btn--primary');

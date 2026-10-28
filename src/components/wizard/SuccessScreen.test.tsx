@@ -36,7 +36,7 @@ describe('SuccessScreen', () => {
     const onClose = vi.fn();
     useWizardStore.setState({ updateResult: { success: true, message: '', deviceUpdates: [{ device: primary, success: true }] } });
     render(<SuccessScreen release={release} devices={[primary]} onReset={onReset} onClose={onClose} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Flash another device' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Flash Another Device' }));
     fireEvent.click(screen.getByRole('button', { name: /^Done$/ }));
     expect(onReset).toHaveBeenCalledTimes(1);
     expect(onClose).toHaveBeenCalledTimes(1);

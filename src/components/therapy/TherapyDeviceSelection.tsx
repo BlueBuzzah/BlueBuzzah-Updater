@@ -18,7 +18,7 @@ export function TherapyDeviceSelection({ selectedDevices, onToggleDevice }: Ther
   const appMode = devices.filter((d) => !d.inBootloader);
   return (
     <Card
-      title="Choose devices"
+      title="Choose Devices"
       actions={
         <Button variant="quiet" icon={RefreshCw} onClick={rescan} disabled={loading}>
           Rescan

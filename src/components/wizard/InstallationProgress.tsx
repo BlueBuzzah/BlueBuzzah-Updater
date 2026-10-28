@@ -303,10 +303,10 @@ export function InstallationProgress({ release, devices, onComplete, onProgressU
         actions={
           <>
             <Button icon={RotateCcw} guardRepeat onClick={handleRetry}>
-              Try again
+              Try Again
             </Button>
             <Button variant="quiet" onClick={reset}>
-              Start over
+              Start Over
             </Button>
           </>
         }
@@ -354,9 +354,9 @@ export function InstallationProgress({ release, devices, onComplete, onProgressU
       <ConfirmDialog
         open={showStopConfirm}
         onOpenChange={setShowStopConfirm}
-        title="Stop the flash?"
-        cancelLabel="Keep flashing"
-        confirmLabel="Stop flash"
+        title="Stop the Flash?"
+        cancelLabel="Keep Flashing"
+        confirmLabel="Stop Flash"
         confirmGuard
         onConfirm={confirmStop}
       >

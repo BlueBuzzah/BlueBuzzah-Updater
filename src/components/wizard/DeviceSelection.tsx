@@ -94,7 +94,7 @@ export function DeviceSelection({ selectedDevices, onDevicesChange, onRoleChange
 
   return (
     <Card
-      title="Choose devices"
+      title="Choose Devices"
       actions={
         <Button variant="quiet" icon={RefreshCw} onClick={rescan} disabled={loading}>
           Rescan

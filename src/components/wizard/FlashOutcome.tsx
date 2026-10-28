@@ -14,7 +14,7 @@ interface FlashOutcomeProps {
   results: DeviceUpdateResult[];
   /** The error that stopped the run, if any */
   error?: string | null;
-  /** Copied by "Copy details" */
+  /** Copied by "Copy Details" */
   logText: string;
   actions?: ReactNode;
 }
@@ -41,7 +41,7 @@ export function FlashOutcome({ version, devices, results, error, logText, action
   };
   const copyAction = (
     <Button variant="secondary" icon={Copy} onClick={copyDetails}>
-      Copy details
+      Copy Details
     </Button>
   );
   const both = devices.length > 1;

@@ -40,14 +40,14 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
         <main className="grid min-h-screen place-items-center bg-surface p-10 text-ink">
           <div className="grid w-full max-w-prose gap-6">
             <OctagonAlert size={ICON.l} className="text-danger" />
-            <h1 className="headline">Something went wrong</h1>
+            <h1 className="headline">Something Went Wrong</h1>
             <p className="body">The Updater hit a problem it couldn&apos;t recover from. Restart it to continue.</p>
             {this.state.error && (
               <p className="code-s whitespace-pre-wrap rounded-md bg-surface-sunken p-4 text-ink-muted">{this.state.error.message}</p>
             )}
             <div className="flex flex-wrap gap-target-gap">
               <Button variant="secondary" icon={Copy} onClick={this.copyDetails}>
-                Copy details
+                Copy Details
               </Button>
               <Button onClick={this.handleRestart}>Restart the Updater</Button>
             </div>

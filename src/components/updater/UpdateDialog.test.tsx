@@ -26,9 +26,9 @@ describe('UpdateDialog', () => {
   it('offers the app update in plain words', () => {
     act(() => useUpdaterStore.getState().setUpdateAvailable(info));
     render(<UpdateDialog />);
-    expect(screen.getByRole('alertdialog', { name: 'A new BlueBuzzah Updater is ready' })).toHaveTextContent('Version 9.9.9 is ready. You have 1.0.0.');
+    expect(screen.getByRole('alertdialog', { name: 'A New BlueBuzzah Updater Is Ready' })).toHaveTextContent('Version 9.9.9 is ready. You have 1.0.0.');
     expect(screen.getByText("What's new")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Not now' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Not Now' }));
     expect(screen.queryByRole('alertdialog')).toBeNull();
   });
 
@@ -36,12 +36,12 @@ describe('UpdateDialog', () => {
     vi.mocked(updaterService.downloadAndInstall).mockRejectedValueOnce(new Error('signature mismatch')).mockResolvedValue(undefined);
     act(() => useUpdaterStore.getState().setUpdateAvailable(info));
     render(<UpdateDialog />);
-    fireEvent.click(screen.getByRole('button', { name: 'Install and restart' }));
-    expect(await screen.findByText("The update didn't install")).toBeInTheDocument();
-    expect(screen.getByText('Check your internet connection, then select Try again.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Install and Restart' }));
+    expect(await screen.findByText("The Update Didn't Install")).toBeInTheDocument();
+    expect(screen.getByText('Check your internet connection, then select Try Again.')).toBeInTheDocument();
     expect(screen.getByText(/signature mismatch/)).toHaveClass('code-s');
-    expect(screen.getByRole('button', { name: 'Copy details' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    expect(screen.getByRole('button', { name: 'Copy Details' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Try Again' }));
     await waitFor(() => expect(updaterService.downloadAndInstall).toHaveBeenCalledTimes(2));
   });
 });

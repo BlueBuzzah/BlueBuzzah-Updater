@@ -21,6 +21,7 @@ Rules:
 - **Take every value from the design system's tokens.** Use the copied `tokens.css` (the Tailwind theme maps to its variables). Never hand-type a hex color, size, radius, duration or font. Build components as `bb-` wrappers over the copied `bundle.css` (see Conventions).
 - **Copy, don't link.** Copy fonts, icons and logos from the design system into this repo. Never reference the workspace path at build or run time, because this repo builds and ships on its own.
 - **Don't invent rules.** If the design system doesn't cover something, ask rather than inventing a rule.
+- **Owner override — title case:** button labels, page titles, dialog titles and card titles use title case: capitalize every word except articles, short conjunctions and prepositions (the first word is always capitalized), e.g. "Update Firmware", "Choose a Version", "Apply to Devices". Body text, banner titles, switch labels, badges and hints stay sentence case per the design system. This overrides the design system's "never Title Case buttons" rule.
 - **Full migrations:** a whole-app pass is the `/implement-design-system` command, run from the workspace.
 
 ### Design system files

@@ -26,7 +26,7 @@ export function SuccessScreen({ release, devices, onReset, onClose }: SuccessScr
         actions={
           <>
             <Button variant="secondary" onClick={onReset}>
-              Flash another device
+              Flash Another Device
             </Button>
             <Button onClick={onClose}>Done</Button>
           </>

@@ -34,7 +34,7 @@ export function ConfigurePage() {
         <TherapyDeviceSelection selectedDevices={selectedDevices} onToggleDevice={toggleDevice} />
         <div className="grid justify-items-start gap-3">
           <Button size="xl" disabled={!!blocked} aria-describedby={blocked ? 'apply-blocked' : undefined} onClick={() => setStep(2)}>
-            {selectedDevices.length === 1 ? 'Apply to device' : 'Apply to devices'}
+            {selectedDevices.length === 1 ? 'Apply to Device' : 'Apply to Devices'}
           </Button>
           {blocked && <p id="apply-blocked" className="body-s text-ink-muted">{blocked}</p>}
         </div>

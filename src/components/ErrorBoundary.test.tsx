@@ -32,10 +32,10 @@ describe('ErrorBoundary', () => {
       </ErrorBoundary>
     );
 
-    expect(screen.getByRole('heading', { name: 'Something went wrong' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Something Went Wrong' })).toBeInTheDocument();
     expect(screen.getByText("The Updater hit a problem it couldn't recover from. Restart it to continue.")).toBeInTheDocument();
     expect(screen.getByText('Test render error')).toHaveClass('code-s');
-    expect(screen.getByRole('button', { name: 'Copy details' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy Details' })).toBeInTheDocument();
   });
 
   it('shows restart button in fallback UI', () => {

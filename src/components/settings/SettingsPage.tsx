@@ -29,7 +29,7 @@ export function SettingsPage() {
   }, []);
 
   const checkNow = async () => {
-    clearError(); // a manual check offers the update again, even after "Not now"
+    clearError(); // a manual check offers the update again, even after "Not Now"
     setChecking(true);
     try {
       setUpdateAvailable(await updaterService.checkForUpdate());
@@ -66,7 +66,7 @@ export function SettingsPage() {
                   setHighContrast(null);
                 }}
               >
-                Use my computer's setting
+                Use My Computer's Setting
               </Button>
             </div>
           )}
@@ -79,7 +79,7 @@ export function SettingsPage() {
           </p>
           <div>
             <Button variant="secondary" onClick={checkNow} disabled={isChecking}>
-              Check for updates
+              Check for Updates
             </Button>
           </div>
           <p className="body-s" aria-live="polite">{status}</p>

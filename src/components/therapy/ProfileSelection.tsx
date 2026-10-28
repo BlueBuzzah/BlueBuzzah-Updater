@@ -44,16 +44,16 @@ export function ProfileSelection() {
           <p className="code-s rounded-xs bg-surface-sunken p-2">{loadError}</p>
         </div>
       )}
-      <Card title="Choose a pattern">
+      <Card title="Choose a Pattern">
         <ChoiceGroup
-          label="Choose a pattern"
+          label="Choose a Pattern"
           value={selected}
           onChange={choose}
           options={THERAPY_PROFILES.map((p) => ({ value: p.id, title: p.name, body: p.description }))}
         />
       </Card>
       {selected === 'CUSTOM' && <CustomProfilePanel />}
-      <Card title="Device behavior">
+      <Card title="Device Behavior">
         <div className="grid divide-y divide-line">
           <Switch
             label="Turn off the light during sessions"

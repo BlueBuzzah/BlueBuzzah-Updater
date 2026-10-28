@@ -39,13 +39,13 @@ describe('flash run safety', () => {
   it('keeps every run guard on while a retried flash runs', async () => {
     vi.mocked(firmwareService.downloadFirmware).mockRejectedValueOnce(new Error('boom')).mockImplementation(() => new Promise(() => {}));
     render(<Harness />);
-    const retry = await screen.findByRole('button', { name: 'Try again' });
+    const retry = await screen.findByRole('button', { name: 'Try Again' });
     expect(screen.getByTestId('busy')).toHaveTextContent('false');
     fireEvent.click(retry);
     await waitFor(() => expect(screen.getByTestId('busy')).toHaveTextContent('true'));
   });
 
-  it('ends the run after Stop, unlocks the app and offers Start over', async () => {
+  it('ends the run after Stop, unlocks the app and offers Start Over', async () => {
     vi.mocked(firmwareService.downloadFirmware).mockResolvedValue(createMockBundle());
     vi.mocked(deviceService.deployFirmware).mockImplementation(() => new Promise(() => {}));
     render(<Harness />);
@@ -53,11 +53,11 @@ describe('flash run safety', () => {
     expect(screen.getByTestId('busy')).toHaveTextContent('true');
     fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
     await act(async () => {
-      fireEvent.click(screen.getByRole('button', { name: 'Stop flash' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Stop Flash' }));
     });
     await waitFor(() => expect(screen.getByTestId('busy')).toHaveTextContent('false'));
     expect(screen.getByRole('alert')).toHaveTextContent('Flash stopped');
-    expect(screen.getByRole('button', { name: 'Start over' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Start Over' })).toBeInTheDocument();
     expect(deviceService.cancelFlash).toHaveBeenCalled();
   });
 });

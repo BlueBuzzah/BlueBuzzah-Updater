@@ -97,7 +97,7 @@ describe('CustomProfilePanel', () => {
     fireEvent.change(field('Buzz length'), { target: { value: '120' } });
     fireEvent.blur(field('Buzz length'));
     expect(screen.getByText('You changed these from the defaults.')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Reset to defaults' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reset to Defaults' }));
     expect(field('Buzz length')).toHaveValue(String(CUSTOM_DEFAULTS.on));
     expect(screen.getByText('Settings reset.')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
@@ -113,7 +113,7 @@ describe('CustomProfilePanel', () => {
   it('keeps timing details one click away', async () => {
     render(<CustomProfilePanel />);
     await waitFor(() => expect(mockRead).toHaveBeenCalled());
-    fireEvent.click(screen.getByRole('button', { name: 'Show timing details' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Show Timing Details' }));
     expect(screen.getByText(/Finger slot \d+ ms · Cycle \d+ ms \([\d.]+ Hz\) on v2/)).toHaveClass('code-s');
   });
 
@@ -127,7 +127,7 @@ describe('CustomProfilePanel', () => {
   it('can load the settings from the device again', async () => {
     render(<CustomProfilePanel />);
     await waitFor(() => expect(mockRead).toHaveBeenCalledTimes(1));
-    fireEvent.click(screen.getByRole('button', { name: 'Load from device' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Load from Device' }));
     await waitFor(() => expect(mockRead).toHaveBeenCalledTimes(2));
   });
 

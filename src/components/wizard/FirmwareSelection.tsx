@@ -94,13 +94,13 @@ export function FirmwareSelection({ value, onChange, board }: FirmwareSelectionP
 
   if (!loading && (loadError || releases.length === 0)) {
     return (
-      <Card title="Choose a version">
+      <Card title="Choose a Version">
         <div className="grid gap-4">
           <h4 className="display-l">No firmware found</h4>
-          <p className="body">We couldn't reach the firmware list on GitHub. Check your internet connection, then select Try again.</p>
+          <p className="body">We couldn't reach the firmware list on GitHub. Check your internet connection, then select Try Again.</p>
           {loadError && <p className="code-s rounded-xs bg-surface-sunken p-2">{loadError}</p>}
           <div>
-            <Button variant="secondary" onClick={load}>Try again</Button>
+            <Button variant="secondary" onClick={load}>Try Again</Button>
           </div>
         </div>
       </Card>
@@ -108,7 +108,7 @@ export function FirmwareSelection({ value, onChange, board }: FirmwareSelectionP
   }
 
   return (
-    <Card title="Choose a version">
+    <Card title="Choose a Version">
       <DialogPrimitive.Root open={pickerOpen} onOpenChange={setPickerOpen}>
         {loading ? (
           <p className="body-s text-ink-muted" aria-live="polite">Loading firmware versions…</p>
@@ -121,7 +121,7 @@ export function FirmwareSelection({ value, onChange, board }: FirmwareSelectionP
                 <p className="body-s text-ink-muted">{details(value)}</p>
               </div>
               <DialogPrimitive.Trigger asChild>
-                <Button variant="secondary">Change version</Button>
+                <Button variant="secondary">Change Version</Button>
               </DialogPrimitive.Trigger>
             </div>
           )
@@ -133,7 +133,7 @@ export function FirmwareSelection({ value, onChange, board }: FirmwareSelectionP
             aria-describedby={undefined}
             className="fixed left-1/2 top-1/2 z-50 grid max-h-[calc(100%-var(--space-8))] w-full max-w-prose -translate-x-1/2 -translate-y-1/2 grid-rows-[auto_auto_1fr_auto] gap-6 rounded-xl bg-surface-overlay p-8 text-ink shadow-3"
           >
-            <DialogPrimitive.Title className="title-l">Choose a version</DialogPrimitive.Title>
+            <DialogPrimitive.Title className="title-l">Choose a Version</DialogPrimitive.Title>
             {releases.some((r) => r.isPrerelease) ? (
               <Switch
                 label="Show experimental versions"
@@ -175,8 +175,8 @@ export function FirmwareSelection({ value, onChange, board }: FirmwareSelectionP
       <ConfirmDialog
         open={toDelete !== null}
         onOpenChange={(open) => !open && setToDelete(null)}
-        title="Delete this download?"
-        cancelLabel="Keep it"
+        title="Delete This Download?"
+        cancelLabel="Keep It"
         confirmLabel="Delete"
         onConfirm={deleteDownload}
       >
@@ -197,7 +197,7 @@ interface VersionRowProps {
   onDelete: () => void;
 }
 
-/** One version in the picker: number, badges, Release notes, Choose and (when downloaded) Delete download. */
+/** One version in the picker: number, badges, Release Notes, Choose and (when downloaded) Delete Download. */
 function VersionRow({ release: r, chosen, badges, details, notesOpen, onToggleNotes, onChoose, onDelete }: VersionRowProps) {
   const titleId = useId();
   const notesId = useId();
@@ -218,16 +218,16 @@ function VersionRow({ release: r, chosen, badges, details, notesOpen, onToggleNo
       <div className="flex flex-wrap items-center gap-target-gap">
         {r.releaseNotes && (
           <Button compact variant="quiet" icon={notesOpen ? ChevronUp : ChevronDown} aria-expanded={notesOpen} aria-controls={notesId} onClick={onToggleNotes}>
-            Release notes
+            Release Notes
           </Button>
         )}
         {r.isCached && (
-          <Button compact variant="danger" icon={Trash2} aria-label={`Delete download of version ${r.version}`} onClick={onDelete}>
-            Delete download
+          <Button compact variant="danger" icon={Trash2} aria-label={`Delete Download of Version ${r.version}`} onClick={onDelete}>
+            Delete Download
           </Button>
         )}
         {!chosen && (
-          <Button compact className="ml-auto" aria-label={`Choose version ${r.version}`} onClick={onChoose}>
+          <Button compact className="ml-auto" aria-label={`Choose Version ${r.version}`} onClick={onChoose}>
             Choose
           </Button>
         )}

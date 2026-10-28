@@ -12,8 +12,8 @@ import { useTheme } from './hooks/useTheme';
 import { useIsBusy } from './stores/busy';
 
 const TITLES: Record<Section, string> = {
-  firmware: 'Update firmware',
-  configure: 'Configure devices',
+  firmware: 'Update Firmware',
+  configure: 'Configure Devices',
   settings: 'Settings',
 };
 
@@ -27,7 +27,7 @@ function App() {
   const rescan = useCallback(() => window.dispatchEvent(new Event('bb:rescan')), []);
   useShortcuts({ onSection: setSection, onRescan: rescan, enabled: !busy });
 
-  const title = kind === 'flash' ? 'Updating firmware' : kind === 'configure' ? 'Setting up devices' : TITLES[section];
+  const title = kind === 'flash' ? 'Updating Firmware' : kind === 'configure' ? 'Setting Up Devices' : TITLES[section];
 
   return (
     <>
@@ -39,9 +39,9 @@ function App() {
       <ConfirmDialog
         open={closeGuard.promptOpen}
         onOpenChange={(open) => !open && closeGuard.keepOpen()}
-        title={kind === 'configure' ? 'Setup is still running' : 'The flash is still running'}
-        cancelLabel="Keep the Updater open"
-        confirmLabel="Close anyway"
+        title={kind === 'configure' ? 'Setup Is Still Running' : 'The Flash Is Still Running'}
+        cancelLabel="Keep the Updater Open"
+        confirmLabel="Close Anyway"
         onConfirm={closeGuard.closeAnyway}
       >
         {kind === 'configure'

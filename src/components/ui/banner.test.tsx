@@ -8,7 +8,7 @@ it('announced danger is an alert', () => {
 });
 
 it('announced warning is a status', () => {
-  render(<Banner tone="warning" title="Keep it plugged in" announce />);
+  render(<Banner tone="warning" title="Keep It plugged in" announce />);
   expect(screen.getByRole('status')).toBeInTheDocument();
 });
 

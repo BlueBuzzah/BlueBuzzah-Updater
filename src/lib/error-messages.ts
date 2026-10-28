@@ -11,7 +11,7 @@ export interface ErrorGuidance {
 }
 
 const REPLUG = 'Unplug the device, wait 5 seconds, then plug it back in.';
-const TRY_AGAIN = 'Select Try again.';
+const TRY_AGAIN = 'Select Try Again.';
 const NO_HUB = 'Plug the device straight into your computer, not into a hub.';
 
 export const ERROR_GUIDANCE: Record<string, ErrorGuidance> = {
@@ -34,7 +34,7 @@ export const ERROR_GUIDANCE: Record<string, ErrorGuidance> = {
     description: "We download firmware from GitHub, and the connection didn't work.",
     resolutionSteps: [
       'Check your internet connection.',
-      'Wait a minute, then select Try again.',
+      'Wait a minute, then select Try Again.',
       'Firmware you downloaded before is still available.',
     ],
   },
@@ -85,7 +85,7 @@ export const ERROR_GUIDANCE: Record<string, ErrorGuidance> = {
   DFU_CANCELLED: {
     title: 'Flash stopped',
     description: 'The flash stopped before it finished. The device may not start until you flash it again.',
-    resolutionSteps: ['Keep the device plugged in.', 'Select Update firmware to start again.'],
+    resolutionSteps: ['Keep the device plugged in.', 'Select Update Firmware to start again.'],
   },
   DFU_MAX_RETRIES: {
     title: 'Flash failed after several tries',
@@ -125,7 +125,7 @@ export const ERROR_GUIDANCE: Record<string, ErrorGuidance> = {
   RATE_LIMITED: {
     title: 'GitHub asked us to wait',
     description: 'There were too many firmware checks in the last hour.',
-    resolutionSteps: ['Wait a few minutes, then select Try again.', 'Firmware you downloaded before is still available.'],
+    resolutionSteps: ['Wait a few minutes, then select Try Again.', 'Firmware you downloaded before is still available.'],
   },
 };
 

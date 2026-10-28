@@ -18,7 +18,7 @@ describe('ProfileSelection', () => {
 
   it('offers the five patterns as a radio group in plain words', () => {
     render(<ProfileSelection />);
-    const group = screen.getByRole('radiogroup', { name: 'Choose a pattern' });
+    const group = screen.getByRole('radiogroup', { name: 'Choose a Pattern' });
     expect(screen.getAllByRole('radio')).toHaveLength(5);
     expect(group).not.toHaveTextContent(/therapeutic|stimulation|vCR|jitter/i);
   });
@@ -34,9 +34,9 @@ describe('ProfileSelection', () => {
 
   it('shows the custom settings only for Custom', () => {
     render(<ProfileSelection />);
-    expect(screen.queryByText('Custom pattern')).toBeNull();
+    expect(screen.queryByText('Custom Pattern')).toBeNull();
     fireEvent.click(screen.getByRole('radio', { name: /^Custom/ }));
-    expect(screen.getByText('Custom pattern')).toBeInTheDocument();
+    expect(screen.getByText('Custom Pattern')).toBeInTheDocument();
   });
 
   it('shows device behavior switches without an Advanced toggle', () => {

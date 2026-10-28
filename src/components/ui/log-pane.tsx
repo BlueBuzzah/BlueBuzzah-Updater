@@ -43,15 +43,15 @@ export function LogPane({ lines, fileName = 'bluebuzzah-updater-log.txt' }: LogP
     <div className="grid gap-4">
       <div>
         <Button variant="quiet" icon={open ? ChevronUp : ChevronDown} aria-expanded={open} aria-controls={paneId} onClick={() => setOpen(!open)}>
-          {open ? 'Hide log' : 'Show log'}
+          {open ? 'Hide Log' : 'Show Log'}
         </Button>
       </div>
       {open && (
         <div id={paneId} className="grid gap-4">
           <div className="flex flex-wrap items-end gap-target-gap">
             <TextField className="min-w-0 flex-1" label="Filter log" hint="Shows lines that contain this text." value={filter} onChange={(e) => setFilter(e.target.value)} />
-            <Button variant="secondary" icon={Copy} onClick={copy}>Copy log</Button>
-            <Button variant="secondary" icon={Save} onClick={saveLog}>Save log</Button>
+            <Button variant="secondary" icon={Copy} onClick={copy}>Copy Log</Button>
+            <Button variant="secondary" icon={Save} onClick={saveLog}>Save Log</Button>
           </div>
           <ol className="code-s m-0 grid list-none gap-1 rounded-md bg-surface-sunken p-4">
             {shown.map(({ n, line }) => (

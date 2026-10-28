@@ -74,13 +74,13 @@ describe('App', () => {
       expect(screen.getByRole('button', { name: 'Firmware' })).toHaveAttribute('aria-current', 'page');
       expect(screen.getByRole('button', { name: 'Configure' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument();
-      expect(screen.getByRole('heading', { level: 1, name: 'Update firmware' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 1, name: 'Update Firmware' })).toBeInTheDocument();
     });
 
     it('Ctrl+2 opens Configure', () => {
       render(<App />);
       fireEvent.keyDown(window, { key: '2', ctrlKey: true });
-      expect(screen.getByRole('heading', { level: 1, name: 'Configure devices' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 1, name: 'Configure Devices' })).toBeInTheDocument();
       expect(screen.getByTestId('profile-selection')).toBeInTheDocument();
     });
 
@@ -95,7 +95,7 @@ describe('App', () => {
       render(<App />);
       expect(screen.getByRole('button', { name: 'Configure' })).toBeDisabled();
       fireEvent.keyDown(window, { key: '2', ctrlKey: true });
-      expect(screen.getByRole('heading', { level: 1, name: 'Updating firmware' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 1, name: 'Updating Firmware' })).toBeInTheDocument();
       expect(screen.getByText('Available when the flash finishes')).toBeInTheDocument();
     });
 
@@ -121,19 +121,19 @@ describe('App', () => {
       ['no roles', [createMockDevice({ role: undefined })]],
       ['both Primary', [createMockDevice({ path: 'a', role: 'PRIMARY' }), createMockDevice({ path: 'b', role: 'PRIMARY' })]],
       ['both Secondary', [createMockDevice({ path: 'a', role: 'SECONDARY' }), createMockDevice({ path: 'b', role: 'SECONDARY' })]],
-    ])('Update firmware is disabled with %s', (_label, devices) => {
+    ])('Update Firmware is disabled with %s', (_label, devices) => {
       useWizardStore.setState({ selectedRelease: createMockRelease(), selectedDevices: devices });
       render(<App />);
-      expect(screen.getByRole('button', { name: 'Update firmware' })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Update Firmware' })).toBeDisabled();
     });
 
     it.each([
       ['one device with a role', [createMockDevice({ role: 'PRIMARY' })]],
       ['complementary roles', [createMockDevice({ path: 'a', role: 'PRIMARY' }), createMockDevice({ path: 'b', role: 'SECONDARY' })]],
-    ])('Update firmware is enabled with %s', (_label, devices) => {
+    ])('Update Firmware is enabled with %s', (_label, devices) => {
       useWizardStore.setState({ selectedRelease: createMockRelease(), selectedDevices: devices });
       render(<App />);
-      expect(screen.getByRole('button', { name: 'Update firmware' })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Update Firmware' })).toBeEnabled();
     });
 
     it('flashing replaces the choices; the result can start over', () => {

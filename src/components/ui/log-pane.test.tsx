@@ -11,15 +11,15 @@ const lines = ['INFO  a', 'ERROR  b', 'INFO  c'];
 
 it('is collapsed until opened', () => {
   render(<LogPane lines={lines} />);
-  const toggle = screen.getByRole('button', { name: 'Show log' });
+  const toggle = screen.getByRole('button', { name: 'Show Log' });
   expect(toggle).toHaveAttribute('aria-expanded', 'false');
   fireEvent.click(toggle);
-  expect(screen.getByRole('button', { name: 'Hide log' })).toHaveAttribute('aria-expanded', 'true');
+  expect(screen.getByRole('button', { name: 'Hide Log' })).toHaveAttribute('aria-expanded', 'true');
 });
 
 it('filters case-insensitively and keeps original line numbers', () => {
   render(<LogPane lines={lines} />);
-  fireEvent.click(screen.getByRole('button', { name: 'Show log' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Show Log' }));
   fireEvent.change(screen.getByRole('textbox', { name: 'Filter log' }), { target: { value: 'error' } });
   const items = screen.getAllByRole('listitem');
   expect(items).toHaveLength(1);
@@ -30,8 +30,8 @@ it('filters case-insensitively and keeps original line numbers', () => {
 it('saves the whole log to the chosen file', async () => {
   vi.mocked(save).mockResolvedValue('/tmp/log.txt');
   render(<LogPane lines={lines} />);
-  fireEvent.click(screen.getByRole('button', { name: 'Show log' }));
-  fireEvent.click(screen.getByRole('button', { name: 'Save log' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Show Log' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Save Log' }));
   await waitFor(() => expect(writeTextFile).toHaveBeenCalledWith('/tmp/log.txt', lines.join('\n')));
   expect(save).toHaveBeenCalledWith({ defaultPath: 'bluebuzzah-updater-log.txt' });
   expect(await screen.findByText('Log saved.')).toBeInTheDocument();
