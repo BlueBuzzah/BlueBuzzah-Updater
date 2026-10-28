@@ -2,7 +2,7 @@
 
 Tauri 2.0 desktop app that flashes BlueBuzzah firmware over serial to two hardware targets — Adafruit Feather nRF52840 gloves (Nordic Secure DFU) and PentaBuzzer / Seeed XIAO ESP32-S3 boards (esptool protocol via espflash) — then configures device role and therapy profile post-flash.
 
-**Frontend**: React 18 + TypeScript + Vite | Zustand, shadcn/ui, Tailwind, Lucide
+**Frontend**: React 18 + TypeScript + Vite | Zustand, design-system `bb-` components (Radix for dialogs), Tailwind (layout), Lucide
 **Backend**: Rust + Tauri 2.0 | Nordic DFU protocol (nRF52840) and espflash (ESP32-S3) over serial
 
 ## Design System — required for every UI/UX change
@@ -18,10 +18,22 @@ Before making a UI/UX change:
 Rules:
 
 - **The design system wins any conflict.** That includes existing styling and anything else in this file. Much of the current UI predates it. Build new and changed UI to the design system rather than copying the surrounding legacy styles.
-- **Take every value from the design system's tokens.** Use `tokens.css`, or `tokens.json` for the Tailwind theme. Never hand-type a hex color, size, radius, duration or font. Build the design system's components with this repo's shadcn/ui + Tailwind, themed from those tokens.
+- **Take every value from the design system's tokens.** Use the copied `tokens.css` (the Tailwind theme maps to its variables). Never hand-type a hex color, size, radius, duration or font. Build components as `bb-` wrappers over the copied `bundle.css` (see Conventions).
 - **Copy, don't link.** Copy fonts, icons and logos from the design system into this repo. Never reference the workspace path at build or run time, because this repo builds and ships on its own.
 - **Don't invent rules.** If the design system doesn't cover something, ask rather than inventing a rule.
 - **Full migrations:** a whole-app pass is the `/implement-design-system` command, run from the workspace.
+
+### Design system files
+
+`src/styles/tokens.css`, `src/styles/fonts/` and `src/styles/bundle.css` are copies of the design system, unchanged. Re-run this after a design-system re-import (from this repo's root):
+
+```bash
+DS=../../.claude/skills/bluebuzzah-design-system
+cp $DS/tokens.css src/styles/tokens.css
+rm -rf src/styles/fonts && cp -R $DS/fonts src/styles/fonts
+cp $DS/components/bundle.css src/styles/bundle.css
+cp $DS/favicons/favicon.ico public/favicon.ico
+```
 
 ## Quick Reference
 
@@ -97,7 +109,8 @@ Rules:
 
 - Rust retry naming: public retrying fn wraps `*_inner`; single attempt = `*_once`; re-enumeration-tolerant = `*_flexible`
 - Tests colocated: `*.test.ts(x)` beside source (global Tauri mocks in `src/test/setup.ts`, factories in `src/test/factories.ts`); Rust `#[cfg(test)]` at file bottom
-- Strict TypeScript (no `any`); shadcn/ui components exclusively; Tailwind only (no inline styles outside generated `components/ui/`)
+- Strict TypeScript (no `any`)
+- UI components live in `src/components/ui/` and render the design system's `bb-` markup (`bundle.css`). Radix only where behavior needs it (dialog focus trap). Tailwind for layout only; its theme is the token CSS variables. Type comes from `tokens.css` classes. No inline styles except computed widths (progress fill).
 - Loading states for all async ops; `src/lib/error-messages.ts` maps DFU errors to user guidance
 
 ## Docs
