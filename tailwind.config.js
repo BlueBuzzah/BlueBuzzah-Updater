@@ -1,67 +1,43 @@
 /** @type {import('tailwindcss').Config} */
+
+// The theme is the design system's token CSS variables (src/styles/tokens.css),
+// replacing Tailwind's defaults so off-system values don't compile.
+const v = (name) => `var(--${name})`;
+const map = (names, toVar = (n) => n) =>
+  Object.fromEntries(names.map((n) => [n, v(toVar(n))]));
+
+const colors = [
+  'surface', 'surface-raised', 'surface-sunken', 'surface-overlay',
+  'line', 'line-strong', 'ink', 'ink-muted', 'ink-disabled', 'fill-disabled',
+  'brand', 'brand-hover', 'brand-pressed', 'brand-soft', 'on-brand',
+  'accent', 'glow', 'on-glow', 'abyss', 'on-abyss', 'focus',
+  'success', 'success-soft', 'warning', 'warning-soft', 'danger', 'danger-soft',
+  'neutral', 'neutral-soft', 'on-status', 'scrim', 'link',
+];
+
 export default {
-  darkMode: ['class'],
-  content: [
-    './index.html',
-    './src/**/*.{js,ts,jsx,tsx}',
-  ],
+  content: ['./index.html', './src/**/*.{js,ts,jsx,tsx}'],
   theme: {
+    colors: { transparent: 'transparent', current: 'currentColor', ...map(colors) },
+    spacing: {
+      0: '0',
+      px: '1px',
+      ...map(['1', '2', '3', '4', '5', '6', '8', '10', '12', '16', '20', '24'], (n) => `space-${n}`),
+      ...map(['target', 'target-lg', 'target-xl', 'target-gap']),
+    },
+    borderRadius: { none: '0', ...map(['xs', 'sm', 'md', 'lg', 'xl', 'full'], (n) => `radius-${n}`) },
+    boxShadow: { none: 'none', 1: v('shadow-1'), 2: v('shadow-2'), 3: v('shadow-3'), focus: v('focus-ring') },
+    borderWidth: { 0: '0', DEFAULT: v('border-hairline'), control: v('border-control') },
+    fontFamily: map(['display', 'sans', 'mono'], (n) => `font-${n}`),
+    // Type comes from the tokens.css classes (.body, .title-m, .caption…).
+    fontSize: {},
+    transitionDuration: map(['fast', 'base', 'slow'], (n) => `duration-${n}`),
+    transitionTimingFunction: map(['standard', 'enter', 'exit'], (n) => `ease-${n}`),
+    maxWidth: { none: 'none', full: '100%', prose: v('prose-max'), content: v('content-max') },
     extend: {
-      colors: {
-        border: 'hsl(var(--border))',
-        input: 'hsl(var(--input))',
-        ring: 'hsl(var(--ring))',
-        background: 'hsl(var(--background))',
-        foreground: 'hsl(var(--foreground))',
-        primary: {
-          DEFAULT: 'hsl(var(--primary))',
-          foreground: 'hsl(var(--primary-foreground))',
-        },
-        secondary: {
-          DEFAULT: 'hsl(var(--secondary))',
-          foreground: 'hsl(var(--secondary-foreground))',
-        },
-        destructive: {
-          DEFAULT: 'hsl(var(--destructive))',
-          foreground: 'hsl(var(--destructive-foreground))',
-        },
-        muted: {
-          DEFAULT: 'hsl(var(--muted))',
-          foreground: 'hsl(var(--muted-foreground))',
-        },
-        accent: {
-          DEFAULT: 'hsl(var(--accent))',
-          foreground: 'hsl(var(--accent-foreground))',
-        },
-        popover: {
-          DEFAULT: 'hsl(var(--popover))',
-          foreground: 'hsl(var(--popover-foreground))',
-        },
-        card: {
-          DEFAULT: 'hsl(var(--card))',
-          foreground: 'hsl(var(--card-foreground))',
-        },
-      },
-      borderRadius: {
-        lg: 'var(--radius)',
-        md: 'calc(var(--radius) - 2px)',
-        sm: 'calc(var(--radius) - 4px)',
-      },
-      keyframes: {
-        'accordion-down': {
-          from: { height: '0' },
-          to: { height: 'var(--radix-accordion-content-height)' },
-        },
-        'accordion-up': {
-          from: { height: 'var(--radix-accordion-content-height)' },
-          to: { height: '0' },
-        },
-      },
-      animation: {
-        'accordion-down': 'accordion-down 0.2s ease-out',
-        'accordion-up': 'accordion-up 0.2s ease-out',
-      },
+      // updater.md: 240px sidebar
+      width: { sidebar: '240px' },
     },
   },
-  plugins: [require('tailwindcss-animate'), require('@tailwindcss/typography')],
+  plugins: [],
 };

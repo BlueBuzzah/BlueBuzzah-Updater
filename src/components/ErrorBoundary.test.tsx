@@ -32,9 +32,10 @@ describe('ErrorBoundary', () => {
       </ErrorBoundary>
     );
 
-    expect(screen.getByText('Something Went Wrong')).toBeInTheDocument();
-    expect(screen.getByText(/An unexpected error occurred/)).toBeInTheDocument();
-    expect(screen.getByText('Test render error')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Something Went Wrong' })).toBeInTheDocument();
+    expect(screen.getByText("The Updater hit a problem it couldn't recover from. Restart it to continue.")).toBeInTheDocument();
+    expect(screen.getByText('Test render error')).toHaveClass('code-s');
+    expect(screen.getByRole('button', { name: 'Copy Details' })).toBeInTheDocument();
   });
 
   it('shows restart button in fallback UI', () => {
@@ -44,7 +45,7 @@ describe('ErrorBoundary', () => {
       </ErrorBoundary>
     );
 
-    expect(screen.getByRole('button', { name: /restart application/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^restart the updater$/i })).toBeInTheDocument();
   });
 
   it('calls window.location.reload on restart click', () => {
@@ -60,7 +61,7 @@ describe('ErrorBoundary', () => {
       </ErrorBoundary>
     );
 
-    fireEvent.click(screen.getByRole('button', { name: /restart application/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^restart the updater$/i }));
 
     expect(reloadMock).toHaveBeenCalledOnce();
   });

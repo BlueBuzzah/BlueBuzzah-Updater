@@ -3,8 +3,9 @@ import { useUpdaterStore } from '@/stores/updaterStore';
 import { updaterService, UpdaterError } from '@/services/UpdaterService';
 import { extractUpdaterError } from '@/lib/updater-errors';
 
+/** Check once at launch. A failure is stored for Settings, not shown as a dialog. */
 export function useAppUpdater() {
-  const { setChecking, setUpdateAvailable, setError } = useUpdaterStore();
+  const { setChecking, setUpdateAvailable, setCheckError } = useUpdaterStore();
   const hasChecked = useRef(false);
 
   useEffect(() => {
@@ -21,13 +22,8 @@ export function useAppUpdater() {
       } catch (error) {
         console.error('Update check failed:', error);
 
-        // Extract and display error details
-        if (error instanceof UpdaterError) {
-          setError(error.info);
-        } else {
-          setError(extractUpdaterError(error, 'check'));
-        }
-        setUpdateAvailable(null);
+        // A failed check is news, not an alarm: Settings shows it (plan choice PC-16)
+        setCheckError(error instanceof UpdaterError ? error.info : extractUpdaterError(error, 'check'));
       }
     };
 
@@ -35,5 +31,5 @@ export function useAppUpdater() {
     const timeoutId = setTimeout(checkForUpdates, 1000);
 
     return () => clearTimeout(timeoutId);
-  }, [setChecking, setUpdateAvailable, setError]);
+  }, [setChecking, setUpdateAvailable, setCheckError]);
 }

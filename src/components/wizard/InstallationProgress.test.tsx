@@ -1,716 +1,150 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, waitFor, cleanup } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react';
 import { InstallationProgress } from './InstallationProgress';
 import { firmwareService } from '@/services/FirmwareService';
 import { deviceService } from '@/services/DeviceService';
 import { createMockRelease, createMockDevice, createMockBundle } from '@/test/factories';
+import type { UpdateProgress } from '@/types';
+import { getErrorGuidance } from '@/lib/error-messages';
 
-// Mock services
-vi.mock('@/services/FirmwareService', () => ({
-  firmwareService: {
-    downloadFirmware: vi.fn(),
-  },
-}));
-
+vi.mock('@/services/FirmwareService', () => ({ firmwareService: { downloadFirmware: vi.fn() } }));
 vi.mock('@/services/DeviceService', () => ({
-  deviceService: {
-    validateDevices: vi.fn(),
-    deployFirmware: vi.fn(),
-    cancelFlash: vi.fn().mockResolvedValue(undefined),
-  },
+  deviceService: { validateDevices: vi.fn(), deployFirmware: vi.fn(), cancelFlash: vi.fn() },
 }));
 
-// Mock wizard store with mutable logs array for test control
-const mockLogs: string[] = [];
-vi.mock('@/stores/wizardStore', () => ({
-  useWizardStore: () => ({
-    reset: vi.fn(),
-    updateDeviceInfo: vi.fn(),
-    addLog: vi.fn(),
-    logs: mockLogs,
-  }),
-}));
+const store = { reset: vi.fn(), updateDeviceInfo: vi.fn(), addLog: vi.fn(), setUpdateResult: vi.fn(), logs: [] as string[] };
+vi.mock('@/stores/wizardStore', () => ({ useWizardStore: () => store }));
 
-// Mock toast hook
-vi.mock('@/components/ui/use-toast', () => ({
-  useToast: () => ({
-    toast: vi.fn(),
-  }),
-}));
+const release = createMockRelease({ version: '2.0.4' });
+const primary = createMockDevice({ path: '/dev/cu.a', role: 'PRIMARY' });
+const secondary = createMockDevice({ path: '/dev/cu.b', role: 'SECONDARY', serialNumber: 'B2' });
+const valid = (paths: string[]) => new Map(paths.map((p) => [p, { valid: true, errors: [], warnings: [] }]));
+
+function renderIt(devices = [primary], onComplete = vi.fn(), onProgressUpdate = vi.fn()) {
+  render(<InstallationProgress release={release} devices={devices} onComplete={onComplete} onProgressUpdate={onProgressUpdate} />);
+  return { onComplete, onProgressUpdate };
+}
 
 describe('InstallationProgress', () => {
-  const mockOnComplete = vi.fn();
-  const mockOnProgressUpdate = vi.fn();
-  const mockRelease = createMockRelease({ version: '1.0.0' });
-  const mockDevice = createMockDevice({ role: 'PRIMARY' });
-  const mockBundle = createMockBundle();
-
   beforeEach(() => {
     vi.resetAllMocks();
-    // Re-apply cancelFlash default after reset (cleanup calls it on unmount)
     vi.mocked(deviceService.cancelFlash).mockResolvedValue(undefined);
-    mockLogs.length = 0; // Clear logs between tests
+    store.logs = [];
   });
 
-  afterEach(() => {
-    cleanup();
+  it('warns to keep the device plugged in and shows the step with its percentage', async () => {
+    vi.mocked(deviceService.validateDevices).mockResolvedValue(valid([primary.path]));
+    vi.mocked(firmwareService.downloadFirmware).mockImplementation(() => new Promise(() => {}));
+    renderIt();
+    expect(screen.getByRole('status')).toHaveTextContent('Keep the device plugged in until this finishes.');
+    expect(await screen.findByText('Downloading firmware — 0%')).toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: 'Overall progress' })).toBeInTheDocument();
   });
 
-  describe('Rendering', () => {
-    it('renders validating stage initially', async () => {
-      vi.mocked(deviceService.validateDevices).mockImplementation(
-        () => new Promise(() => {}) // Never resolves
-      );
-
-      render(
-        <InstallationProgress
-          release={mockRelease}
-          devices={[mockDevice]}
-          onComplete={mockOnComplete}
-          onProgressUpdate={mockOnProgressUpdate}
-        />
-      );
-
-      expect(screen.getByText('Validating Devices')).toBeInTheDocument();
-    });
-
-    it('shows overall progress bar', async () => {
-      vi.mocked(deviceService.validateDevices).mockResolvedValue(
-        new Map([[mockDevice.path, { valid: true, errors: [], warnings: [] }]])
-      );
-      vi.mocked(firmwareService.downloadFirmware).mockResolvedValue(mockBundle);
-      vi.mocked(deviceService.deployFirmware).mockResolvedValue(undefined);
-
-      render(
-        <InstallationProgress
-          release={mockRelease}
-          devices={[mockDevice]}
-          onComplete={mockOnComplete}
-          onProgressUpdate={mockOnProgressUpdate}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('Overall Progress')).toBeInTheDocument();
-      });
-    });
-
-    it('shows firmware version being downloaded', async () => {
-      vi.mocked(deviceService.validateDevices).mockResolvedValue(
-        new Map([[mockDevice.path, { valid: true, errors: [], warnings: [] }]])
-      );
-      vi.mocked(firmwareService.downloadFirmware).mockImplementation(
-        () => new Promise(() => {})
-      );
-
-      render(
-        <InstallationProgress
-          release={mockRelease}
-          devices={[mockDevice]}
-          onComplete={mockOnComplete}
-          onProgressUpdate={mockOnProgressUpdate}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('Version 1.0.0')).toBeInTheDocument();
-      });
-    });
+  it('uses the plural warning for two devices', () => {
+    vi.mocked(deviceService.validateDevices).mockImplementation(() => new Promise(() => {}));
+    renderIt([primary, secondary]);
+    expect(screen.getByRole('status')).toHaveTextContent('Keep the devices plugged in until this finishes.');
   });
 
-  describe('Stage Transitions', () => {
-    it('transitions to downloading stage after validation', async () => {
-      vi.mocked(deviceService.validateDevices).mockResolvedValue(
-        new Map([[mockDevice.path, { valid: true, errors: [], warnings: [] }]])
-      );
-      vi.mocked(firmwareService.downloadFirmware).mockImplementation(
-        () => new Promise(() => {})
-      );
-
-      render(
-        <InstallationProgress
-          release={mockRelease}
-          devices={[mockDevice]}
-          onComplete={mockOnComplete}
-          onProgressUpdate={mockOnProgressUpdate}
-        />
-      );
-
-      // Verify that downloadFirmware was called after validation passes
-      await waitFor(() => {
-        expect(firmwareService.downloadFirmware).toHaveBeenCalled();
-      }, { timeout: 3000 });
+  it('shows each device with a word for its state and its own percentage', async () => {
+    vi.mocked(deviceService.validateDevices).mockResolvedValue(valid([primary.path]));
+    vi.mocked(firmwareService.downloadFirmware).mockResolvedValue(createMockBundle());
+    vi.mocked(deviceService.deployFirmware).mockImplementation(async (_d, _f, onProgress) => {
+      onProgress!({ devicePath: primary.path, stage: 'copying', progress: 64, message: 'Writing' } as UpdateProgress);
+      return new Promise(() => {});
     });
-
-    it('transitions to installing stage after download', async () => {
-      vi.mocked(deviceService.validateDevices).mockResolvedValue(
-        new Map([[mockDevice.path, { valid: true, errors: [], warnings: [] }]])
-      );
-      vi.mocked(firmwareService.downloadFirmware).mockResolvedValue(mockBundle);
-      vi.mocked(deviceService.deployFirmware).mockImplementation(
-        () => new Promise(() => {})
-      );
-
-      render(
-        <InstallationProgress
-          release={mockRelease}
-          devices={[mockDevice]}
-          onComplete={mockOnComplete}
-          onProgressUpdate={mockOnProgressUpdate}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('Installing Firmware')).toBeInTheDocument();
-      });
-    });
-
-    it('transitions to complete stage after successful install', async () => {
-      vi.mocked(deviceService.validateDevices).mockResolvedValue(
-        new Map([[mockDevice.path, { valid: true, errors: [], warnings: [] }]])
-      );
-      vi.mocked(firmwareService.downloadFirmware).mockResolvedValue(mockBundle);
-      vi.mocked(deviceService.deployFirmware).mockResolvedValue(undefined);
-
-      render(
-        <InstallationProgress
-          release={mockRelease}
-          devices={[mockDevice]}
-          onComplete={mockOnComplete}
-          onProgressUpdate={mockOnProgressUpdate}
-        />
-      );
-
-      // Verify installation completed successfully by checking callback
-      await waitFor(() => {
-        expect(mockOnComplete).toHaveBeenCalledWith(
-          expect.objectContaining({ success: true })
-        );
-      }, { timeout: 3000 });
-    });
+    renderIt();
+    expect(await screen.findByRole('group', { name: /Primary device.*Flashing/ })).toBeInTheDocument();
+    expect(screen.getByText('Flashing')).toBeInTheDocument();
+    expect(screen.getByRole('progressbar', { name: 'Primary device' })).toHaveAttribute('aria-valuenow', '64');
   });
 
-  describe('Device Progress', () => {
-    it('shows device card during installation', async () => {
-      vi.mocked(deviceService.validateDevices).mockResolvedValue(
-        new Map([[mockDevice.path, { valid: true, errors: [], warnings: [] }]])
-      );
-      vi.mocked(firmwareService.downloadFirmware).mockResolvedValue(mockBundle);
-      vi.mocked(deviceService.deployFirmware).mockImplementation(
-        () => new Promise(() => {})
-      );
-
-      render(
-        <InstallationProgress
-          release={mockRelease}
-          devices={[mockDevice]}
-          onComplete={mockOnComplete}
-          onProgressUpdate={mockOnProgressUpdate}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText(mockDevice.label)).toBeInTheDocument();
-        expect(screen.getByText('PRIMARY')).toBeInTheDocument();
-      });
-    });
-
-    it('shows device path', async () => {
-      vi.mocked(deviceService.validateDevices).mockResolvedValue(
-        new Map([[mockDevice.path, { valid: true, errors: [], warnings: [] }]])
-      );
-      vi.mocked(firmwareService.downloadFirmware).mockResolvedValue(mockBundle);
-      vi.mocked(deviceService.deployFirmware).mockImplementation(
-        () => new Promise(() => {})
-      );
-
-      render(
-        <InstallationProgress
-          release={mockRelease}
-          devices={[mockDevice]}
-          onComplete={mockOnComplete}
-          onProgressUpdate={mockOnProgressUpdate}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText(mockDevice.path)).toBeInTheDocument();
-      });
-    });
-
-    it('reports progress via callback', async () => {
-      vi.mocked(deviceService.validateDevices).mockResolvedValue(
-        new Map([[mockDevice.path, { valid: true, errors: [], warnings: [] }]])
-      );
-      vi.mocked(firmwareService.downloadFirmware).mockResolvedValue(mockBundle);
-      vi.mocked(deviceService.deployFirmware).mockImplementation(
-        async (_device, _firmware, onProgress) => {
-          if (onProgress) {
-            onProgress({
-              devicePath: mockDevice.path,
-              stage: 'copying',
-              progress: 50,
-              message: 'Copying files...',
-            });
-          }
-        }
-      );
-
-      render(
-        <InstallationProgress
-          release={mockRelease}
-          devices={[mockDevice]}
-          onComplete={mockOnComplete}
-          onProgressUpdate={mockOnProgressUpdate}
-        />
-      );
-
-      await waitFor(() => {
-        expect(mockOnProgressUpdate).toHaveBeenCalledWith(
-          mockDevice.path,
-          expect.objectContaining({ stage: 'copying', progress: 50 })
-        );
-      });
-    });
+  it('downloads the firmware for the devices’ board and reports success', async () => {
+    const v3 = createMockDevice({ path: 'COM7', board: 'esp32s3', role: 'PRIMARY' });
+    vi.mocked(deviceService.validateDevices).mockResolvedValue(valid([v3.path]));
+    vi.mocked(firmwareService.downloadFirmware).mockResolvedValue(createMockBundle());
+    vi.mocked(deviceService.deployFirmware).mockResolvedValue(undefined as never);
+    const { onComplete } = renderIt([v3]);
+    await waitFor(() => expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({ success: true })));
+    expect(firmwareService.downloadFirmware).toHaveBeenCalledWith(release, 'esp32s3');
   });
 
-  describe('Multi-device Support', () => {
-    it('handles multiple devices', async () => {
-      const device1 = createMockDevice({ path: '/Volumes/CIRCUITPY1', label: 'CIRCUITPY1', role: 'PRIMARY' });
-      const device2 = createMockDevice({ path: '/Volumes/CIRCUITPY2', label: 'CIRCUITPY2', role: 'SECONDARY' });
-
-      vi.mocked(deviceService.validateDevices).mockResolvedValue(
-        new Map([
-          [device1.path, { valid: true, errors: [], warnings: [] }],
-          [device2.path, { valid: true, errors: [], warnings: [] }],
-        ])
-      );
-      vi.mocked(firmwareService.downloadFirmware).mockResolvedValue(mockBundle);
-      vi.mocked(deviceService.deployFirmware).mockResolvedValue(undefined);
-
-      render(
-        <InstallationProgress
-          release={mockRelease}
-          devices={[device1, device2]}
-          onComplete={mockOnComplete}
-          onProgressUpdate={mockOnProgressUpdate}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('CIRCUITPY1')).toBeInTheDocument();
-        expect(screen.getByText('CIRCUITPY2')).toBeInTheDocument();
-      });
-    });
-
-    it('shows updating X devices message', async () => {
-      const devices = [
-        createMockDevice({ path: '/Volumes/CIRCUITPY1', label: 'CIRCUITPY1', role: 'PRIMARY' }),
-        createMockDevice({ path: '/Volumes/CIRCUITPY2', label: 'CIRCUITPY2', role: 'SECONDARY' }),
-      ];
-
-      vi.mocked(deviceService.validateDevices).mockResolvedValue(
-        new Map([
-          [devices[0].path, { valid: true, errors: [], warnings: [] }],
-          [devices[1].path, { valid: true, errors: [], warnings: [] }],
-        ])
-      );
-      vi.mocked(firmwareService.downloadFirmware).mockResolvedValue(mockBundle);
-      vi.mocked(deviceService.deployFirmware).mockImplementation(
-        () => new Promise(() => {})
-      );
-
-      render(
-        <InstallationProgress
-          release={mockRelease}
-          devices={devices}
-          onComplete={mockOnComplete}
-          onProgressUpdate={mockOnProgressUpdate}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('Updating 2 devices...')).toBeInTheDocument();
-      });
-    });
+  it('refuses a mixed v2/v3 batch before downloading', async () => {
+    const v3 = createMockDevice({ path: 'COM7', board: 'esp32s3', role: 'SECONDARY' });
+    vi.mocked(deviceService.validateDevices).mockResolvedValue(valid([primary.path, v3.path]));
+    const { onComplete } = renderIt([primary, v3]);
+    await waitFor(() => expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({ success: false })));
+    expect(firmwareService.downloadFirmware).not.toHaveBeenCalled();
   });
 
-  describe('Error Handling', () => {
-    it('shows error state when validation fails', async () => {
-      vi.mocked(deviceService.validateDevices).mockResolvedValue(
-        new Map([[mockDevice.path, { valid: false, errors: ['Device not found'], warnings: [] }]])
-      );
-
-      render(
-        <InstallationProgress
-          release={mockRelease}
-          devices={[mockDevice]}
-          onComplete={mockOnComplete}
-          onProgressUpdate={mockOnProgressUpdate}
-        />
-      );
-
-      // Verify error triggers onComplete(false)
-      await waitFor(() => {
-        expect(mockOnComplete).toHaveBeenCalledWith(
-          expect.objectContaining({ success: false })
-        );
-      }, { timeout: 3000 });
-    });
-
-    it('shows error message', async () => {
-      vi.mocked(deviceService.validateDevices).mockRejectedValue(
-        new Error('Network error')
-      );
-
-      render(
-        <InstallationProgress
-          release={mockRelease}
-          devices={[mockDevice]}
-          onComplete={mockOnComplete}
-          onProgressUpdate={mockOnProgressUpdate}
-        />
-      );
-
-      // Error is logged and completion callback called
-      await waitFor(() => {
-        expect(mockOnComplete).toHaveBeenCalledWith(
-          expect.objectContaining({ success: false })
-        );
-      }, { timeout: 3000 });
-    });
-
-    it('shows retry button on error', async () => {
-      vi.mocked(deviceService.validateDevices).mockRejectedValue(
-        new Error('Failed')
-      );
-
-      render(
-        <InstallationProgress
-          release={mockRelease}
-          devices={[mockDevice]}
-          onComplete={mockOnComplete}
-          onProgressUpdate={mockOnProgressUpdate}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
-      });
-    });
-
-    it('calls onComplete with false on error', async () => {
-      vi.mocked(deviceService.validateDevices).mockRejectedValue(
-        new Error('Failed')
-      );
-
-      render(
-        <InstallationProgress
-          release={mockRelease}
-          devices={[mockDevice]}
-          onComplete={mockOnComplete}
-          onProgressUpdate={mockOnProgressUpdate}
-        />
-      );
-
-      await waitFor(() => {
-        expect(mockOnComplete).toHaveBeenCalledWith(
-          expect.objectContaining({ success: false })
-        );
-      }, { timeout: 3000 });
-    });
+  it('shows a failure as a danger banner with steps, the detail underneath and Copy Details', async () => {
+    vi.mocked(deviceService.validateDevices).mockResolvedValue(valid([primary.path]));
+    vi.mocked(firmwareService.downloadFirmware).mockRejectedValue(new Error('network error: connection refused'));
+    const { onComplete } = renderIt();
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent(getErrorGuidance('network error: connection refused')!.title);
+    expect(screen.getByRole('button', { name: 'Copy Details' })).toBeInTheDocument();
+    expect(screen.getByText('network error: connection refused')).toHaveClass('code-s');
+    expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({ success: false }));
   });
 
-  describe('Installation Log', () => {
-    it('shows installation log section', async () => {
-      vi.mocked(deviceService.validateDevices).mockImplementation(
-        () => new Promise(() => {})
-      );
-
-      render(
-        <InstallationProgress
-          release={mockRelease}
-          devices={[mockDevice]}
-          onComplete={mockOnComplete}
-          onProgressUpdate={mockOnProgressUpdate}
-        />
-      );
-
-      expect(screen.getByText('Installation Log')).toBeInTheDocument();
-    });
-
-    it('has show/hide logs button', async () => {
-      vi.mocked(deviceService.validateDevices).mockImplementation(
-        () => new Promise(() => {})
-      );
-
-      render(
-        <InstallationProgress
-          release={mockRelease}
-          devices={[mockDevice]}
-          onComplete={mockOnComplete}
-          onProgressUpdate={mockOnProgressUpdate}
-        />
-      );
-
-      expect(screen.getByRole('button', { name: /show logs/i })).toBeInTheDocument();
-    });
-
-    it('has copy logs button when logs exist', async () => {
-      // Add logs before rendering so Copy Logs button appears
-      mockLogs.push('[12:00:00] Starting installation...');
-
-      vi.mocked(deviceService.validateDevices).mockResolvedValue(
-        new Map([[mockDevice.path, { valid: true, errors: [], warnings: [] }]])
-      );
-      vi.mocked(firmwareService.downloadFirmware).mockResolvedValue(mockBundle);
-      vi.mocked(deviceService.deployFirmware).mockResolvedValue(undefined);
-
-      render(
-        <InstallationProgress
-          release={mockRelease}
-          devices={[mockDevice]}
-          onComplete={mockOnComplete}
-          onProgressUpdate={mockOnProgressUpdate}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByRole('button', { name: /copy logs/i })).toBeInTheDocument();
-      });
-    });
+  it('a tremor double click on Try Again starts one retry', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(1000);
+    vi.mocked(deviceService.validateDevices).mockResolvedValue(valid([primary.path]));
+    vi.mocked(firmwareService.downloadFirmware).mockRejectedValueOnce(new Error('boom')).mockImplementation(() => new Promise(() => {}));
+    renderIt();
+    const retry = await screen.findByRole('button', { name: 'Try Again' });
+    fireEvent.click(retry);
+    vi.setSystemTime(1100);
+    fireEvent.click(retry);
+    await waitFor(() => expect(firmwareService.downloadFirmware).toHaveBeenCalledTimes(2));
+    vi.useRealTimers();
   });
 
-  describe('Completion', () => {
-    it('calls onComplete with true on success', async () => {
-      vi.mocked(deviceService.validateDevices).mockResolvedValue(
-        new Map([[mockDevice.path, { valid: true, errors: [], warnings: [] }]])
-      );
-      vi.mocked(firmwareService.downloadFirmware).mockResolvedValue(mockBundle);
-      vi.mocked(deviceService.deployFirmware).mockResolvedValue(undefined);
-
-      render(
-        <InstallationProgress
-          release={mockRelease}
-          devices={[mockDevice]}
-          onComplete={mockOnComplete}
-          onProgressUpdate={mockOnProgressUpdate}
-        />
-      );
-
-      await waitFor(() => {
-        expect(mockOnComplete).toHaveBeenCalledWith(
-          expect.objectContaining({ success: true })
-        );
-      });
-    });
-
-    it('shows complete status for successful devices', async () => {
-      vi.mocked(deviceService.validateDevices).mockResolvedValue(
-        new Map([[mockDevice.path, { valid: true, errors: [], warnings: [] }]])
-      );
-      vi.mocked(firmwareService.downloadFirmware).mockResolvedValue(mockBundle);
-      vi.mocked(deviceService.deployFirmware).mockImplementation(
-        async (_device, _firmware, onProgress) => {
-          if (onProgress) {
-            onProgress({
-              devicePath: mockDevice.path,
-              stage: 'complete',
-              progress: 100,
-              message: 'Update complete!',
-            });
-          }
-        }
-      );
-
-      render(
-        <InstallationProgress
-          release={mockRelease}
-          devices={[mockDevice]}
-          onComplete={mockOnComplete}
-          onProgressUpdate={mockOnProgressUpdate}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('Update complete!')).toBeInTheDocument();
-      });
-    });
+  it('confirms before stopping, without double-tap recovery advice', async () => {
+    vi.mocked(deviceService.validateDevices).mockImplementation(() => new Promise(() => {}));
+    renderIt();
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    const dialog = screen.getByRole('alertdialog', { name: 'Stop the Flash?' });
+    expect(dialog).not.toHaveTextContent(/twice/i);
+    fireEvent.click(screen.getByRole('button', { name: 'Stop Flash' }));
+    await waitFor(() => expect(deviceService.cancelFlash).toHaveBeenCalled());
   });
 
-  describe('Progress Calculation', () => {
-    it('shows 0% during validation', async () => {
-      vi.mocked(deviceService.validateDevices).mockImplementation(
-        () => new Promise(() => {})
-      );
-
-      render(
-        <InstallationProgress
-          release={mockRelease}
-          devices={[mockDevice]}
-          onComplete={mockOnComplete}
-          onProgressUpdate={mockOnProgressUpdate}
-        />
-      );
-
-      expect(screen.getByText('0%')).toBeInTheDocument();
-    });
+  it('writes log lines that start with a level word', async () => {
+    vi.mocked(deviceService.validateDevices).mockResolvedValue(
+      new Map([[primary.path, { valid: false, errors: ['port busy'], warnings: [] }]])
+    );
+    renderIt();
+    await screen.findByRole('alert');
+    const lines = store.addLog.mock.calls.map(([l]) => l as string);
+    expect(lines.length).toBeGreaterThan(0);
+    lines.forEach((l) => expect(l).toMatch(/^(INFO|WARN|ERROR) {2}/));
+    expect(lines.some((l) => l.startsWith('ERROR  '))).toBe(true);
   });
 
-  describe('Device Path Mutation', () => {
-    it('does not mutate original device objects on path rename', async () => {
-      const device = createMockDevice({ path: '/dev/cu.usbmodemOLD', label: 'Old Label', role: 'PRIMARY' });
-      const originalPath = device.path;
-      const originalLabel = device.label;
-
-      vi.mocked(deviceService.validateDevices).mockResolvedValue(
-        new Map([[device.path, { valid: true, errors: [], warnings: [] }]])
-      );
-      vi.mocked(firmwareService.downloadFirmware).mockResolvedValue(mockBundle);
-      vi.mocked(deviceService.deployFirmware).mockImplementation(
-        async (_device, _firmware, onProgress) => {
-          if (onProgress) {
-            // Simulate a path rename during progress
-            onProgress({
-              devicePath: device.path,
-              stage: 'preparing',
-              progress: 50,
-              message: 'Renaming...',
-              newDevicePath: '/dev/cu.usbmodemNEW',
-              newDeviceLabel: 'New Label',
-            });
-            onProgress({
-              devicePath: '/dev/cu.usbmodemNEW',
-              stage: 'complete',
-              progress: 100,
-              message: 'Done',
-            });
-          }
-        }
-      );
-
-      render(
-        <InstallationProgress
-          release={mockRelease}
-          devices={[device]}
-          onComplete={mockOnComplete}
-          onProgressUpdate={mockOnProgressUpdate}
-        />
-      );
-
-      await waitFor(() => {
-        expect(mockOnComplete).toHaveBeenCalledWith(
-          expect.objectContaining({ success: true })
-        );
-      });
-
-      // Original device object must not be mutated
-      expect(device.path).toBe(originalPath);
-      expect(device.label).toBe(originalLabel);
+  it('tracks a renamed device without mutating the original object', async () => {
+    const original = { ...primary };
+    vi.mocked(deviceService.validateDevices).mockResolvedValue(valid([primary.path]));
+    vi.mocked(firmwareService.downloadFirmware).mockResolvedValue(createMockBundle());
+    vi.mocked(deviceService.deployFirmware).mockImplementation(async (_d, _f, onProgress) => {
+      onProgress!({ devicePath: primary.path, stage: 'configuring', progress: 90, message: '', newDevicePath: '/dev/cu.z', newDeviceLabel: 'Z' } as UpdateProgress);
     });
+    const { onComplete } = renderIt([primary]);
+    await waitFor(() => expect(onComplete).toHaveBeenCalled());
+    expect(primary).toEqual(original);
+    expect(store.updateDeviceInfo).toHaveBeenCalledWith('/dev/cu.a', 'Z', '/dev/cu.z');
   });
 
-  describe('Board Branching', () => {
-    it("downloads the firmware for the selected devices' board", async () => {
-      const device1 = createMockDevice({
-        path: '/dev/cu.usbmodem1',
-        label: 'PentaBuzzer #1',
-        role: 'PRIMARY',
-        board: 'esp32s3',
-      });
-      const device2 = createMockDevice({
-        path: '/dev/cu.usbmodem2',
-        label: 'PentaBuzzer #2',
-        role: 'SECONDARY',
-        board: 'esp32s3',
-      });
-      const v3Bundle = createMockBundle({ board: 'esp32s3', localPath: '/tmp/fw-v3.zip' });
-
-      vi.mocked(deviceService.validateDevices).mockResolvedValue(
-        new Map([
-          [device1.path, { valid: true, errors: [], warnings: [] }],
-          [device2.path, { valid: true, errors: [], warnings: [] }],
-        ])
-      );
-      vi.mocked(firmwareService.downloadFirmware).mockResolvedValue(v3Bundle);
-      vi.mocked(deviceService.deployFirmware).mockResolvedValue(undefined);
-
-      render(
-        <InstallationProgress
-          release={mockRelease}
-          devices={[device1, device2]}
-          onComplete={mockOnComplete}
-          onProgressUpdate={mockOnProgressUpdate}
-        />
-      );
-
-      await waitFor(() => {
-        expect(firmwareService.downloadFirmware).toHaveBeenCalledWith(
-          expect.anything(),
-          'esp32s3'
-        );
-        expect(firmwareService.downloadFirmware).toHaveBeenCalledTimes(1);
-      });
+  it('cancels the flash on unmount', async () => {
+    vi.mocked(deviceService.validateDevices).mockImplementation(() => new Promise(() => {}));
+    let unmount: () => void = () => {};
+    act(() => {
+      ({ unmount } = render(<InstallationProgress release={release} devices={[primary]} onComplete={vi.fn()} onProgressUpdate={vi.fn()} />));
     });
-
-    it('fails fast if selected devices have mixed hardware versions', async () => {
-      const device1 = createMockDevice({
-        path: '/dev/cu.usbmodem1',
-        label: 'Glove #1',
-        role: 'PRIMARY',
-        board: 'nrf52',
-      });
-      const device2 = createMockDevice({
-        path: '/dev/cu.usbmodem2',
-        label: 'PentaBuzzer #2',
-        role: 'SECONDARY',
-        board: 'esp32s3',
-      });
-
-      vi.mocked(deviceService.validateDevices).mockResolvedValue(
-        new Map([
-          [device1.path, { valid: true, errors: [], warnings: [] }],
-          [device2.path, { valid: true, errors: [], warnings: [] }],
-        ])
-      );
-
-      render(
-        <InstallationProgress
-          release={mockRelease}
-          devices={[device1, device2]}
-          onComplete={mockOnComplete}
-          onProgressUpdate={mockOnProgressUpdate}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText(/same hardware version/i)).toBeInTheDocument();
-      });
-
-      expect(firmwareService.downloadFirmware).not.toHaveBeenCalled();
-    });
-  });
-
-  describe('Cleanup on Unmount', () => {
-    it('calls cancelFlash when component unmounts', async () => {
-      vi.mocked(deviceService.validateDevices).mockImplementation(
-        () => new Promise(() => {}) // Never resolves — keeps component busy
-      );
-      vi.mocked(deviceService.cancelFlash).mockResolvedValue(undefined);
-
-      const { unmount } = render(
-        <InstallationProgress
-          release={mockRelease}
-          devices={[mockDevice]}
-          onComplete={mockOnComplete}
-          onProgressUpdate={mockOnProgressUpdate}
-        />
-      );
-
-      // Unmount triggers cleanup
-      unmount();
-
-      expect(deviceService.cancelFlash).toHaveBeenCalledTimes(1);
-    });
+    unmount();
+    expect(deviceService.cancelFlash).toHaveBeenCalled();
   });
 });

@@ -2,7 +2,7 @@
 
 Tauri 2.0 desktop app that flashes BlueBuzzah firmware over serial to two hardware targets — Adafruit Feather nRF52840 gloves (Nordic Secure DFU) and PentaBuzzer / Seeed XIAO ESP32-S3 boards (esptool protocol via espflash) — then configures device role and therapy profile post-flash.
 
-**Frontend**: React 18 + TypeScript + Vite | Zustand, shadcn/ui, Tailwind, Lucide
+**Frontend**: React 18 + TypeScript + Vite | Zustand, design-system `bb-` components (Radix for dialogs), Tailwind (layout), Lucide
 **Backend**: Rust + Tauri 2.0 | Nordic DFU protocol (nRF52840) and espflash (ESP32-S3) over serial
 
 ## Design System — required for every UI/UX change
@@ -18,10 +18,29 @@ Before making a UI/UX change:
 Rules:
 
 - **The design system wins any conflict.** That includes existing styling and anything else in this file. Much of the current UI predates it. Build new and changed UI to the design system rather than copying the surrounding legacy styles.
-- **Take every value from the design system's tokens.** Use `tokens.css`, or `tokens.json` for the Tailwind theme. Never hand-type a hex color, size, radius, duration or font. Build the design system's components with this repo's shadcn/ui + Tailwind, themed from those tokens.
+- **Take every value from the design system's tokens.** Use the copied `tokens.css` (the Tailwind theme maps to its variables). Never hand-type a hex color, size, radius, duration or font. Build components as `bb-` wrappers over the copied `bundle.css` (see Conventions).
 - **Copy, don't link.** Copy fonts, icons and logos from the design system into this repo. Never reference the workspace path at build or run time, because this repo builds and ships on its own.
 - **Don't invent rules.** If the design system doesn't cover something, ask rather than inventing a rule.
+- **Owner override — title case:** button labels, page titles, dialog titles and card titles use title case: capitalize every word except articles, short conjunctions and prepositions (the first word is always capitalized), e.g. "Update Firmware", "Choose a Version", "Apply to Devices". Body text, banner titles, switch labels, badges and hints stay sentence case per the design system. This overrides the design system's "never Title Case buttons" rule.
 - **Full migrations:** a whole-app pass is the `/implement-design-system` command, run from the workspace.
+
+### Design system files
+
+`src/styles/tokens.css`, `src/styles/fonts/` and `src/styles/bundle.css` are copies of the design system, unchanged. Re-run this after a design-system re-import (from this repo's root):
+
+```bash
+DS=../../.claude/skills/bluebuzzah-design-system
+cp $DS/tokens.css src/styles/tokens.css
+rm -rf src/styles/fonts && cp -R $DS/fonts src/styles/fonts
+cp $DS/components/bundle.css src/styles/bundle.css
+cp $DS/favicons/favicon.ico public/favicon.ico
+```
+
+Before committing UI work, this check must print nothing (hand-typed sizes, colors, legacy icons, plurals like "device(s)", exclamation marks):
+
+```bash
+grep -rnE "text-(xs|sm|base|lg|[0-9]?xl)\b|text-\[|#[0-9a-fA-F]{3,8}\b|rgba?\(|hsl\(|-(red|amber|yellow|emerald|zinc|blue|green|gray|slate)-[0-9]{2,3}|(bg|text|border|ring|from|to|shadow)-[a-z-]+/[0-9]{1,2}\b|animate-|duration-[0-9]|shadow-(sm|md|lg|xl)|space-y-6|XCircle|AlertCircle|CircuitBoard|\bBan\b|device\(s\)|!['\"]" src --include='*.tsx' --include='*.ts' --include='*.css' | grep -v "src/styles/" | grep -v "\.test\."
+```
 
 ## Quick Reference
 
@@ -37,7 +56,7 @@ Rules:
 
 ## Architecture
 
-`HomeScreen` picks a mode; `App.tsx` routes the step switch for two wizards: **flash** (`components/wizard/`: FirmwareSelection → DeviceSelection → InstallationProgress → SuccessScreen) and **therapy config** (`components/therapy/`, steps 0–2: ProfileSelection (renders `CustomProfilePanel` inline when Custom is picked) → TherapyDeviceSelection → TherapyProgress, swapped for TherapySuccess once a result exists). Both → Zustand stores (`src/stores/`: `wizardStore`, `therapyStore`, `settingsStore`, `updaterStore`) → services (`src/services/`: `DeviceService`, `FirmwareService`, `UpdaterService` implement `I*Repository`; `TherapyService` implements `ITherapyService`) → Rust via `invoke()` + `Channel` progress events.
+`App.tsx` renders `AppShell` (sidebar: Firmware, Configure, Settings; ⌘/Ctrl+1–3, ⌘/Ctrl+R rescan). Each section is one page with phases keyed on its store's step (`< 2` choose, `2` running, then result): **Firmware** (`components/firmware/FirmwarePage.tsx`: DeviceSelection + FirmwareSelection (version picker dialog) → InstallationProgress → SuccessScreen; failures stay in InstallationProgress via `FlashOutcome`) and **Configure** (`components/configure/ConfigurePage.tsx`: legal notices + ProfileSelection (renders `CustomProfilePanel` for Custom) + DeviceSelection (`mode="configure"`: no roles, running devices only) → TherapyProgress → TherapySuccess). `src/stores/busy.ts` `useIsBusy()` is true while a run is live (step 2 with no result yet); it locks navigation, arms the window-close guard (`useBusyCloseGuard`) and holds the app-update dialog — anything that ends or restarts a run must set or clear the store's result. Pages → Zustand stores (`src/stores/`: `wizardStore`, `therapyStore`, `settingsStore`, `updaterStore`, `themeStore`) → services (`src/services/`: `DeviceService`, `FirmwareService`, `UpdaterService` implement `I*Repository`; `TherapyService` implements `ITherapyService`) → Rust via `invoke()` + `Channel` progress events.
 
 | Rust module (`src-tauri/src/`) | Purpose |
 |--------------------------------|---------|
@@ -97,7 +116,8 @@ Rules:
 
 - Rust retry naming: public retrying fn wraps `*_inner`; single attempt = `*_once`; re-enumeration-tolerant = `*_flexible`
 - Tests colocated: `*.test.ts(x)` beside source (global Tauri mocks in `src/test/setup.ts`, factories in `src/test/factories.ts`); Rust `#[cfg(test)]` at file bottom
-- Strict TypeScript (no `any`); shadcn/ui components exclusively; Tailwind only (no inline styles outside generated `components/ui/`)
+- Strict TypeScript (no `any`)
+- UI components live in `src/components/ui/` and render the design system's `bb-` markup (`bundle.css`). Radix only where behavior needs it (dialog focus trap). Tailwind for layout only; its theme is the token CSS variables. Type comes from `tokens.css` classes. No inline styles except computed widths (progress fill).
 - Loading states for all async ops; `src/lib/error-messages.ts` maps DFU errors to user guidance
 
 ## Docs

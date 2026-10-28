@@ -57,12 +57,12 @@ export interface FieldBounds {
 }
 
 export const CUSTOM_BOUNDS: Record<CustomNumericField, FieldBounds> = {
-  on: { min: 50, max: 200, step: 1, unit: 'ms', label: 'Burst duration' },
-  off: { min: 30, max: 200, step: 1, unit: 'ms', label: 'Burst gap' },
-  jitter: { min: 0, max: 50, step: 0.5, unit: '%', label: 'Jitter' },
-  ampMin: { min: 20, max: 100, step: 1, unit: '%', label: 'Amplitude min' },
-  ampMax: { min: 20, max: 100, step: 1, unit: '%', label: 'Amplitude max' },
-  session: { min: 1, max: 240, step: 1, unit: 'min', label: 'Session length' },
+  on: { min: 50, max: 200, step: 1, unit: 'milliseconds', label: 'Buzz length' },
+  off: { min: 30, max: 200, step: 1, unit: 'milliseconds', label: 'Pause between buzzes' },
+  jitter: { min: 0, max: 50, step: 0.5, unit: '%', label: 'Timing variation' },
+  ampMin: { min: 20, max: 100, step: 1, unit: '%', label: 'Lowest strength' },
+  ampMax: { min: 20, max: 100, step: 1, unit: '%', label: 'Highest strength' },
+  session: { min: 1, max: 240, step: 1, unit: 'minutes', label: 'Session length' },
 };
 
 /** Smallest inter-burst gap the jitter excursion may leave (config.h:211). */
@@ -85,44 +85,40 @@ const NUMERIC_FIELDS: CustomNumericField[] = [
  */
 const INTEGER_FIELDS: CustomNumericField[] = ['ampMin', 'ampMax', 'session'];
 
+/** "50–200 milliseconds", "0–50%": the range in words for a field's hint. */
+export function rangeHint(b: FieldBounds): string {
+  return `${b.min}–${b.max}${b.unit === '%' ? '%' : ` ${b.unit}`}`;
+}
+
+export type CustomParamErrors = Partial<Record<CustomNumericField, string>>;
+
 /**
  * Validate every field against the firmware bounds.
  *
- * @returns Human-readable messages, one per violation. Empty array means valid.
+ * @returns One message per invalid field, keyed by field, saying how to fix
+ * it (TextField README). Empty object means valid.
  */
-export function validateCustomParams(p: CustomProfileParams): string[] {
-  const errors: string[] = [];
+export function validateCustomParams(p: CustomProfileParams): CustomParamErrors {
+  const errors: CustomParamErrors = {};
 
   for (const field of NUMERIC_FIELDS) {
-    const bounds = CUSTOM_BOUNDS[field];
+    const { min, max } = CUSTOM_BOUNDS[field];
     const value = p[field];
-
-    if (!Number.isFinite(value)) {
-      errors.push(`${bounds.label} must be a number.`);
-      continue;
-    }
-    if (value < bounds.min || value > bounds.max) {
-      errors.push(
-        `${bounds.label} must be between ${bounds.min} and ${bounds.max} ${bounds.unit}.`
-      );
-    }
-    if (INTEGER_FIELDS.includes(field) && !Number.isInteger(value)) {
-      errors.push(`${bounds.label} must be a whole number.`);
+    if (!Number.isFinite(value) || value < min || value > max) {
+      errors[field] = `Enter a number from ${min} to ${max}.`;
+    } else if (INTEGER_FIELDS.includes(field) && !Number.isInteger(value)) {
+      errors[field] = `Enter a whole number, like ${min}.`;
     }
   }
 
-  if (
-    Number.isFinite(p.ampMin) &&
-    Number.isFinite(p.ampMax) &&
-    p.ampMin > p.ampMax
-  ) {
-    errors.push('Amplitude min must not exceed amplitude max.');
+  if (!errors.ampMin && !errors.ampMax && p.ampMin > p.ampMax) {
+    errors.ampMax = "Lowest strength can't be higher than highest strength.";
   }
 
   return errors;
 }
 
-/** True when any field differs from the research defaults. */
+/** True when any field differs from the defaults. */
 export function isDeviatingFromDefaults(p: CustomProfileParams): boolean {
   return (
     p.on !== CUSTOM_DEFAULTS.on ||

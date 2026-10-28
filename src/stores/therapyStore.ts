@@ -21,7 +21,6 @@ interface TherapyStore extends TherapyState {
 
   // Device management
   setDevices: (devices: Device[]) => void;
-  toggleDevice: (device: Device) => void;
 
   // Progress tracking
   setProgress: (devicePath: string, progress: TherapyConfigProgress) => void;
@@ -69,29 +68,6 @@ export const useTherapyStore = create<TherapyStore>((set) => ({
 
   setDevices: (devices) => set({ selectedDevices: devices }),
 
-  toggleDevice: (device) =>
-    set((state) => {
-      const isSelected = state.selectedDevices.some(
-        (d) => d.path === device.path
-      );
-
-      if (isSelected) {
-        // Deselect: remove from array
-        return {
-          selectedDevices: state.selectedDevices.filter(
-            (d) => d.path !== device.path
-          ),
-        };
-      } else {
-        // Select: add to array (max 2 devices)
-        if (state.selectedDevices.length >= 2) {
-          return state; // Don't add more than 2
-        }
-        return {
-          selectedDevices: [...state.selectedDevices, device],
-        };
-      }
-    }),
 
   setProgress: (devicePath, progress) =>
     set((state) => {

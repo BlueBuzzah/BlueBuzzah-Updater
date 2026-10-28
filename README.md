@@ -15,7 +15,7 @@ Device firmware updater for BlueBuzzah devices. Supports both hardware revisions
 
 The correct firmware package and flash protocol are selected automatically based on the detected hardware.
 
-## 🚀 Quick Start
+## Quick Start
 
 ### For Users
 
@@ -48,19 +48,18 @@ npm run tauri:build
 > [!NOTE]  
 > **Need detailed setup instructions?** See [SETUP.md](SETUP.md) for complete installation guide, prerequisites, and troubleshooting.
 
-## ✨ Features
+## Features
 
-- **Guided UI**: Step-by-step wizards for flashing and therapy configuration
-- **4-Step Wizard**: Intuitive workflow from firmware selection to successful installation
+- **Guided UI**: One focused page each for flashing firmware and configuring devices, in a sidebar with Settings
 - **GitHub Integration**: Automatically fetches latest firmware releases, with the right package per hardware revision
 - **Multi-Hardware Support**: Flashes both v2 (nRF52840) and v3 (ESP32-S3) devices with the matching protocol
 - **Auto-Detection**: Automatically detects connected devices over serial and identifies their hardware revision
-- **Dual-Device Support**: Update up to 2 devices of the same hardware revision simultaneously with PRIMARY/SECONDARY roles
+- **Dual-Device Support**: Update up to 2 devices of the same hardware revision simultaneously with Primary/Secondary roles
 - **Firmware Cache**: Downloaded firmware is cached per version and board with SHA256 verification
 - **Real-time Progress**: Live progress tracking with detailed logging
 - **Cross-Platform**: Native support for macOS and Windows
 
-## 🏗️ Architecture
+## Architecture
 
 **Frontend:** React 18 + TypeScript + Zustand + shadcn/ui + Tailwind CSS
 **Backend:** Tauri 2.0 + Rust for device detection, firmware flashing (Nordic Secure DFU and espflash), and post-flash role configuration over serial
@@ -69,12 +68,12 @@ npm run tauri:build
 
 ```mermaid
 %%{init: {'theme': 'base', 'themeVariables': {
-  'primaryColor': '#0d3a4d',
-  'primaryTextColor': '#fafafa',
-  'primaryBorderColor': '#35B6F2',
-  'lineColor': '#35B6F2',
-  'secondaryColor': '#05212D',
-  'tertiaryColor': '#0a0a0a'
+  'primaryColor': '#0f1830',
+  'primaryTextColor': '#eef3ff',
+  'primaryBorderColor': '#4fb0ff',
+  'lineColor': '#4fb0ff',
+  'secondaryColor': '#26355a',
+  'tertiaryColor': '#070d1c'
 }}}%%
 mindmap
   root((BlueBuzzah Updater))
@@ -100,23 +99,23 @@ mindmap
         Firmware cache
 ```
 
-### Wizard Flow
+### Flash flow
 
-1. **Firmware Selection** → Browse GitHub releases and select version
-2. **Device Selection** → Auto-detect devices (v2/v3) and assign roles (PRIMARY/SECONDARY)
-3. **Installation** → Flash firmware with real-time progress, then configure device role over serial
-4. **Complete** → Success screen with post-installation instructions
+1. **Choose devices** → Auto-detect devices (v2/v3) and assign roles (Primary/Secondary)
+2. **Choose a version** → Latest stable release preselected; experimental versions behind a toggle
+3. **Flash** → Real-time progress, then the device role is set over serial
+4. **Verify** → The result, with recovery steps and copyable details if something failed
 
-## 🎨 UI/UX
+## UI/UX
 
 All UI/UX follows the BlueBuzzah design system, which lives in the [BlueBuzzah-Workspace](https://github.com/BlueBuzzah/BlueBuzzah-Workspace) repo (`.claude/skills/bluebuzzah-design-system/`).
 
-## 📦 Technology Stack
+## Technology Stack
 
 | Category             | Technologies                         |
 | -------------------- | ------------------------------------ |
 | **Frontend**         | React 18, TypeScript, Vite           |
-| **UI Components**    | shadcn/ui (dark theme), Tailwind CSS |
+| **UI Components**    | BlueBuzzah design system (`bb-` components, four themes), Tailwind CSS for layout |
 | **State Management** | Zustand                              |
 | **Icons**            | Lucide React                         |
 | **Backend**          | Tauri 2.0, Rust                      |
@@ -124,12 +123,12 @@ All UI/UX follows the BlueBuzzah design system, which lives in the [BlueBuzzah-W
 | **Device Detection** | serialport (VID/PID identification)  |
 | **HTTP Client**      | reqwest, native fetch                |
 
-## 📚 Documentation
+## Documentation
 
 - **[SETUP.md](SETUP.md)** - Complete setup guide, prerequisites, and troubleshooting
 - **[docs/TAURI_DFU_FLASH_GUIDE.MD](docs/TAURI_DFU_FLASH_GUIDE.MD)** - DFU flashing implementation guide
 
-## 🔧 Development
+## Development
 
 ### Key Commands
 
@@ -148,7 +147,7 @@ After flashing, the updater configures each device's role over serial (`SET_ROLE
 - **PRIMARY**: Coordinator device, broadcasts to secondary
 - **SECONDARY**: Listener device, receives from primary
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! Please:
 
@@ -157,7 +156,7 @@ Contributions are welcome! Please:
 3. Follow existing code style and architecture
 4. Submit a pull request with clear description
 
-## 📄 License
+## License
 
 MIT License - see [LICENSE](LICENSE) file for details.
 

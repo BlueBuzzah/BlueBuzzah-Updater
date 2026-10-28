@@ -1,56 +1,52 @@
 import * as React from 'react';
-import { Slot } from '@radix-ui/react-slot';
-import { cva, type VariantProps } from 'class-variance-authority';
+import type { LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { ICON } from './icon';
 
-const buttonVariants = cva(
-  'inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50',
-  {
-    variants: {
-      variant: {
-        default:
-          'bg-primary text-primary-foreground shadow hover:bg-primary/90',
-        destructive:
-          'bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90',
-        outline:
-          'border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground',
-        secondary:
-          'bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80',
-        ghost: 'hover:bg-accent hover:text-accent-foreground',
-        link: 'text-primary underline-offset-4 hover:underline',
-      },
-      size: {
-        default: 'h-9 px-4 py-2',
-        sm: 'h-8 rounded-md px-3 text-xs',
-        lg: 'h-10 rounded-md px-8',
-        icon: 'h-9 w-9',
-      },
-    },
-    defaultVariants: {
-      variant: 'default',
-      size: 'default',
-    },
-  }
-);
+type Variant = 'primary' | 'secondary' | 'quiet' | 'danger';
+type Size = 'md' | 'lg' | 'xl';
 
-export interface ButtonProps
-  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
-    VariantProps<typeof buttonVariants> {
-  asChild?: boolean;
+export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: Variant;
+  size?: Size;
+  icon?: LucideIcon;
+  iconEnd?: LucideIcon;
+  fullWidth?: boolean;
+  /** Dense lists only: 44px (target-min) with tighter padding and small icons */
+  compact?: boolean;
+  /** Ignore repeat activations within 400ms. Defaults to true for size xl. */
+  guardRepeat?: boolean;
 }
 
-const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, asChild = false, ...props }, ref) => {
-    const Comp = asChild ? Slot : 'button';
+export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
+  (
+    { variant = 'primary', size = 'md', icon: Icon, iconEnd: IconEnd, fullWidth, compact, guardRepeat, className, children, onClick, ...rest },
+    ref
+  ) => {
+    const guard = guardRepeat ?? size === 'xl';
+    const last = React.useRef(0);
+    const iconSize = size === 'xl' ? ICON.l : compact ? ICON.s : ICON.m;
     return (
-      <Comp
-        className={cn(buttonVariants({ variant, size, className }))}
+      <button
+        type="button"
         ref={ref}
-        {...props}
-      />
+        {...rest}
+        className={cn('bb-btn', `bb-btn--${variant}`, `bb-btn--${size}`, fullWidth && 'bb-btn--full', compact && 'bb-btn--compact', className)}
+        onClick={(e) => {
+          const now = Date.now();
+          if (guard && now - last.current < 400) {
+            e.preventDefault();
+            return;
+          }
+          last.current = now;
+          onClick?.(e);
+        }}
+      >
+        {Icon && <Icon size={iconSize} />}
+        <span className="bb-btn__label">{children}</span>
+        {IconEnd && <IconEnd size={iconSize} />}
+      </button>
     );
   }
 );
 Button.displayName = 'Button';
-
-export { Button, buttonVariants };

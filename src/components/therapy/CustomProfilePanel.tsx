@@ -1,21 +1,17 @@
-import { useEffect, useRef, useState } from 'react';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
+import { useEffect, useId, useRef, useState } from 'react';
+import { ChevronDown, ChevronUp, RefreshCw, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { Card } from '@/components/ui/card';
+import { ICON } from '@/components/ui/icon';
 import { Switch } from '@/components/ui/switch';
+import { TextField } from '@/components/ui/text-field';
 import {
   CUSTOM_BOUNDS,
   CUSTOM_DEFAULTS,
   crTiming,
   effectiveJitterCapPct,
   isDeviatingFromDefaults,
+  rangeHint,
   validateCustomParams,
   type CustomNumericField,
   type CustomProfileParams,
@@ -23,7 +19,6 @@ import {
 import { therapyService } from '@/services/TherapyService';
 import { useSettingsStore } from '@/stores/settingsStore';
 import type { CustomProfileRead } from '@/types';
-import { RefreshCw, SlidersHorizontal } from 'lucide-react';
 
 /** Firmware profile name -> display name, for the "not_custom" prefill message. */
 const PROFILE_DISPLAY_NAMES: Record<string, string> = {
@@ -33,39 +28,52 @@ const PROFILE_DISPLAY_NAMES: Record<string, string> = {
   gentle: 'Gentle',
 };
 
-const NUMERIC_FIELDS: CustomNumericField[] = [
-  'on',
-  'off',
-  'jitter',
-  'ampMin',
-  'ampMax',
-  'session',
-];
+const NUMERIC_FIELDS: CustomNumericField[] = ['on', 'off', 'jitter', 'ampMin', 'ampMax', 'session'];
+const INTEGER_FIELDS = new Set<CustomNumericField>(['ampMin', 'ampMax', 'session']);
+
+// A missing or invalid saved number shows as an empty field, never "null" or "NaN".
+const show = (n: number) => (Number.isFinite(n) ? String(n) : '');
+const toRaw = (v: CustomProfileParams) =>
+  Object.fromEntries(NUMERIC_FIELDS.map((f) => [f, show(v[f])])) as Record<CustomNumericField, string>;
+const parse = (raw: string) => (raw.trim() === '' ? Number.NaN : Number(raw));
 
 export function CustomProfilePanel(): JSX.Element {
   const { settings, setSettings } = useSettingsStore();
+  const values: CustomProfileParams = settings.customProfile ?? CUSTOM_DEFAULTS;
+  const [raw, setRaw] = useState(() => toRaw(values));
+  const [focused, setFocused] = useState<CustomNumericField | null>(null);
+  const [beforeReset, setBeforeReset] = useState<CustomProfileParams | null>(null);
   const [read, setRead] = useState<CustomProfileRead | null>(null);
   const [isReading, setIsReading] = useState(false);
+  const [timingOpen, setTimingOpen] = useState(false);
   const hasReadRef = useRef(false);
+  const timingId = useId();
 
-  const values: CustomProfileParams = settings.customProfile ?? CUSTOM_DEFAULTS;
+  // Replace everything shown, e.g. after a device read, a reset or an undo.
+  const replaceAll = (next: CustomProfileParams) => {
+    setSettings({ customProfile: next });
+    setRaw(toRaw(next));
+  };
+
+  // Follow store changes made elsewhere (the saved copy loading, a device read),
+  // except in the field someone is typing in.
+  useEffect(() => {
+    setRaw((r) => {
+      const changed = NUMERIC_FIELDS.filter((f) => f !== focused && !Object.is(parse(r[f]), values[f]) && r[f] !== show(values[f]));
+      return changed.length ? { ...r, ...Object.fromEntries(changed.map((f) => [f, show(values[f])])) } : r;
+    });
+  }, [values, focused]);
 
   const doRead = async () => {
     setIsReading(true);
     try {
       const result = await therapyService.readCustomProfile();
       setRead(result);
-      if (result.case === 'custom' && result.values) {
-        // The device is the source of truth for what is actually on the
-        // hardware, so a successful read overrides the persisted values.
-        setSettings({ customProfile: result.values });
-      }
+      // The device is the source of truth for what is actually on the hardware.
+      if (result.case === 'custom' && result.values) replaceAll(result.values);
     } catch (error) {
-      // The command answers 'no_device' rather than rejecting for an absent or
-      // unreadable glove, so a rejection here is an IPC-level failure. Prefill
-      // is a convenience: leave `read` null so no prefill claim is made and the
-      // panel falls back to the defaults, rather than crashing the render with
-      // an unhandled rejection.
+      // 'no_device' is an answer, not a rejection; a rejection is an IPC failure.
+      // Prefill is a convenience, so fall back to the defaults without a claim.
       console.error('[CustomProfilePanel] prefill read failed:', error);
       setRead(null);
     } finally {
@@ -78,164 +86,141 @@ export function CustomProfilePanel(): JSX.Element {
     if (hasReadRef.current) return;
     hasReadRef.current = true;
     doRead();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleFieldChange = (field: CustomNumericField, raw: string) => {
-    const parsed = Number(raw);
-    setSettings({ customProfile: { ...values, [field]: parsed } });
-  };
-
-  const handleMirrorChange = (checked: boolean) => {
-    setSettings({ customProfile: { ...values, mirror: checked } });
-  };
-
-  const handleReset = () => {
-    setSettings({ customProfile: { ...CUSTOM_DEFAULTS } });
+  // Validate on blur only (TextField README: don't validate while typing).
+  const commit = (field: CustomNumericField) => {
+    setSettings({ customProfile: { ...values, [field]: parse(raw[field]) } });
+    setFocused(null);
+    setBeforeReset(null);
   };
 
   const errors = validateCustomParams(values);
+  // The store only changes on blur or from outside, so this never validates
+  // mid-typing; an invalid saved value is highlighted as soon as the panel opens.
+  const shownError = (field: CustomNumericField) => (field === focused ? undefined : errors[field]);
   const deviating = isDeviatingFromDefaults(values);
   const jitterCap = effectiveJitterCapPct(values);
-  const showJitterAdvisory = values.jitter > jitterCap;
 
   const prefillMessage = (() => {
-    if (!read) return null;
-    switch (read.case) {
+    switch (read?.case) {
       case 'custom':
-        return 'Loaded from your primary glove.';
+        return 'Loaded from your Primary device.';
       case 'not_custom': {
-        const displayName =
-          (read.profileName && PROFILE_DISPLAY_NAMES[read.profileName]) ||
-          read.profileName ||
-          'an unknown profile';
-        return `Your glove is set to ${displayName}. Showing research defaults — these will be saved when you apply.`;
+        const name = (read.profileName && PROFILE_DISPLAY_NAMES[read.profileName]) || read.profileName || 'another pattern';
+        return `Your device uses ${name}. These are the default settings. They're saved when you apply.`;
       }
       case 'no_device':
-        return 'No glove connected. Showing research defaults.';
+        return 'No device connected. Showing the default settings. Plug in your Primary device to load its settings.';
       default:
         return null;
     }
   })();
 
   return (
-    <Card className="border-primary/20 bg-primary/5">
-      <CardHeader className="pb-4">
-        <CardTitle className="text-lg flex items-center gap-2">
-          <SlidersHorizontal className="h-5 w-5 text-primary" />
-          <span>Custom Profile</span>
-        </CardTitle>
-        <CardDescription>
-          Configure your own timing, amplitude, and session length
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        {prefillMessage && (
-          <p className="text-sm text-muted-foreground">{prefillMessage}</p>
-        )}
+    <Card title="Custom Pattern">
+      <div className="grid gap-6">
+        <p className="body">Set your own timing, strength and session length.</p>
+        {prefillMessage && <p className="body-s text-ink-muted" aria-live="polite">{prefillMessage}</p>}
 
-        {deviating && (
-          <div className="flex items-center justify-between gap-4 rounded-md border border-amber-500/30 bg-amber-500/10 px-4 py-3">
-            <p className="text-sm text-amber-600 dark:text-amber-400">
-              These settings differ from the researched therapy configuration.
+        {(deviating || beforeReset) && (
+          <div className="flex flex-wrap items-center justify-between gap-target-gap" aria-live="polite">
+            <p className="body-s flex items-center gap-2">
+              {beforeReset ? (
+                'Settings reset.'
+              ) : (
+                <>
+                  <TriangleAlert size={ICON.s} className="shrink-0 text-warning" />
+                  You changed these from the defaults.
+                </>
+              )}
             </p>
-            <Button variant="outline" size="sm" onClick={handleReset}>
-              Reset to research defaults
-            </Button>
+            {beforeReset ? (
+              <Button variant="quiet" onClick={() => replaceAll(beforeReset)}>Undo</Button>
+            ) : (
+              <Button
+                variant="quiet"
+                onClick={() => {
+                  const previous = values;
+                  replaceAll({ ...CUSTOM_DEFAULTS });
+                  setBeforeReset(previous);
+                }}
+              >
+                Reset to Defaults
+              </Button>
+            )}
           </div>
         )}
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          {NUMERIC_FIELDS.map((field) => {
-            const bounds = CUSTOM_BOUNDS[field];
-            const inputId = `custom-profile-${field}`;
-            return (
-              <div key={field} className="space-y-1.5">
-                <Label htmlFor={inputId}>{bounds.label}</Label>
-                <Input
-                  id={inputId}
-                  type="number"
-                  min={bounds.min}
-                  max={bounds.max}
-                  step={bounds.step}
-                  value={values[field]}
-                  onChange={(e) => handleFieldChange(field, e.target.value)}
-                />
-              </div>
-            );
-          })}
+        <div className="grid gap-6 sm:grid-cols-2">
+          {NUMERIC_FIELDS.map((field) => (
+            <TextField
+              key={field}
+              label={CUSTOM_BOUNDS[field].label}
+              hint={rangeHint(CUSTOM_BOUNDS[field])}
+              error={shownError(field)}
+              inputMode={INTEGER_FIELDS.has(field) ? 'numeric' : 'decimal'}
+              className="tabular-nums"
+              value={raw[field]}
+              onChange={(e) => setRaw((r) => ({ ...r, [field]: e.target.value }))}
+              onFocus={() => setFocused(field)}
+              onBlur={() => commit(field)}
+            />
+          ))}
         </div>
 
-        <div className="flex items-center gap-4">
-          <Switch
-            id="custom-profile-mirror"
-            checked={values.mirror}
-            onCheckedChange={handleMirrorChange}
-          />
-          <Label htmlFor="custom-profile-mirror">Mirror across both gloves</Label>
-        </div>
+        <Switch
+          label="Same order on both devices"
+          description="Both devices buzz the same fingers in the same order."
+          checked={values.mirror}
+          onChange={(mirror) => setSettings({ customProfile: { ...values, mirror } })}
+        />
 
-        {errors.length > 0 && (
-          <div className="space-y-1">
-            {errors.map((error) => (
-              <p key={error} className="text-sm text-destructive">
-                {error}
-              </p>
-            ))}
-          </div>
-        )}
-
-        {showJitterAdvisory && (
-          <p
-            data-testid="jitter-advisory"
-            className="text-sm text-muted-foreground"
-          >
-            At this burst gap, jitter is effectively capped at{' '}
-            {jitterCap.toFixed(1)}%.
+        {values.jitter > jitterCap && (
+          <p data-testid="jitter-advisory" className="body-s tabular-nums text-ink-muted">
+            With this pause, timing can vary by at most {jitterCap.toFixed(1)}%.
           </p>
         )}
 
-        <DerivedTiming values={values} motors={read?.motors ?? null} />
-
-        <div className="flex justify-end">
+        <div className="flex flex-wrap items-start justify-between gap-target-gap">
           <Button
-            variant="outline"
-            size="sm"
-            onClick={doRead}
-            disabled={isReading}
+            variant="quiet"
+            icon={timingOpen ? ChevronUp : ChevronDown}
+            aria-expanded={timingOpen}
+            aria-controls={timingId}
+            onClick={() => setTimingOpen(!timingOpen)}
           >
-            <RefreshCw className="mr-2 h-4 w-4" />
-            Re-read from glove
+            {timingOpen ? 'Hide Timing Details' : 'Show Timing Details'}
+          </Button>
+          <Button variant="quiet" icon={RefreshCw} onClick={doRead} disabled={isReading}>
+            Load from Device
           </Button>
         </div>
-      </CardContent>
+        {timingOpen && (
+          <div id={timingId}>
+            <DerivedTiming values={values} motors={read?.motors ?? null} />
+          </div>
+        )}
+      </div>
     </Card>
   );
 }
 
-function DerivedTiming({
-  values,
-  motors,
-}: {
-  values: CustomProfileParams;
-  motors: number | null;
-}) {
+/** The coordinated-reset timing in technical terms, one click away (README Principle 4). */
+function DerivedTiming({ values, motors }: { values: CustomProfileParams; motors: number | null }) {
   if (motors !== null) {
     const { slotMs, periodMs, hz } = crTiming(values, motors);
     return (
-      <p data-testid="derived-timing" className="text-sm text-muted-foreground">
-        Slot {slotMs} ms · CR period {periodMs} ms ({hz.toFixed(2)} Hz)
+      <p data-testid="derived-timing" className="code-s tabular-nums">
+        Finger slot {slotMs} ms · Cycle {periodMs} ms ({hz.toFixed(2)} Hz)
       </p>
     );
   }
-
-  const four = crTiming(values, 4);
-  const five = crTiming(values, 5);
+  const v2 = crTiming(values, 4);
+  const v3 = crTiming(values, 5);
   return (
-    <p data-testid="derived-timing" className="text-sm text-muted-foreground">
-      Slot {four.slotMs} ms · CR period {four.periodMs} ms (
-      {four.hz.toFixed(2)} Hz) on 4 motors, {five.periodMs} ms (
-      {five.hz.toFixed(2)} Hz) on 5
+    <p data-testid="derived-timing" className="code-s tabular-nums">
+      Finger slot {v2.slotMs} ms · Cycle {v2.periodMs} ms ({v2.hz.toFixed(2)} Hz) on v2 · {v3.periodMs} ms ({v3.hz.toFixed(2)} Hz) on v3
     </p>
   );
 }

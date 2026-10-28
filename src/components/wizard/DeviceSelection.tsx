@@ -1,327 +1,179 @@
-import { Badge } from '@/components/ui/badge';
+import { useId, useRef, useState } from 'react';
+import { RefreshCw, TriangleAlert } from 'lucide-react';
+import { Banner } from '@/components/ui/banner';
 import { Button } from '@/components/ui/button';
-import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-} from '@/components/ui/card';
-import {
-	Select,
-	SelectContent,
-	SelectItem,
-	SelectTrigger,
-	SelectValue,
-} from '@/components/ui/select';
-import { useToast } from '@/components/ui/use-toast';
-import { deviceService } from '@/services/DeviceService';
-import { Device, DeviceRole } from '@/types';
-import { AlertCircle, CheckCircle2, CircuitBoard, RefreshCw } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { Card } from '@/components/ui/card';
+import { DeviceCard } from '@/components/ui/device-card';
+import { ICON } from '@/components/ui/icon';
+import { SegmentedControl } from '@/components/ui/segmented-control';
+import { foundStatus, useDeviceScan } from '@/hooks/useDeviceScan';
+import type { BoardType, Device, DeviceRole } from '@/types';
 
-interface DeviceSelectionProps {
-  selectedDevices: Device[];
-  onDevicesChange: (devices: Device[]) => void;
-  onRoleChange: (devicePath: string, role: DeviceRole) => void;
+export const BOARD_NAME: Record<BoardType, string> = { nrf52: 'BlueBuzzah v2', esp32s3: 'BlueBuzzah v3' };
+
+const ROLE_OPTIONS: { value: DeviceRole; label: string }[] = [
+  { value: 'PRIMARY', label: 'Primary' },
+  { value: 'SECONDARY', label: 'Secondary' },
+];
+
+const MSG = {
+  missingRole: 'Choose a role for this device.',
+  duplicateRole: 'Give each device a different role: one Primary, one Secondary.',
+  max: { flash: 'You can flash up to 2 devices at once.', configure: 'You can configure up to 2 devices at once.' },
+  mixed: "You can't flash a v2 and a v3 device together. Flash one kind at a time.",
+  pruned: 'A selected device was unplugged or changed, so we deselected it.',
+};
+
+/** Empty state (copy: Firmware choose devices). */
+function NoDevicesFound() {
+  return (
+    <div className="grid gap-4">
+      <h4 className="display-l">No devices found</h4>
+      <p className="body">Plug in a device with a USB data cable. Some cables only charge.</p>
+      <ul className="body grid list-disc gap-2 pl-6">
+        <li>Check that the device is turned on.</li>
+        <li>Try a different USB port.</li>
+        <li>Unplug the device, wait 5 seconds, then plug it back in.</li>
+      </ul>
+    </div>
+  );
 }
 
-export function DeviceSelection({
-  selectedDevices,
-  onDevicesChange,
-  onRoleChange,
-}: DeviceSelectionProps) {
-  const [availableDevices, setAvailableDevices] = useState<Device[]>([]);
-  const [loading, setLoading] = useState(true);
-  const { toast } = useToast();
-  const callIdRef = useRef(0);
+interface DeviceSelectionProps {
+  /**
+   * flash: roles and one board version per run. configure: no roles, any mix
+   * of boards, and only devices running firmware (settings can't be written to
+   * a device in bootloader mode).
+   */
+  mode?: 'flash' | 'configure';
+  selectedDevices: Device[];
+  onDevicesChange: (devices: Device[]) => void;
+  onRoleChange?: (devicePath: string, role: DeviceRole) => void;
+}
 
-  useEffect(() => {
-    detectDevices();
-  }, []);
+/** The Choose Devices card, shared by the Firmware and Configure pages. */
+export function DeviceSelection({ mode = 'flash', selectedDevices, onDevicesChange, onRoleChange }: DeviceSelectionProps) {
+  const flash = mode === 'flash';
+  const [notice, setNotice] = useState<string | null>(null);
+  const [autoAssigned, setAutoAssigned] = useState(false);
+  const selectedRef = useRef(selectedDevices);
+  selectedRef.current = selectedDevices;
+  const errId = useId();
 
-  const detectDevices = async () => {
-    const currentCallId = ++callIdRef.current;
-    try {
-      setLoading(true);
-      const devices = await deviceService.detectDevices();
-
-      // Discard stale responses from overlapping calls
-      if (currentCallId !== callIdRef.current) return;
-
-      setAvailableDevices(devices);
-
-      // Prune selections that no longer match reality. A replug can reuse a
-      // path for different hardware (Windows COM reuse especially), and the
-      // stale Device object's board would otherwise drive the wrong flasher.
-      const stillValid = selectedDevices.filter((sel) =>
-        devices.some(
-          (d) =>
-            d.path === sel.path &&
-            d.board === sel.board &&
-            d.serialNumber === sel.serialNumber
-        )
-      );
-      if (stillValid.length !== selectedDevices.length) {
-        onDevicesChange(stillValid);
-        toast({
-          title: 'Selection updated',
-          description:
-            'A selected device was disconnected or changed and has been deselected.',
-        });
-      }
-
-      if (devices.length === 0) {
-        toast({
-          title: 'No Devices Found',
-          description:
-            'Please connect a BlueBuzzah device and try again.',
-        });
-      }
-    } catch (error) {
-      // Discard stale errors from overlapping calls
-      if (currentCallId !== callIdRef.current) return;
-
-      toast({
-        variant: 'destructive',
-        title: 'Error',
-        description:
-          error instanceof Error
-            ? error.message
-            : 'Failed to detect devices',
-      });
-    } finally {
-      if (currentCallId === callIdRef.current) {
-        setLoading(false);
-      }
-    }
-  };
-
-  const toggleDeviceSelection = (device: Device) => {
-    const isSelected = selectedDevices.some((d) => d.path === device.path);
-
-    if (isSelected) {
-      // Deselect device
-      onDevicesChange(selectedDevices.filter((d) => d.path !== device.path));
-    } else {
-      // Batch flashing is single-board only: both devices must be the same
-      // hardware version (one download, one flasher per run).
-      if (
-        selectedDevices.length > 0 &&
-        selectedDevices[0].board !== device.board
-      ) {
-        toast({
-          variant: 'destructive',
-          title: 'Hardware version mismatch',
-          description:
-            'Both devices must be the same hardware version to flash together. Deselect the current device first.',
-        });
-        return;
-      }
-      // Select device
-      const newDevices = [...selectedDevices, device];
-
-      // Auto-assign roles if we have 2 devices
-      if (newDevices.length === 2) {
-        const updatedDevices = newDevices.map((d, index) => ({
-          ...d,
-          role: (index === 0 ? 'PRIMARY' : 'SECONDARY') as DeviceRole,
-        }));
-        onDevicesChange(updatedDevices);
-      } else {
-        onDevicesChange(newDevices);
-      }
-    }
-  };
-
-  const isDeviceSelected = (devicePath: string) => {
-    return selectedDevices.some((d) => d.path === devicePath);
-  };
-
-  const getDeviceRole = (devicePath: string): DeviceRole | undefined => {
-    return selectedDevices.find((d) => d.path === devicePath)?.role;
-  };
-
-  const canProceed = () => {
-    if (selectedDevices.length === 0) return false;
-    return selectedDevices.every((d) => d.role !== undefined);
-  };
-
-  if (loading) {
-    return (
-      <div className="text-center py-12">
-        <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full mx-auto mb-4" />
-        <p className="text-muted-foreground">Detecting devices...</p>
-      </div>
+  // A replug can reuse a port for different hardware (Windows COM reuse),
+  // and a stale board would drive the wrong flasher: drop it.
+  const { devices: found, loading, error: scanError, rescan } = useDeviceScan((devices) => {
+    const current = selectedRef.current;
+    const stillValid = current.filter((sel) =>
+      devices.some((d) => d.path === sel.path && d.board === sel.board && d.serialNumber === sel.serialNumber)
     );
-  }
+    if (stillValid.length !== current.length) {
+      onDevicesChange(stillValid);
+      setNotice(MSG.pruned);
+    }
+  });
+  const available = flash ? found : found.filter((d) => !d.inBootloader);
+
+  const toggle = (device: Device) => {
+    setNotice(null);
+    if (selectedDevices.some((d) => d.path === device.path)) {
+      onDevicesChange(selectedDevices.filter((d) => d.path !== device.path));
+      setAutoAssigned(false);
+      return;
+    }
+    if (selectedDevices.length >= 2) return setNotice(MSG.max[mode]);
+    // Batch flashing is single-board only: one download, one flasher per run.
+    if (flash && selectedDevices.length > 0 && selectedDevices[0].board !== device.board) return setNotice(MSG.mixed);
+    const next = [...selectedDevices, device];
+    if (flash && next.length === 2) {
+      onDevicesChange(next.map((d, i) => ({ ...d, role: (i === 0 ? 'PRIMARY' : 'SECONDARY') as DeviceRole })));
+      setAutoAssigned(true);
+    } else {
+      onDevicesChange(next);
+    }
+  };
+
+  const roles = selectedDevices.map((d) => d.role);
+  const duplicate = flash && selectedDevices.length === 2 && roles[0] !== undefined && roles[0] === roles[1];
+  const status = loading
+    ? 'Looking for devices…'
+    : scanError
+      ? ''
+      : foundStatus(available.length, selectedDevices.length);
 
   return (
-    <div className="space-y-6">
-      <div className="text-center">
-        <h2 className="text-2xl font-bold mb-2">Select Devices</h2>
-        <p className="text-muted-foreground">
-          Choose the devices to update and assign roles
+    <Card
+      title="Choose Devices"
+      actions={
+        <Button variant="quiet" icon={RefreshCw} onClick={rescan} disabled={loading}>
+          Rescan
+        </Button>
+      }
+    >
+      <div className="grid gap-6">
+        <p className="body">Plug in up to 2 devices with a USB data cable.</p>
+        <p className="body-s tabular-nums text-ink-muted" aria-live="polite">{status}</p>
+
+        {scanError && (
+          <Banner tone="danger" title="Couldn't look for devices" announce>
+            <p>Select Rescan to try again.</p>
+            <p className="code-s rounded-xs bg-surface-sunken p-2">{scanError}</p>
+          </Banner>
+        )}
+
+        {!loading && !scanError && available.length === 0 && <NoDevicesFound />}
+
+        {available.length > 0 && (
+          <ul className="grid gap-6 sm:grid-cols-2">
+            {available.map((device, i) => {
+              const selected = selectedDevices.find((d) => d.path === device.path);
+              const roleErr = selected && !duplicate && !selected.role ? `${errId}-${i}` : undefined;
+              return (
+                <li key={device.path} className="grid content-start gap-4">
+                  <DeviceCard
+                    name={BOARD_NAME[device.board]}
+                    role={flash ? selected?.role : undefined}
+                    port={device.path}
+                    serial={device.serialNumber}
+                    selected={!!selected}
+                    onSelect={() => toggle(device)}
+                  />
+                  {flash && selected && (
+                    <div className="grid gap-2">
+                      <SegmentedControl
+                        label="Role"
+                        options={ROLE_OPTIONS}
+                        value={selected.role}
+                        onChange={(role) => onRoleChange?.(device.path, role)}
+                        aria-describedby={duplicate ? `${errId}-dup` : roleErr}
+                      />
+                      {roleErr && <p id={roleErr} className="body-s text-danger">{MSG.missingRole}</p>}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
+        {flash && selectedDevices.length > 0 && (
+          <div className="grid gap-2">
+            {autoAssigned && <p className="body-s">We set the roles for you. You can change them.</p>}
+            <p className="body-s text-ink-muted">The Primary device connects to the BuzzahBuddy app. The Secondary device follows it.</p>
+            {duplicate && (
+              <p id={`${errId}-dup`} className="body-s flex items-start gap-2 text-danger">
+                <TriangleAlert size={ICON.s} className="shrink-0" />
+                {MSG.duplicateRole}
+              </p>
+            )}
+          </div>
+        )}
+
+        <p className="body-s flex items-start gap-2" aria-live="polite">
+          {notice && <TriangleAlert size={ICON.s} className="shrink-0 text-warning" />}
+          {notice}
         </p>
       </div>
-
-      <div className="flex justify-between items-center">
-        <div className="flex items-center gap-2">
-          <Badge variant="secondary">
-            {availableDevices.length} device{availableDevices.length !== 1 ? 's' : ''} found
-          </Badge>
-          {selectedDevices.length > 0 && (
-            <Badge variant="default">
-              {selectedDevices.length} selected
-            </Badge>
-          )}
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={detectDevices}
-          disabled={loading}
-        >
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Refresh
-        </Button>
-      </div>
-
-      {availableDevices.length === 0 ? (
-        <Card className="border-dashed">
-          <CardContent className="pt-6 pb-6 text-center">
-            <AlertCircle className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-            <h3 className="text-lg font-semibold mb-2">
-              No BlueBuzzah Devices Found
-            </h3>
-            <p className="text-sm text-muted-foreground mb-4">
-              Make sure each BlueBuzzah device is <strong>powered on</strong> and connected via USB.
-            </p>
-            <div className="text-sm text-left bg-muted p-4 rounded-md space-y-2">
-              <p className="font-semibold">Troubleshooting:</p>
-              <ul className="list-disc list-inside space-y-1 text-muted-foreground">
-                <li>Check USB cable connection (use a data cable, not charge-only)</li>
-                <li>Ensure each device is powered on</li>
-                <li>Try different USB ports</li>
-                <li>Power cycle your device</li>
-              </ul>
-            </div>
-            <Button onClick={detectDevices} className="mt-4">
-              <RefreshCw className="h-4 w-4 mr-2" />
-              Try Again
-            </Button>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2">
-          {availableDevices.map((device) => {
-            const selected = isDeviceSelected(device.path);
-            const role = getDeviceRole(device.path);
-
-            return (
-              <Card
-                key={device.path}
-                className={`transition-all cursor-pointer hover:shadow-lg ${
-                  selected ? 'ring-2 ring-primary' : ''
-                }`}
-                onClick={() => toggleDeviceSelection(device)}
-              >
-                <CardHeader>
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3">
-                      <CircuitBoard className="h-[1.875rem] w-[1.875rem]" />
-                      <div>
-                        <CardTitle className="text-base">
-                          {device.label}
-                        </CardTitle>
-                        <CardDescription className="text-xs mt-1">
-                          {device.path}
-                        </CardDescription>
-                        {device.serialNumber && (
-                          <p className="text-xs text-muted-foreground mt-1">
-                            S/N: {device.serialNumber}
-                          </p>
-                        )}
-                        <Badge variant="secondary" className="mt-1 text-[10px]">
-                          {device.board === 'esp32s3' ? 'ESP32-S3' : 'nRF52840'}
-                        </Badge>
-                      </div>
-                    </div>
-                    {selected && (
-                      <CheckCircle2 className="h-5 w-5 text-primary" />
-                    )}
-                  </div>
-                </CardHeader>
-
-                {selected && (
-                  <CardContent onClick={(e) => e.stopPropagation()}>
-                    <div className="space-y-2">
-                      <label className="text-sm font-medium">
-                        Device Role
-                      </label>
-                      <Select
-                        value={role}
-                        onValueChange={(value) =>
-                          onRoleChange(device.path, value as DeviceRole)
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select role" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="PRIMARY">
-                            PRIMARY
-                            <span className="text-xs text-muted-foreground ml-2">
-                              (Coordinator)
-                            </span>
-                          </SelectItem>
-                          <SelectItem value="SECONDARY">
-                            SECONDARY
-                            <span className="text-xs text-muted-foreground ml-2">
-                              (Listener)
-                            </span>
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <p className="text-xs text-muted-foreground">
-                        {role === 'PRIMARY' &&
-                          'Primary device coordinates communication'}
-                        {role === 'SECONDARY' &&
-                          'Secondary device listens for commands'}
-                      </p>
-                    </div>
-                  </CardContent>
-                )}
-              </Card>
-            );
-          })}
-        </div>
-      )}
-
-      {selectedDevices.length > 0 && (
-        <Card className="bg-muted/50">
-          <CardContent className="pt-6">
-            <div className="flex items-start gap-3">
-              <AlertCircle className="h-5 w-5 text-blue-500 mt-0.5" />
-              <div className="space-y-1">
-                <p className="text-sm font-medium">Device Roles</p>
-                <p className="text-sm text-muted-foreground">
-                  {selectedDevices.length === 1
-                    ? 'Please select a role for your device.'
-                    : selectedDevices.length === 2
-                    ? 'Roles have been auto-assigned. You can change them if needed.'
-                    : 'You can update up to 2 devices at once.'}
-                </p>
-                {!canProceed() && (
-                  <p className="text-sm text-destructive">
-                    All selected devices must have a role assigned.
-                  </p>
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-    </div>
+    </Card>
   );
 }

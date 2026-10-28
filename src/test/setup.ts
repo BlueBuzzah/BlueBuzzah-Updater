@@ -18,6 +18,29 @@ vi.mock('@tauri-apps/api/event', () => ({
   emit: vi.fn(),
 }));
 
+// jsdom has no matchMedia; report no OS preference
+if (!window.matchMedia) {
+  window.matchMedia = (query: string) =>
+    ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      addListener: () => {},
+      removeListener: () => {},
+      dispatchEvent: () => false,
+    }) as MediaQueryList;
+}
+
+// Mock the Tauri window (plain functions so resetAllMocks keeps them working)
+vi.mock('@tauri-apps/api/window', () => ({
+  getCurrentWindow: () => ({
+    onCloseRequested: () => Promise.resolve(() => {}),
+    destroy: () => Promise.resolve(),
+  }),
+}));
+
 // Mock fetch for GitHub API calls
 global.fetch = vi.fn();
 

@@ -1,469 +1,192 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { useState } from 'react';
 import { FirmwareSelection } from './FirmwareSelection';
 import { firmwareService } from '@/services/FirmwareService';
-import { createMockRelease, createMockReleases } from '@/test/factories';
+import { createMockCachedMetadata, createMockRelease } from '@/test/factories';
+import type { FirmwareRelease } from '@/types';
 
 // Mock the firmware service (keep the real getAssetForBoard helper)
 vi.mock('@/services/FirmwareService', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/services/FirmwareService')>();
   return {
     ...actual,
-    firmwareService: {
-      fetchReleases: vi.fn(),
-      deleteCachedFirmware: vi.fn(),
-    },
+    firmwareService: { fetchReleases: vi.fn(), deleteCachedFirmware: vi.fn() },
   };
 });
 
-// Mock the toast hook
-vi.mock('@/components/ui/use-toast', () => ({
-  useToast: () => ({
-    toast: vi.fn(),
-  }),
-}));
+const beta = createMockRelease({ version: '2.1.0-beta', tagName: 'v2.1.0-beta', isPrerelease: true, releaseNotes: 'Beta notes' });
+const stable = createMockRelease({ version: '2.0.4', tagName: 'v2.0.4', releaseNotes: 'Fixes **pairing**. See [docs](https://example.com).' });
+const older = createMockRelease({ version: '2.0.3', tagName: 'v2.0.3' });
+
+function Harness({ onChange = vi.fn() }: { onChange?: (r: FirmwareRelease | null) => void }) {
+  const [value, setValue] = useState<FirmwareRelease | null>(null);
+  return (
+    <FirmwareSelection
+      value={value}
+      onChange={(r) => {
+        onChange(r);
+        setValue(r);
+      }}
+    />
+  );
+}
+
+async function openPicker() {
+  fireEvent.click(await screen.findByRole('button', { name: 'Change Version' }));
+  return screen.getByRole('dialog', { name: 'Choose a Version' });
+}
+
+function row(dialog: HTMLElement, version: string) {
+  return within(dialog).getByRole('listitem', { name: `Version ${version}` });
+}
 
 describe('FirmwareSelection', () => {
-  const mockOnSelect = vi.fn();
-
   beforeEach(() => {
     vi.resetAllMocks();
   });
 
-  describe('Loading State', () => {
-    it('renders loading state while fetching', () => {
-      vi.mocked(firmwareService.fetchReleases).mockImplementation(
-        () => new Promise(() => {}) // Never resolves
-      );
-
-      render(
-        <FirmwareSelection onSelect={mockOnSelect} />
-      );
-
-      expect(screen.getByText('Loading firmware releases...')).toBeInTheDocument();
-    });
-
-    it('shows skeleton cards during loading', () => {
-      vi.mocked(firmwareService.fetchReleases).mockImplementation(
-        () => new Promise(() => {})
-      );
-
-      render(
-        <FirmwareSelection onSelect={mockOnSelect} />
-      );
-
-      // Should show 4 skeleton cards
-      const skeletonCards = document.querySelectorAll('.animate-pulse');
-      expect(skeletonCards.length).toBeGreaterThanOrEqual(4);
-    });
+  it('says it is loading', () => {
+    vi.mocked(firmwareService.fetchReleases).mockImplementation(() => new Promise(() => {}));
+    render(<Harness />);
+    expect(screen.getByText('Loading firmware versions…')).toBeInTheDocument();
   });
 
-  describe('Rendering Releases', () => {
-    it('renders firmware list on success', async () => {
-      const mockReleases = createMockReleases(3);
-      vi.mocked(firmwareService.fetchReleases).mockResolvedValue(mockReleases);
-
-      render(
-        <FirmwareSelection onSelect={mockOnSelect} />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('1.0.0')).toBeInTheDocument();
-        expect(screen.getByText('1.1.0')).toBeInTheDocument();
-        expect(screen.getByText('1.2.0')).toBeInTheDocument();
-      });
-    });
-
-    it('shows version and date for each release', async () => {
-      const mockRelease = createMockRelease({
-        version: '2.0.0',
-        publishedAt: new Date('2024-06-15'),
-      });
-      vi.mocked(firmwareService.fetchReleases).mockResolvedValue([mockRelease]);
-
-      render(
-        <FirmwareSelection onSelect={mockOnSelect} />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('2.0.0')).toBeInTheDocument();
-        expect(screen.getByText(/June/)).toBeInTheDocument();
-      });
-    });
-
-    it('highlights latest release with badge', async () => {
-      const mockReleases = createMockReleases(2);
-      vi.mocked(firmwareService.fetchReleases).mockResolvedValue(mockReleases);
-
-      render(
-        <FirmwareSelection onSelect={mockOnSelect} />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('Latest')).toBeInTheDocument();
-      });
-    });
-
-    it('shows cached badge for cached releases', async () => {
-      const cachedRelease = createMockRelease({
-        version: '1.0.0',
-        isCached: true,
-        cachedMetadata: {
-          version: '1.0.0',
-          board: 'nrf52',
-          tag_name: 'v1.0.0',
-          sha256_hash: 'abc123',
-          zip_path: '/cache/1.0.0.zip',
-          downloaded_at: '2024-01-15T12:00:00Z',
-          file_size: 1024000,
-          published_at: '2024-01-15T00:00:00Z',
-          release_notes: 'Test',
-        },
-      });
-      vi.mocked(firmwareService.fetchReleases).mockResolvedValue([cachedRelease]);
-
-      render(
-        <FirmwareSelection onSelect={mockOnSelect} />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('Cached')).toBeInTheDocument();
-      });
-    });
-
-    it('shows experimental badge for pre-release versions when toggle is enabled', async () => {
-      const stableRelease = createMockRelease({
-        version: '1.0.0',
-        isPrerelease: false,
-      });
-      const prereleaseVersion = createMockRelease({
-        version: '2.0.0-beta.1',
-        tagName: 'v2.0.0-beta.1',
-        isPrerelease: true,
-        publishedAt: new Date('2024-01-20'),
-      });
-      vi.mocked(firmwareService.fetchReleases).mockResolvedValue([prereleaseVersion, stableRelease]);
-
-      render(
-        <FirmwareSelection onSelect={mockOnSelect} />
-      );
-
-      // Wait for releases to load - only stable release visible initially
-      await waitFor(() => {
-        expect(screen.getByText('1.0.0')).toBeInTheDocument();
-      });
-
-      // Pre-release version should NOT be visible initially
-      expect(screen.queryByText('2.0.0-beta.1')).not.toBeInTheDocument();
-
-      // Toggle experimental releases on
-      const experimentalToggle = screen.getByRole('switch');
-      fireEvent.click(experimentalToggle);
-
-      // Now the pre-release version should be visible
-      await waitFor(() => {
-        expect(screen.getByText('2.0.0-beta.1')).toBeInTheDocument();
-      });
-    });
-
-    it('displays download size', async () => {
-      const mockRelease = createMockRelease({
-        version: '1.0.0',
-        assets: [
-          {
-            name: 'firmware.zip',
-            downloadUrl: 'https://test.com/firmware.zip',
-            size: 1048576, // 1 MB
-          },
-        ],
-      });
-      vi.mocked(firmwareService.fetchReleases).mockResolvedValue([mockRelease]);
-
-      render(
-        <FirmwareSelection onSelect={mockOnSelect} />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('1 MB')).toBeInTheDocument();
-      });
-    });
-
-    it('shows per-board download sizes when a release has both assets', async () => {
-      const mockRelease = createMockRelease({
-        version: '2.0.0',
-        assets: [
-          { name: 'BlueBuzzah-Firmware-v2.0.0-abc.zip', downloadUrl: 'u1', size: 200 * 1024 },
-          { name: 'BlueBuzzah-Firmware-v3-v2.0.0-abc.zip', downloadUrl: 'u2', size: 1024 * 1024 },
-        ],
-      });
-      vi.mocked(firmwareService.fetchReleases).mockResolvedValue([mockRelease]);
-
-      render(
-        <FirmwareSelection onSelect={mockOnSelect} />
-      );
-
-      expect(await screen.findByText(/v2: 200 KB/)).toBeInTheDocument();
-      expect(screen.getByText(/v3: 1 MB/)).toBeInTheDocument();
-    });
+  it('starts on the newest stable release, shown compactly with a green Latest badge', async () => {
+    vi.mocked(firmwareService.fetchReleases).mockResolvedValue([beta, stable, older]);
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('2.0.4')).toHaveClass('code'));
+    expect(screen.getByText('Latest').closest('.bb-badge')).toHaveClass('bb-badge--success');
+    expect(screen.queryByText('2.0.3')).toBeNull();
   });
 
-  describe('Empty State', () => {
-    it('renders no releases found message', async () => {
-      vi.mocked(firmwareService.fetchReleases).mockResolvedValue([]);
-
-      render(
-        <FirmwareSelection onSelect={mockOnSelect} />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('No Releases Found')).toBeInTheDocument();
-      });
-    });
-
-    it('shows retry button when no releases', async () => {
-      vi.mocked(firmwareService.fetchReleases).mockResolvedValue([]);
-
-      render(
-        <FirmwareSelection onSelect={mockOnSelect} />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
-      });
-    });
+  it('lists every version in a dialog and closes it after choosing one', async () => {
+    vi.mocked(firmwareService.fetchReleases).mockResolvedValue([beta, stable, older]);
+    const onChange = vi.fn();
+    render(<Harness onChange={onChange} />);
+    const dialog = await openPicker();
+    expect(within(dialog).queryByText('2.1.0-beta')).toBeNull();
+    expect(within(row(dialog, '2.0.4')).getByText('Latest')).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Choose Version 2.0.3' }));
+    expect(onChange).toHaveBeenLastCalledWith(older);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(screen.getByText('2.0.3')).toBeInTheDocument();
   });
 
-  describe('Interactions', () => {
-    it('clicking release calls onSelect', async () => {
-      const mockRelease = createMockRelease({ version: '1.0.0' });
-      vi.mocked(firmwareService.fetchReleases).mockResolvedValue([mockRelease]);
-
-      render(
-        <FirmwareSelection onSelect={mockOnSelect} />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('1.0.0')).toBeInTheDocument();
-      });
-
-      fireEvent.click(screen.getByRole('button', { name: /install 1\.0\.0/i }));
-
-      expect(mockOnSelect).toHaveBeenCalledWith(mockRelease);
-    });
-
-    it('disables install button after click to prevent double-click', async () => {
-      const mockRelease = createMockRelease({ version: '1.0.0' });
-      vi.mocked(firmwareService.fetchReleases).mockResolvedValue([mockRelease]);
-
-      render(
-        <FirmwareSelection onSelect={mockOnSelect} />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('1.0.0')).toBeInTheDocument();
-      });
-
-      const installButton = screen.getByRole('button', { name: /install 1\.0\.0/i });
-      fireEvent.click(installButton);
-
-      // Button should be disabled after click and show spinner
-      await waitFor(() => {
-        expect(screen.getByText('Loading...')).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: /loading/i })).toBeDisabled();
-      });
-      expect(mockOnSelect).toHaveBeenCalledTimes(1);
-    });
-
-    it('shows spinner only on the clicked release card', async () => {
-      const releases = [
-        createMockRelease({ version: '2.0.0', publishedAt: new Date('2024-12-01') }),
-        createMockRelease({ version: '1.0.0', publishedAt: new Date('2024-06-01') }),
-      ];
-      vi.mocked(firmwareService.fetchReleases).mockResolvedValue(releases);
-
-      render(
-        <FirmwareSelection onSelect={mockOnSelect} />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('2.0.0')).toBeInTheDocument();
-        expect(screen.getByText('1.0.0')).toBeInTheDocument();
-      });
-
-      // Click first release
-      fireEvent.click(screen.getByRole('button', { name: /install 2\.0\.0/i }));
-
-      await waitFor(() => {
-        // Clicked card shows spinner
-        expect(screen.getByText('Loading...')).toBeInTheDocument();
-        // Other card still shows its install text (disabled but no spinner)
-        expect(screen.getByText('Install 1.0.0')).toBeInTheDocument();
-      });
-    });
-
+  it('marks the current choice in the list instead of offering Choose', async () => {
+    vi.mocked(firmwareService.fetchReleases).mockResolvedValue([stable, older]);
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('2.0.4')).toBeInTheDocument());
+    const dialog = await openPicker();
+    const chosenRow = row(dialog, '2.0.4');
+    expect(within(chosenRow).queryByText('Chosen')).toBeNull();
+    const check = within(chosenRow).getByRole('img', { name: 'Chosen' });
+    expect(check).toHaveAttribute('width', '24');
+    expect(check.parentElement).toHaveClass('justify-between');
+    expect(within(row(dialog, '2.0.3')).queryByRole('img', { name: 'Chosen' })).toBeNull();
+    expect(within(dialog).queryByRole('button', { name: 'Choose Version 2.0.4' })).toBeNull();
   });
 
-  describe('Release Notes Expansion', () => {
-    it('shows truncated release notes by default', async () => {
-      const longNotes = 'A'.repeat(200);
-      const mockRelease = createMockRelease({
-        version: '1.0.0',
-        releaseNotes: longNotes,
-      });
-      vi.mocked(firmwareService.fetchReleases).mockResolvedValue([mockRelease]);
-
-      render(
-        <FirmwareSelection onSelect={mockOnSelect} />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('Read more')).toBeInTheDocument();
-      });
-    });
-
-    it('expands release notes on click', async () => {
-      const longNotes = 'A'.repeat(200);
-      const mockRelease = createMockRelease({
-        version: '1.0.0',
-        releaseNotes: longNotes,
-      });
-      vi.mocked(firmwareService.fetchReleases).mockResolvedValue([mockRelease]);
-
-      render(
-        <FirmwareSelection onSelect={mockOnSelect} />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('Read more')).toBeInTheDocument();
-      });
-
-      fireEvent.click(screen.getByText('Read more'));
-
-      expect(screen.getByText('Show less')).toBeInTheDocument();
-    });
-
-    it('does not show expand button for short notes', async () => {
-      const shortNotes = 'Short release notes';
-      const mockRelease = createMockRelease({
-        version: '1.0.0',
-        releaseNotes: shortNotes,
-      });
-      vi.mocked(firmwareService.fetchReleases).mockResolvedValue([mockRelease]);
-
-      render(
-        <FirmwareSelection onSelect={mockOnSelect} />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('Short release notes')).toBeInTheDocument();
-      });
-
-      expect(screen.queryByText('Read more')).not.toBeInTheDocument();
-    });
+  it('shows experimental versions from the switch at the top of the dialog', async () => {
+    vi.mocked(firmwareService.fetchReleases).mockResolvedValue([beta, stable, older]);
+    render(<Harness />);
+    const dialog = await openPicker();
+    fireEvent.click(within(dialog).getByRole('switch', { name: 'Show experimental versions' }));
+    const betaRow = row(dialog, '2.1.0-beta');
+    expect(within(betaRow).getByText('Experimental')).toBeInTheDocument();
+    expect(within(betaRow).queryByText('Latest')).toBeNull();
   });
 
-  describe('Cache Management', () => {
-    it('shows delete button for cached releases', async () => {
-      const cachedRelease = createMockRelease({
-        version: '1.0.0',
-        isCached: true,
-        cachedMetadata: {
-          version: '1.0.0',
-          board: 'nrf52',
-          tag_name: 'v1.0.0',
-          sha256_hash: 'abc123',
-          zip_path: '/cache/1.0.0.zip',
-          downloaded_at: '2024-01-15T12:00:00Z',
-          file_size: 1024000,
-          published_at: '2024-01-15T00:00:00Z',
-          release_notes: 'Test',
-        },
-      });
-      vi.mocked(firmwareService.fetchReleases).mockResolvedValue([cachedRelease]);
-
-      render(
-        <FirmwareSelection onSelect={mockOnSelect} />
-      );
-
-      await waitFor(() => {
-        // Cached release should show cache badge and have a delete button
-        expect(screen.getByText('Cached')).toBeInTheDocument();
-        // There should be multiple buttons (select + delete)
-        const buttons = screen.getAllByRole('button');
-        expect(buttons.length).toBeGreaterThan(1);
-      });
-    });
-
-    it('shows confirmation dialog when delete clicked', async () => {
-      const cachedRelease = createMockRelease({
-        version: '1.0.0',
-        isCached: true,
-        cachedMetadata: {
-          version: '1.0.0',
-          board: 'nrf52',
-          tag_name: 'v1.0.0',
-          sha256_hash: 'abc123',
-          zip_path: '/cache/1.0.0.zip',
-          downloaded_at: '2024-01-15T12:00:00Z',
-          file_size: 1024000,
-          published_at: '2024-01-15T00:00:00Z',
-          release_notes: 'Test',
-        },
-      });
-      vi.mocked(firmwareService.fetchReleases).mockResolvedValue([cachedRelease]);
-
-      render(
-        <FirmwareSelection onSelect={mockOnSelect} />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('Cached')).toBeInTheDocument();
-      });
-
-      // Find and click the delete button (small button with trash icon)
-      const buttons = screen.getAllByRole('button');
-      // The delete button is the small one (not "Install X.X.X")
-      const deleteButton = buttons.find(btn => !btn.textContent?.includes('Install'));
-      if (deleteButton) {
-        fireEvent.click(deleteButton);
-
-        await waitFor(() => {
-          expect(screen.getByText('Delete Cached Firmware')).toBeInTheDocument();
-        });
-      }
-    });
+  it('falls back to the newest stable when the chosen experimental version is hidden again', async () => {
+    vi.mocked(firmwareService.fetchReleases).mockResolvedValue([beta, stable]);
+    const onChange = vi.fn();
+    render(<Harness onChange={onChange} />);
+    const dialog = await openPicker();
+    const toggle = within(dialog).getByRole('switch', { name: 'Show experimental versions' });
+    fireEvent.click(toggle);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Choose Version 2.1.0-beta' }));
+    const reopened = await openPicker();
+    fireEvent.click(within(reopened).getByRole('switch', { name: 'Show experimental versions' }));
+    expect(onChange).toHaveBeenLastCalledWith(stable);
   });
 
-  describe('Error Handling', () => {
-    it('handles fetch error gracefully', async () => {
-      vi.mocked(firmwareService.fetchReleases).mockRejectedValue(
-        new Error('Network error')
-      );
-
-      render(
-        <FirmwareSelection onSelect={mockOnSelect} />
-      );
-
-      // Should not crash - error is handled via toast
-      await waitFor(() => {
-        expect(screen.getByText('No Releases Found')).toBeInTheDocument();
-      });
-    });
+  it('opens release notes inside a row, with underlined links', async () => {
+    vi.mocked(firmwareService.fetchReleases).mockResolvedValue([stable]);
+    render(<Harness />);
+    const dialog = await openPicker();
+    const notes = within(row(dialog, '2.0.4')).getByRole('button', { name: 'Release Notes' });
+    expect(notes).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(notes);
+    expect(notes).toHaveAttribute('aria-expanded', 'true');
+    expect(within(dialog).getByRole('link', { name: 'docs' }).closest('.release-notes')).not.toBeNull();
   });
 
-  describe('Single Release', () => {
-    it('renders correctly with single release', async () => {
-      const mockRelease = createMockRelease({ version: '1.0.0' });
-      vi.mocked(firmwareService.fetchReleases).mockResolvedValue([mockRelease]);
+  it('deletes a download from its row only after confirming', async () => {
+    const cached = { ...stable, isCached: true, cachedEntries: [createMockCachedMetadata({ version: '2.0.4' })] };
+    vi.mocked(firmwareService.fetchReleases).mockResolvedValue([cached, older]);
+    render(<Harness />);
+    const dialog = await openPicker();
+    expect(within(row(dialog, '2.0.4')).getByText('Downloaded')).toBeInTheDocument();
+    expect(within(row(dialog, '2.0.3')).queryByRole('button', { name: /Delete Download/ })).toBeNull();
+    fireEvent.click(within(row(dialog, '2.0.4')).getByRole('button', { name: 'Delete Download of Version 2.0.4' }));
+    expect(screen.getByRole('alertdialog', { name: 'Delete This Download?' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(firmwareService.deleteCachedFirmware).toHaveBeenCalledWith('2.0.4', 'nrf52'));
+  });
 
-      render(
-        <FirmwareSelection onSelect={mockOnSelect} />
-      );
+  it('offers Try Again when nothing can be loaded', async () => {
+    vi.mocked(firmwareService.fetchReleases).mockRejectedValueOnce(new Error('rate limited')).mockResolvedValueOnce([stable]);
+    render(<Harness />);
+    expect(await screen.findByText('No firmware found')).toBeInTheDocument();
+    expect(screen.getByText('rate limited')).toHaveClass('code-s');
+    fireEvent.click(screen.getByRole('button', { name: 'Try Again' }));
+    expect(await screen.findByRole('button', { name: 'Change Version' })).toBeInTheDocument();
+  });
 
-      await waitFor(() => {
-        expect(screen.getByText('1.0.0')).toBeInTheDocument();
-        expect(screen.getByText('Latest')).toBeInTheDocument();
-      });
-    });
+  it('returns focus to Change Version when the dialog closes', async () => {
+    vi.mocked(firmwareService.fetchReleases).mockResolvedValue([stable, older]);
+    render(<Harness />);
+    const trigger = await screen.findByRole('button', { name: 'Change Version' });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole('dialog', { name: 'Choose a Version' });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Choose Version 2.0.3' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Change Version' })).toHaveFocus());
+  });
+
+  it('drops the Downloaded mark after deleting the chosen version', async () => {
+    const cached = { ...stable, isCached: true, cachedEntries: [createMockCachedMetadata({ version: '2.0.4' })] };
+    vi.mocked(firmwareService.fetchReleases).mockResolvedValueOnce([cached]).mockResolvedValue([stable]);
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('Downloaded')).toBeInTheDocument());
+    const dialog = await openPicker();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete Download of Version 2.0.4' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(screen.queryByText('Downloaded')).toBeNull());
+  });
+
+  it('says so when a delete fails', async () => {
+    const cached = { ...stable, isCached: true, cachedEntries: [createMockCachedMetadata({ version: '2.0.4' })] };
+    vi.mocked(firmwareService.fetchReleases).mockResolvedValue([cached]);
+    vi.mocked(firmwareService.deleteCachedFirmware).mockRejectedValue(new Error('locked'));
+    render(<Harness />);
+    const dialog = await openPicker();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete Download of Version 2.0.4' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    expect(await within(screen.getByRole('dialog')).findByText("Couldn't delete the download.")).toBeInTheDocument();
+  });
+
+  it('orders row buttons Release Notes, Delete Download, then a compact primary Choose on the right', async () => {
+    const cached = { ...older, isCached: true, cachedEntries: [createMockCachedMetadata({ version: '2.0.3' })] };
+    vi.mocked(firmwareService.fetchReleases).mockResolvedValue([stable, cached]);
+    render(<Harness />);
+    const dialog = await openPicker();
+    const buttons = within(row(dialog, '2.0.3')).getAllByRole('button');
+    expect(buttons.map((b) => b.textContent)).toEqual(['Release Notes', 'Delete Download', 'Choose']);
+    buttons.forEach((b) => expect(b).toHaveClass('bb-btn--compact'));
+    const choose = buttons[2];
+    expect(choose).toHaveClass('bb-btn--primary');
+    expect(choose).toHaveClass('ml-auto');
   });
 });

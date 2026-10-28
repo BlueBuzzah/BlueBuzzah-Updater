@@ -1,657 +1,206 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, cleanup, act } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { useState } from 'react';
 import { DeviceSelection } from './DeviceSelection';
-import { Toaster } from '@/components/ui/toaster';
 import { deviceService } from '@/services/DeviceService';
-import { createMockDevice, createMockDevices } from '@/test/factories';
+import { createMockDevice } from '@/test/factories';
+import type { Device, DeviceRole } from '@/types';
 
-// Mock the device service
 vi.mock('@/services/DeviceService', () => ({
-  deviceService: {
-    detectDevices: vi.fn(),
-  },
+  deviceService: { detectDevices: vi.fn() },
 }));
 
-// Note: real useToast/Toaster are used (not mocked) so tests can assert on
-// rendered toast content (see "Hardware Version" describe block below).
+const v2a = createMockDevice({ path: '/dev/cu.a', serialNumber: 'A1', board: 'nrf52' });
+const v2b = createMockDevice({ path: '/dev/cu.b', serialNumber: 'B2', board: 'nrf52' });
+const v2c = createMockDevice({ path: '/dev/cu.c', serialNumber: 'C3', board: 'nrf52' });
+const v3 = createMockDevice({ path: 'COM7', serialNumber: 'E1', board: 'esp32s3', vid: 0x303a, pid: 0x1001 });
+
+/** Holds selection state like the store does, so role changes re-render. */
+function Harness({ initial = [] as Device[], onChange = vi.fn(), mode = 'flash' as 'flash' | 'configure' }) {
+  const [selected, setSelected] = useState<Device[]>(initial);
+  return (
+    <DeviceSelection
+      mode={mode}
+      selectedDevices={selected}
+      onDevicesChange={(d) => {
+        onChange(d);
+        setSelected(d);
+      }}
+      onRoleChange={(path: string, role: DeviceRole) =>
+        setSelected((s) => s.map((d) => (d.path === path ? { ...d, role } : d)))
+      }
+    />
+  );
+}
 
 describe('DeviceSelection', () => {
-  const mockOnDevicesChange = vi.fn();
-  const mockOnRoleChange = vi.fn();
-
   beforeEach(() => {
     vi.resetAllMocks();
   });
 
-  afterEach(() => {
-    cleanup();
+  it('says what it is doing while it looks for devices', async () => {
+    let resolve: (d: Device[]) => void = () => {};
+    vi.mocked(deviceService.detectDevices).mockImplementation(() => new Promise((r) => (resolve = r)));
+    render(<Harness />);
+    expect(screen.getByText('Looking for devices…')).toBeInTheDocument();
+    await act(async () => resolve([v2a]));
+    expect(screen.getByText('Found 1 device.')).toBeInTheDocument();
   });
 
-  describe('Loading State', () => {
-    it('renders loading state while detecting', async () => {
-      let resolveDetect: (value: never[]) => void;
-      vi.mocked(deviceService.detectDevices).mockImplementation(
-        () => new Promise((resolve) => { resolveDetect = resolve as (value: never[]) => void; })
-      );
-
-      render(
-        <DeviceSelection
-          selectedDevices={[]}
-          onDevicesChange={mockOnDevicesChange}
-          onRoleChange={mockOnRoleChange}
-        />
-      );
-
-      expect(screen.getByText('Detecting devices...')).toBeInTheDocument();
-
-      // Resolve the promise to allow cleanup
-      await act(async () => {
-        resolveDetect!([]);
-      });
-    });
-
-    it('shows spinner during loading', async () => {
-      let resolveDetect: (value: never[]) => void;
-      vi.mocked(deviceService.detectDevices).mockImplementation(
-        () => new Promise((resolve) => { resolveDetect = resolve as (value: never[]) => void; })
-      );
-
-      render(
-        <DeviceSelection
-          selectedDevices={[]}
-          onDevicesChange={mockOnDevicesChange}
-          onRoleChange={mockOnRoleChange}
-        />
-      );
-
-      const spinner = document.querySelector('.animate-spin');
-      expect(spinner).toBeInTheDocument();
-
-      // Resolve the promise to allow cleanup
-      await act(async () => {
-        resolveDetect!([]);
-      });
-    });
+  it('renders each device as a keyboard-reachable card with its port and serial number in mono', async () => {
+    vi.mocked(deviceService.detectDevices).mockResolvedValue([v2a, v3]);
+    render(<Harness />);
+    const card = await screen.findByRole('button', { name: /BlueBuzzah v2, port \/dev\/cu\.a/ });
+    expect(card).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByText('Port /dev/cu.a')).toHaveClass('code-s');
+    expect(screen.getByText('Serial number A1')).toHaveClass('code-s');
+    expect(screen.getByRole('button', { name: /BlueBuzzah v3, port COM7/ })).toBeInTheDocument();
+    expect(screen.getByText('Found 2 devices.')).toBeInTheDocument();
   });
 
-  describe('Rendering Devices', () => {
-    it('renders device list on success', async () => {
-      const mockDevices = [
-        createMockDevice({ path: '/dev/cu.usbmodem1234', label: 'Feather nRF52840' }),
-        createMockDevice({ path: '/dev/cu.usbmodem5678', label: 'Feather nRF52840 #2' }),
-      ];
-      vi.mocked(deviceService.detectDevices).mockResolvedValue(mockDevices);
-
-      render(
-        <DeviceSelection
-          selectedDevices={[]}
-          onDevicesChange={mockOnDevicesChange}
-          onRoleChange={mockOnRoleChange}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('Feather nRF52840')).toBeInTheDocument();
-        expect(screen.getByText('Feather nRF52840 #2')).toBeInTheDocument();
-      });
-    });
-
-    it('shows device label and path', async () => {
-      const mockDevice = createMockDevice({
-        path: '/dev/cu.usbmodem1234',
-        label: 'Feather nRF52840',
-      });
-      vi.mocked(deviceService.detectDevices).mockResolvedValue([mockDevice]);
-
-      render(
-        <DeviceSelection
-          selectedDevices={[]}
-          onDevicesChange={mockOnDevicesChange}
-          onRoleChange={mockOnRoleChange}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('Feather nRF52840')).toBeInTheDocument();
-        expect(screen.getByText('/dev/cu.usbmodem1234')).toBeInTheDocument();
-      });
-    });
-
-    it('shows device serial number when available', async () => {
-      const mockDevice = createMockDevice({
-        path: '/dev/cu.usbmodem1234',
-        label: 'Feather nRF52840',
-        serialNumber: 'SN12345678',
-      });
-      vi.mocked(deviceService.detectDevices).mockResolvedValue([mockDevice]);
-
-      render(
-        <DeviceSelection
-          selectedDevices={[]}
-          onDevicesChange={mockOnDevicesChange}
-          onRoleChange={mockOnRoleChange}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('S/N: SN12345678')).toBeInTheDocument();
-      });
-    });
-
-    it('does not show serial number when not available', async () => {
-      const mockDevice = createMockDevice({
-        path: '/dev/cu.usbmodem1234',
-        label: 'Feather nRF52840',
-        serialNumber: undefined,
-      });
-      vi.mocked(deviceService.detectDevices).mockResolvedValue([mockDevice]);
-
-      render(
-        <DeviceSelection
-          selectedDevices={[]}
-          onDevicesChange={mockOnDevicesChange}
-          onRoleChange={mockOnRoleChange}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('Feather nRF52840')).toBeInTheDocument();
-      });
-
-      expect(screen.queryByText(/S\/N:/)).not.toBeInTheDocument();
-    });
-
-    it('shows device count badge', async () => {
-      const mockDevices = createMockDevices(3);
-      vi.mocked(deviceService.detectDevices).mockResolvedValue(mockDevices);
-
-      render(
-        <DeviceSelection
-          selectedDevices={[]}
-          onDevicesChange={mockOnDevicesChange}
-          onRoleChange={mockOnRoleChange}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('3 devices found')).toBeInTheDocument();
-      });
-    });
+  it('shows an empty state with steps when nothing is plugged in', async () => {
+    vi.mocked(deviceService.detectDevices).mockResolvedValue([]);
+    render(<Harness />);
+    expect(await screen.findByText('No devices found')).toBeInTheDocument();
+    expect(screen.getByText('Plug in a device with a USB data cable. Some cables only charge.')).toBeInTheDocument();
+    expect(screen.getByText('Try a different USB port.')).toBeInTheDocument();
   });
 
-  describe('No Devices Found', () => {
-    it('renders no devices found message', async () => {
-      vi.mocked(deviceService.detectDevices).mockResolvedValue([]);
-
-      render(
-        <DeviceSelection
-          selectedDevices={[]}
-          onDevicesChange={mockOnDevicesChange}
-          onRoleChange={mockOnRoleChange}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('No BlueBuzzah Devices Found')).toBeInTheDocument();
-      });
-    });
-
-    it('shows troubleshooting tips', async () => {
-      vi.mocked(deviceService.detectDevices).mockResolvedValue([]);
-
-      render(
-        <DeviceSelection
-          selectedDevices={[]}
-          onDevicesChange={mockOnDevicesChange}
-          onRoleChange={mockOnRoleChange}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('Troubleshooting:')).toBeInTheDocument();
-        expect(screen.getByText(/Check USB cable connection/)).toBeInTheDocument();
-      });
-    });
-
-    it('shows try again button', async () => {
-      vi.mocked(deviceService.detectDevices).mockResolvedValue([]);
-
-      render(
-        <DeviceSelection
-          selectedDevices={[]}
-          onDevicesChange={mockOnDevicesChange}
-          onRoleChange={mockOnRoleChange}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByRole('button', { name: /try again/i })).toBeInTheDocument();
-      });
-    });
+  it('selects with the keyboard and asks for a role', async () => {
+    vi.mocked(deviceService.detectDevices).mockResolvedValue([v2a]);
+    render(<Harness />);
+    const card = await screen.findByRole('button', { name: /BlueBuzzah v2/ });
+    card.focus();
+    fireEvent.click(card); // Enter/Space on a <button> fires click
+    expect(screen.getByRole('button', { name: /selected/ })).toHaveAttribute('aria-pressed', 'true');
+    const roles = screen.getByRole('radiogroup', { name: 'Role' });
+    expect(roles).toHaveAccessibleDescription(/Choose a role for this device\./);
+    fireEvent.click(screen.getByRole('radio', { name: 'Primary' }));
+    expect(screen.getByText('Primary device')).toBeInTheDocument();
+    expect(screen.queryByText('Choose a role for this device.')).toBeNull();
   });
 
-  describe('Device Selection', () => {
-    it('clicking device toggles selection', async () => {
-      const mockDevice = createMockDevice();
-      vi.mocked(deviceService.detectDevices).mockResolvedValue([mockDevice]);
-
-      render(
-        <DeviceSelection
-          selectedDevices={[]}
-          onDevicesChange={mockOnDevicesChange}
-          onRoleChange={mockOnRoleChange}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('Feather nRF52840')).toBeInTheDocument();
-      });
-
-      // Click the card to select
-      fireEvent.click(screen.getByText('Feather nRF52840'));
-
-      expect(mockOnDevicesChange).toHaveBeenCalledWith([mockDevice]);
-    });
-
-    it('shows checkmark for selected device', async () => {
-      const mockDevice = createMockDevice();
-      vi.mocked(deviceService.detectDevices).mockResolvedValue([mockDevice]);
-
-      render(
-        <DeviceSelection
-          selectedDevices={[mockDevice]}
-          onDevicesChange={mockOnDevicesChange}
-          onRoleChange={mockOnRoleChange}
-        />
-      );
-
-      await waitFor(() => {
-        // Selected device should show checkmark icon (SVG within the card)
-        const cards = document.querySelectorAll('.ring-2');
-        expect(cards.length).toBe(1);
-      });
-    });
-
-    it('selected device shows ring styling', async () => {
-      const mockDevice = createMockDevice();
-      vi.mocked(deviceService.detectDevices).mockResolvedValue([mockDevice]);
-
-      render(
-        <DeviceSelection
-          selectedDevices={[mockDevice]}
-          onDevicesChange={mockOnDevicesChange}
-          onRoleChange={mockOnRoleChange}
-        />
-      );
-
-      await waitFor(() => {
-        const cards = document.querySelectorAll('.ring-2');
-        expect(cards.length).toBe(1);
-      });
-    });
-
-    it('shows selected count badge', async () => {
-      const mockDevices = createMockDevices(3);
-      vi.mocked(deviceService.detectDevices).mockResolvedValue(mockDevices);
-
-      render(
-        <DeviceSelection
-          selectedDevices={[mockDevices[0], mockDevices[1]]}
-          onDevicesChange={mockOnDevicesChange}
-          onRoleChange={mockOnRoleChange}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('2 selected')).toBeInTheDocument();
-      });
-    });
+  it('auto-assigns roles for two devices and explains duplicates next to the role control', async () => {
+    vi.mocked(deviceService.detectDevices).mockResolvedValue([v2a, v2b]);
+    render(<Harness />);
+    fireEvent.click(await screen.findByRole('button', { name: /port \/dev\/cu\.a/ }));
+    fireEvent.click(screen.getByRole('button', { name: /port \/dev\/cu\.b/ }));
+    expect(screen.getByText('We set the roles for you. You can change them.')).toBeInTheDocument();
+    expect(screen.getByText('Primary device')).toBeInTheDocument();
+    expect(screen.getByText('Secondary device')).toBeInTheDocument();
+    // Make both Primary
+    const groups = screen.getAllByRole('radiogroup', { name: 'Role' });
+    fireEvent.click(groups[1].querySelector('[role="radio"]') as HTMLElement);
+    const msg = 'Give each device a different role: one Primary, one Secondary.';
+    expect(screen.getByText(msg)).toBeInTheDocument();
+    groups.forEach((g) => expect(g).toHaveAccessibleDescription(new RegExp(msg)));
   });
 
-  describe('Role Assignment', () => {
-    it('shows role dropdown for selected device', async () => {
-      const mockDevice = createMockDevice();
-      vi.mocked(deviceService.detectDevices).mockResolvedValue([mockDevice]);
-
-      render(
-        <DeviceSelection
-          selectedDevices={[mockDevice]}
-          onDevicesChange={mockOnDevicesChange}
-          onRoleChange={mockOnRoleChange}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('Device Role')).toBeInTheDocument();
-      });
-    });
-
-    it('auto-assigns roles when selecting 2 devices', async () => {
-      const mockDevices = createMockDevices(2);
-      vi.mocked(deviceService.detectDevices).mockResolvedValue(mockDevices);
-
-      // Start with one device selected
-      render(
-        <DeviceSelection
-          selectedDevices={[mockDevices[0]]}
-          onDevicesChange={mockOnDevicesChange}
-          onRoleChange={mockOnRoleChange}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('Feather nRF52840 #1')).toBeInTheDocument();
-      });
-
-      // Click second device
-      fireEvent.click(screen.getByText('Feather nRF52840 #2'));
-
-      // Should call onDevicesChange with both devices and auto-assigned roles
-      expect(mockOnDevicesChange).toHaveBeenCalledWith(
-        expect.arrayContaining([
-          expect.objectContaining({ role: 'PRIMARY' }),
-          expect.objectContaining({ role: 'SECONDARY' }),
-        ])
-      );
-    });
-
-    it('displays role description', async () => {
-      const mockDevice = createMockDevice({ role: 'PRIMARY' });
-      vi.mocked(deviceService.detectDevices).mockResolvedValue([mockDevice]);
-
-      render(
-        <DeviceSelection
-          selectedDevices={[mockDevice]}
-          onDevicesChange={mockOnDevicesChange}
-          onRoleChange={mockOnRoleChange}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('Primary device coordinates communication')).toBeInTheDocument();
-      });
-    });
-
-    it('shows warning when roles not assigned', async () => {
-      const mockDevice = createMockDevice({ role: undefined });
-      vi.mocked(deviceService.detectDevices).mockResolvedValue([mockDevice]);
-
-      render(
-        <DeviceSelection
-          selectedDevices={[mockDevice]}
-          onDevicesChange={mockOnDevicesChange}
-          onRoleChange={mockOnRoleChange}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('All selected devices must have a role assigned.')).toBeInTheDocument();
-      });
-    });
+  it('allows at most 2 devices', async () => {
+    vi.mocked(deviceService.detectDevices).mockResolvedValue([v2a, v2b, v2c]);
+    const onChange = vi.fn();
+    render(<Harness onChange={onChange} />);
+    fireEvent.click(await screen.findByRole('button', { name: /port \/dev\/cu\.a/ }));
+    fireEvent.click(screen.getByRole('button', { name: /port \/dev\/cu\.b/ }));
+    fireEvent.click(screen.getByRole('button', { name: /port \/dev\/cu\.c/ }));
+    expect(onChange).toHaveBeenCalledTimes(2);
+    expect(screen.getByText('You can flash up to 2 devices at once.')).toBeInTheDocument();
   });
 
-  describe('Refresh', () => {
-    it('refresh button re-detects devices', async () => {
-      vi.mocked(deviceService.detectDevices).mockResolvedValue([createMockDevice()]);
-
-      render(
-        <DeviceSelection
-          selectedDevices={[]}
-          onDevicesChange={mockOnDevicesChange}
-          onRoleChange={mockOnRoleChange}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('Feather nRF52840')).toBeInTheDocument();
-      });
-
-      // Click refresh and wait for re-detection to complete
-      await act(async () => {
-        fireEvent.click(screen.getByRole('button', { name: /refresh/i }));
-      });
-
-      // Wait for the refresh to complete
-      await waitFor(() => {
-        expect(deviceService.detectDevices).toHaveBeenCalledTimes(2);
-      });
-    });
+  it('refuses to mix v2 and v3 devices', async () => {
+    vi.mocked(deviceService.detectDevices).mockResolvedValue([v2a, v3]);
+    const onChange = vi.fn();
+    render(<Harness onChange={onChange} />);
+    fireEvent.click(await screen.findByRole('button', { name: /port \/dev\/cu\.a/ }));
+    fireEvent.click(screen.getByRole('button', { name: /port COM7/ }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("You can't flash a v2 and a v3 device together. Flash one kind at a time.")).toBeInTheDocument();
   });
 
-  describe('Race Condition Prevention', () => {
-    it('refresh shows latest detection results', async () => {
-      // Initial call returns Device A
-      const deviceA = createMockDevice({ path: '/dev/cu.usbmodemA', label: 'Device A' });
-      vi.mocked(deviceService.detectDevices).mockResolvedValueOnce([deviceA]);
-
-      render(
-        <DeviceSelection
-          selectedDevices={[]}
-          onDevicesChange={mockOnDevicesChange}
-          onRoleChange={mockOnRoleChange}
-        />
-      );
-
-      // Wait for initial detection
-      await waitFor(() => {
-        expect(screen.getByText('Device A')).toBeInTheDocument();
-      });
-
-      // Setup second call to return Device B
-      const deviceB = createMockDevice({ path: '/dev/cu.usbmodemB', label: 'Device B' });
-      vi.mocked(deviceService.detectDevices).mockResolvedValueOnce([deviceB]);
-
-      // Click refresh
-      await act(async () => {
-        fireEvent.click(screen.getByRole('button', { name: /refresh/i }));
-      });
-
-      // Latest result should be shown, not stale data
-      await waitFor(() => {
-        expect(screen.getByText('Device B')).toBeInTheDocument();
-      });
-      expect(screen.queryByText('Device A')).not.toBeInTheDocument();
-      expect(deviceService.detectDevices).toHaveBeenCalledTimes(2);
+  it('rescans from the button and from the ⌘/Ctrl+R event', async () => {
+    vi.mocked(deviceService.detectDevices).mockResolvedValue([v2a]);
+    render(<Harness />);
+    await screen.findByRole('button', { name: /BlueBuzzah v2/ });
+    fireEvent.click(screen.getByRole('button', { name: 'Rescan' }));
+    await waitFor(() => expect(deviceService.detectDevices).toHaveBeenCalledTimes(2));
+    act(() => {
+      window.dispatchEvent(new Event('bb:rescan'));
     });
+    await waitFor(() => expect(deviceService.detectDevices).toHaveBeenCalledTimes(3));
   });
 
-  describe('Error Handling', () => {
-    it('handles detection error gracefully', async () => {
-      vi.mocked(deviceService.detectDevices).mockRejectedValue(
-        new Error('Detection failed')
-      );
-
-      render(
-        <DeviceSelection
-          selectedDevices={[]}
-          onDevicesChange={mockOnDevicesChange}
-          onRoleChange={mockOnRoleChange}
-        />
-      );
-
-      // Should not crash - shows no devices found
-      await waitFor(() => {
-        expect(screen.getByText('No BlueBuzzah Devices Found')).toBeInTheDocument();
-      });
+  it('keeps the newest scan when scans overlap', async () => {
+    let first: (d: Device[]) => void = () => {};
+    vi.mocked(deviceService.detectDevices)
+      .mockImplementationOnce(() => new Promise((r) => (first = r)))
+      .mockResolvedValueOnce([v2b]);
+    render(<Harness />);
+    act(() => {
+      window.dispatchEvent(new Event('bb:rescan'));
     });
+    await screen.findByRole('button', { name: /port \/dev\/cu\.b/ });
+    await act(async () => first([v2a]));
+    expect(screen.queryByRole('button', { name: /port \/dev\/cu\.a/ })).toBeNull();
   });
 
-  describe('Device Info Card', () => {
-    it('shows device roles info card', async () => {
-      const mockDevice = createMockDevice();
-      vi.mocked(deviceService.detectDevices).mockResolvedValue([mockDevice]);
-
-      render(
-        <DeviceSelection
-          selectedDevices={[mockDevice]}
-          onDevicesChange={mockOnDevicesChange}
-          onRoleChange={mockOnRoleChange}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('Device Roles')).toBeInTheDocument();
-      });
-    });
-
-    it('shows message for single device selection', async () => {
-      const mockDevice = createMockDevice();
-      vi.mocked(deviceService.detectDevices).mockResolvedValue([mockDevice]);
-
-      render(
-        <DeviceSelection
-          selectedDevices={[mockDevice]}
-          onDevicesChange={mockOnDevicesChange}
-          onRoleChange={mockOnRoleChange}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('Please select a role for your device.')).toBeInTheDocument();
-      });
-    });
-
-    it('shows auto-assigned message for two devices', async () => {
-      const mockDevices = createMockDevices(2);
-      mockDevices[0].role = 'PRIMARY';
-      mockDevices[1].role = 'SECONDARY';
-      vi.mocked(deviceService.detectDevices).mockResolvedValue(mockDevices);
-
-      render(
-        <DeviceSelection
-          selectedDevices={mockDevices}
-          onDevicesChange={mockOnDevicesChange}
-          onRoleChange={mockOnRoleChange}
-        />
-      );
-
-      await waitFor(() => {
-        expect(screen.getByText('Roles have been auto-assigned. You can change them if needed.')).toBeInTheDocument();
-      });
-    });
+  it('shows a scan failure as a danger banner with the detail underneath', async () => {
+    vi.mocked(deviceService.detectDevices).mockRejectedValue(new Error('IOKit busy'));
+    render(<Harness />);
+    expect(await screen.findByRole('alert')).toHaveTextContent("Couldn't look for devices");
+    expect(screen.getByText('IOKit busy')).toHaveClass('code-s');
   });
 
-  describe('Hardware Version', () => {
-    const nrf52Device = createMockDevice({
-      path: 'COM3',
-      label: 'BlueBuzzah v2 (COM3)',
-      board: 'nrf52',
-    });
-    const esp32s3Device = createMockDevice({
-      path: 'COM4',
-      label: 'BlueBuzzah v3 (COM4)',
-      board: 'esp32s3',
-    });
-
-    it('shows a hardware-version badge per device', async () => {
-      vi.mocked(deviceService.detectDevices).mockResolvedValue([
-        nrf52Device,
-        esp32s3Device,
-      ]);
-
-      render(
-        <DeviceSelection selectedDevices={[]} onDevicesChange={vi.fn()} onRoleChange={vi.fn()} />
-      );
-
-      expect(await screen.findByText('nRF52840')).toBeInTheDocument();
-      expect(screen.getByText('ESP32-S3')).toBeInTheDocument();
-    });
-
-    it('blocks selecting a second device with a different hardware version', async () => {
-      vi.mocked(deviceService.detectDevices).mockResolvedValue([
-        nrf52Device,
-        esp32s3Device,
-      ]);
-      const onDevicesChange = vi.fn();
-
-      render(
-        <>
-          <DeviceSelection
-            selectedDevices={[nrf52Device]}
-            onDevicesChange={onDevicesChange}
-            onRoleChange={vi.fn()}
-          />
-          <Toaster />
-        </>
-      );
-
-      fireEvent.click(await screen.findByText('BlueBuzzah v3 (COM4)'));
-
-      expect(onDevicesChange).not.toHaveBeenCalled();
-      expect(
-        await screen.findByText(/same hardware version/i)
-      ).toBeInTheDocument();
-    });
+  it('deselects a device that changed under the same port, and says so', async () => {
+    const stale = { ...v2a, role: 'PRIMARY' as DeviceRole };
+    vi.mocked(deviceService.detectDevices).mockResolvedValue([{ ...v2a, board: 'esp32s3' }]);
+    const onChange = vi.fn();
+    render(<Harness initial={[stale]} onChange={onChange} />);
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith([]));
+    expect(screen.getByText('A selected device was unplugged or changed, so we deselected it.')).toBeInTheDocument();
   });
 
-  describe('Stale Selection Pruning', () => {
-    // Note: the toast hook keeps a module-level memory state (not reset by
-    // React unmount/cleanup), so the "does not prune" test — which asserts a
-    // toast is ABSENT — must run before any test in this file produces a
-    // "Selection updated" toast, or it would see a stale toast left over
-    // from a previous test.
-    it('does not prune when the detected device matches path, board, and serial number exactly', async () => {
-      const selected = createMockDevice({
-        path: 'COM3',
-        board: 'nrf52',
-        serialNumber: 'ABC123',
-      });
-      const detected = createMockDevice({
-        path: 'COM3',
-        board: 'nrf52',
-        serialNumber: 'ABC123',
-      });
-      vi.mocked(deviceService.detectDevices).mockResolvedValue([detected]);
-      const onDevicesChange = vi.fn();
+  it('keeps a selection that still matches path, board and serial number', async () => {
+    vi.mocked(deviceService.detectDevices).mockResolvedValue([v2a]);
+    const onChange = vi.fn();
+    render(<Harness initial={[{ ...v2a, role: 'PRIMARY' }]} onChange={onChange} />);
+    await screen.findByText('Primary device');
+    expect(onChange).not.toHaveBeenCalled();
+  });
 
-      render(
-        <>
-          <DeviceSelection
-            selectedDevices={[selected]}
-            onDevicesChange={onDevicesChange}
-            onRoleChange={vi.fn()}
-          />
-          <Toaster />
-        </>
-      );
+  describe('configure mode (same card, no roles)', () => {
+    const boot = createMockDevice({ path: '/dev/cu.boot', serialNumber: 'Z9', inBootloader: true });
 
-      // Wait for detection to settle without relying on onDevicesChange being called.
-      await waitFor(() => {
-        expect(deviceService.detectDevices).toHaveBeenCalledTimes(1);
-      });
-
-      expect(screen.queryByText('Selection updated')).not.toBeInTheDocument();
-      expect(onDevicesChange).not.toHaveBeenCalled();
+    it('uses the same card, copy and rescan, without role controls', async () => {
+      vi.mocked(deviceService.detectDevices).mockResolvedValue([v2a, v2b]);
+      render(<Harness mode="configure" />);
+      expect(screen.getByRole('region', { name: 'Choose Devices' })).toBeInTheDocument();
+      expect(screen.getByText('Plug in up to 2 devices with a USB data cable.')).toBeInTheDocument();
+      fireEvent.click(await screen.findByRole('button', { name: /port \/dev\/cu\.a/ }));
+      fireEvent.click(screen.getByRole('button', { name: /port \/dev\/cu\.b/ }));
+      expect(screen.queryByRole('radiogroup', { name: 'Role' })).toBeNull();
+      expect(screen.queryByText('We set the roles for you. You can change them.')).toBeNull();
+      expect(screen.queryByText('Primary device')).toBeNull();
+      expect(screen.getByText(/Found 2 devices\. 2 selected/)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Rescan' })).toBeInTheDocument();
     });
 
-    it('prunes a selection whose board no longer matches the device at the same path and shows a toast', async () => {
-      const selectedStale = createMockDevice({
-        path: 'COM3',
-        board: 'nrf52',
-        serialNumber: 'ABC123',
-      });
-      // Same path, but the detected device is now esp32s3 (e.g. Windows COM reuse).
-      const detected = createMockDevice({
-        path: 'COM3',
-        board: 'esp32s3',
-        serialNumber: 'ABC123',
-      });
-      vi.mocked(deviceService.detectDevices).mockResolvedValue([detected]);
-      const onDevicesChange = vi.fn();
+    it('hides devices in bootloader mode, since settings can only be written to running firmware', async () => {
+      vi.mocked(deviceService.detectDevices).mockResolvedValue([v2a, boot]);
+      render(<Harness mode="configure" />);
+      await screen.findByRole('button', { name: /port \/dev\/cu\.a/ });
+      expect(screen.queryByRole('button', { name: /cu\.boot/ })).toBeNull();
+      expect(screen.getByText('Found 1 device.')).toBeInTheDocument();
+    });
 
-      render(
-        <>
-          <DeviceSelection
-            selectedDevices={[selectedStale]}
-            onDevicesChange={onDevicesChange}
-            onRoleChange={vi.fn()}
-          />
-          <Toaster />
-        </>
-      );
-
-      expect(await screen.findByText('Selection updated')).toBeInTheDocument();
-      expect(onDevicesChange).toHaveBeenCalledWith([]);
+    it('allows a v2 and a v3 together, and says when the limit is reached', async () => {
+      vi.mocked(deviceService.detectDevices).mockResolvedValue([v2a, v3, v2c]);
+      const onChange = vi.fn();
+      render(<Harness mode="configure" onChange={onChange} />);
+      fireEvent.click(await screen.findByRole('button', { name: /port \/dev\/cu\.a/ }));
+      fireEvent.click(screen.getByRole('button', { name: /port COM7/ }));
+      expect(onChange).toHaveBeenLastCalledWith([v2a, v3]);
+      fireEvent.click(screen.getByRole('button', { name: /port \/dev\/cu\.c/ }));
+      expect(screen.getByText('You can configure up to 2 devices at once.')).toBeInTheDocument();
     });
   });
 });

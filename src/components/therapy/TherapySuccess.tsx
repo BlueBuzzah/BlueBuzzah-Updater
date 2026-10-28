@@ -1,26 +1,15 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { Copy } from 'lucide-react';
+import { Banner } from '@/components/ui/banner';
 import { Button } from '@/components/ui/button';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
-import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
-import { summarizeDeviceError } from '@/lib/error-messages';
+import { DeviceCard } from '@/components/ui/device-card';
+import { LogPane } from '@/components/ui/log-pane';
+import { StatusBadge, type Tone } from '@/components/ui/status-badge';
+import { BOARD_NAME } from '@/components/wizard/DeviceSelection';
+import { getErrorGuidance } from '@/lib/error-messages';
 import { getProfileInfo } from '@/lib/therapy-profiles';
 import { useTherapyStore } from '@/stores/therapyStore';
-import type { Device, TherapyProfile, TherapyConfigResult } from '@/types';
-import {
-  CheckCircle2,
-  CircuitBoard,
-  ClipboardCopy,
-  RefreshCw,
-  X,
-  XCircle,
-} from 'lucide-react';
+import type { Device, DeviceConfigResult, TherapyConfigResult, TherapyProfile } from '@/types';
 
 interface TherapySuccessProps {
   profile: TherapyProfile;
@@ -30,221 +19,112 @@ interface TherapySuccessProps {
   onClose: () => void;
 }
 
-export function TherapySuccess({
-  profile,
-  devices,
-  result,
-  onReset,
-  onClose,
-}: TherapySuccessProps) {
-  const { copyToClipboard } = useCopyToClipboard();
+function deviceWord(c?: DeviceConfigResult): { tone: Tone; word: string } {
+  if (!c || !c.success) return { tone: 'danger', word: 'Failed' };
+  if (c.outcome?.status === 'partial') return { tone: 'warning', word: 'Partly done' };
+  return { tone: 'success', word: 'Done' };
+}
+
+/** The finished setup: one Banner that says what really happened, then each device. */
+export function TherapySuccess({ profile, devices, result, onReset, onClose }: TherapySuccessProps) {
   const { logs } = useTherapyStore();
-  const [showLogs, setShowLogs] = useState(false);
+  const [copied, setCopied] = useState('');
+  const bannerRef = useRef<HTMLDivElement>(null);
+  const name = getProfileInfo(profile)?.name ?? profile;
+  const configs = result.deviceConfigs;
+  const failed = configs.filter((c) => !c.success);
+  const partial = configs.some((c) => c.outcome?.status === 'partial');
+  // Only a Secondary answered: the profile may have changed, but custom values never reached a Primary.
+  const noPrimary = configs.length > 0 && configs.every((c) => c.outcome?.status === 'success_secondary');
+  const guidance = failed[0]?.error ? getErrorGuidance(failed[0].error) : null;
+  const both = devices.length > 1;
 
-  const profileInfo = getProfileInfo(profile);
-  // A partial device reports `success: true` — the profile change really did
-  // land — so it must be counted as its own outcome rather than folded into
-  // either bucket. Counting only `!success` produced "0 of 2 devices failed" on
-  // a screen that was simultaneously showing a Partial badge.
-  const partialCount = result.deviceConfigs.filter(
-    (c) => c.outcome?.status === 'partial'
-  ).length;
-  const failCount = result.deviceConfigs.filter((c) => !c.success).length;
-  const successCount = result.deviceConfigs.filter(
-    (c) => c.success && c.outcome?.status !== 'partial'
-  ).length;
+  useEffect(() => bannerRef.current?.focus(), []);
 
-  // Agrees with the total in "1 of 2 devices", not with the count.
-  const plural = (n: number) => (n === 1 ? 'device' : 'devices');
-
-  /** One sentence covering whichever problems actually occurred. */
-  const outcomeSummary = (() => {
-    const total = devices.length;
-
-    if (failCount > 0 && partialCount > 0) {
-      return `${failCount} of ${total} ${plural(total)} failed, and ${partialCount} finished only partially.`;
+  const copyDetails = async () => {
+    try {
+      await navigator.clipboard.writeText(logs.join('\n'));
+      setCopied('Details copied.');
+    } catch {
+      setCopied("Couldn't copy the details.");
     }
-    if (partialCount > 0) {
-      return `${partialCount} of ${total} ${plural(total)} finished only partially — the profile changed, but the parameters were not confirmed.`;
-    }
-    if (failCount === total) {
-      return 'All devices failed to configure.';
-    }
-    return `${failCount} of ${total} ${plural(total)} failed to configure.`;
-  })();
-
-  const exportLogs = async () => {
-    await copyToClipboard(logs.join('\n'), 'Configuration logs');
   };
 
+  const banner = (() => {
+    if (failed.length > 0) {
+      return (
+        <Banner
+          tone="danger"
+          announce
+          title={`Setup didn't finish on ${failed.length} of ${configs.length} ${configs.length === 1 ? 'device' : 'devices'}`}
+          action={
+            <Button variant="secondary" icon={Copy} onClick={copyDetails}>
+              Copy Details
+            </Button>
+          }
+        >
+          {guidance && <p>{guidance.description}</p>}
+          {guidance && (
+            <ol className="list-decimal pl-6">
+              {guidance.resolutionSteps.map((step) => (
+                <li key={step}>{step}</li>
+              ))}
+            </ol>
+          )}
+        </Banner>
+      );
+    }
+    if (partial) {
+      return (
+        <Banner tone="warning" announce title="The pattern changed, but your custom settings may not have saved">
+          Select Apply to Devices to try again.
+        </Banner>
+      );
+    }
+    if (noPrimary) {
+      return (
+        <Banner tone="warning" announce title="Custom settings weren't applied">
+          No device answered as the Primary device. Plug in your Primary device, then select Apply to Devices again.
+        </Banner>
+      );
+    }
+    return (
+      <Banner tone="success" announce title={`${name} is set on ${both ? 'both devices' : 'your device'}`}>
+        You can unplug the devices. They&apos;re ready to use.
+      </Banner>
+    );
+  })();
+
   return (
-    <div className="space-y-6">
-      <div className="text-center">
-        {result.success ? (
-          <>
-            <div className="w-20 h-20 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
-              <CheckCircle2 className="h-10 w-10 text-primary" />
-            </div>
-            <h2 className="text-2xl font-bold mb-2">Configuration Complete</h2>
-            <p className="text-muted-foreground">
-              {successCount === 1
-                ? 'Your device has been configured successfully.'
-                : `All ${successCount} devices have been configured successfully.`}
-            </p>
-          </>
-        ) : (
-          <>
-            <div className="w-20 h-20 rounded-full bg-destructive/10 flex items-center justify-center mx-auto mb-4">
-              <XCircle className="h-10 w-10 text-destructive" />
-            </div>
-            <h2 className="text-2xl font-bold mb-2">Configuration Issues</h2>
-            <p className="text-muted-foreground" data-testid="outcome-summary">
-              {outcomeSummary}
-            </p>
-          </>
-        )}
+    <div className="grid max-w-content gap-10">
+      <div ref={bannerRef} tabIndex={-1}>
+        {banner}
       </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Profile Applied</CardTitle>
-          <CardDescription>
-            {profileInfo?.name} - {profileInfo?.description}
-          </CardDescription>
-        </CardHeader>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Configured Devices</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {result.deviceConfigs.map((config) => {
-            const isPartial = config.outcome?.status === 'partial';
-            const isSecondary = config.outcome?.status === 'success_secondary';
-
-            return (
-              <div
-                key={config.device.path}
-                className={`flex items-center justify-between p-3 rounded-lg ${
-                  config.success && !isPartial ? 'bg-muted/50' : 'bg-destructive/10'
-                }`}
-              >
-                <div className="flex items-center gap-3">
-                  <CircuitBoard className="h-5 w-5" />
-                  <div>
-                    <p className="font-medium">{config.device.label}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {config.device.path}
-                    </p>
-                    {isSecondary && (
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {config.outcome?.message}
-                      </p>
-                    )}
-                    {isPartial && config.outcome?.message && (
-                      <p className="text-xs text-destructive mt-1">
-                        {summarizeDeviceError(config.outcome.message)}
-                      </p>
-                    )}
-                    {!config.success && config.error && (
-                      <p className="text-xs text-destructive mt-1">
-                        {summarizeDeviceError(config.error)}
-                      </p>
-                    )}
-                  </div>
-                </div>
-                {isPartial ? (
-                  <div className="flex items-center gap-2">
-                    <Badge variant="destructive">Partial</Badge>
-                    <XCircle className="h-5 w-5 text-destructive" />
-                  </div>
-                ) : config.success ? (
-                  <CheckCircle2 className="h-5 w-5 text-primary" />
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <Badge variant="destructive">Failed</Badge>
-                    <XCircle className="h-5 w-5 text-destructive" />
-                  </div>
-                )}
-              </div>
-            );
-          })}
-        </CardContent>
-      </Card>
-
-      {result.success && (
-        <Card className="bg-muted/50">
-          <CardContent className="pt-6">
-            <div className="space-y-2">
-              <p className="text-sm font-medium">Next Steps:</p>
-              <ol className="text-sm text-muted-foreground space-y-1 list-decimal list-inside">
-                <li>Your device{successCount > 1 ? 's are' : ' is'} ready to use</li>
-                <li>
-                  The {profileInfo?.name} profile is now active
-                </li>
-                <li>You can safely disconnect your device{successCount > 1 ? 's' : ''}</li>
-              </ol>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Logs Section */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-base">Configuration Log</CardTitle>
-            <div className="flex items-center gap-2">
-              {logs.length > 0 && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={exportLogs}
-                >
-                  <ClipboardCopy className="h-4 w-4 mr-2" />
-                  Copy Logs
-                </Button>
-              )}
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowLogs(!showLogs)}
-              >
-                {showLogs ? 'Hide' : 'Show'} Logs
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
-        {showLogs && (
-          <CardContent>
-            <div className="bg-muted rounded-md p-4 font-mono text-xs space-y-1 max-h-64 overflow-y-auto">
-              {logs.map((log, index) => {
-                const isError = log.includes('✗ Error');
-                return (
-                  <div
-                    key={index}
-                    className={isError ? 'text-destructive font-semibold' : 'text-muted-foreground'}
-                  >
-                    {log}
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        )}
-      </Card>
-
-      <div className="flex gap-4 justify-center">
-        <Button variant="outline" onClick={onReset}>
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Configure More Devices
+      <p className="body-s" aria-live="polite">{copied}</p>
+      <ul className="grid gap-6 sm:grid-cols-2">
+        {devices.map((device) => {
+          const config = configs.find((c) => c.device.path === device.path);
+          const state = deviceWord(config);
+          return (
+            <li key={device.path} className="grid content-start gap-2">
+              <DeviceCard
+                name={BOARD_NAME[device.board]}
+                port={device.path}
+                status={<StatusBadge tone={state.tone}>{state.word}</StatusBadge>}
+                statusLabel={state.word}
+              />
+              {config?.error && <p className="code-s text-ink-muted">{config.error}</p>}
+            </li>
+          );
+        })}
+      </ul>
+      <div className="flex flex-wrap gap-target-gap">
+        <Button variant="secondary" onClick={onReset}>
+          Set Up Another Device
         </Button>
-        <Button onClick={onClose}>
-          <X className="h-4 w-4 mr-2" />
-          Close
-        </Button>
+        <Button onClick={onClose}>Done</Button>
       </div>
+      <LogPane lines={logs} fileName="bluebuzzah-updater-setup-log.txt" />
     </div>
   );
 }

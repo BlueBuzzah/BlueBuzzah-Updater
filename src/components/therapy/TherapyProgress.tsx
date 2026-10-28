@@ -1,33 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
-import { Progress } from '@/components/ui/progress';
-import { useCopyToClipboard } from '@/hooks/useCopyToClipboard';
+import { Banner } from '@/components/ui/banner';
+import { DeviceCard } from '@/components/ui/device-card';
+import { LogPane } from '@/components/ui/log-pane';
+import { ProgressBar } from '@/components/ui/progress-bar';
+import { StatusBadge, type Tone } from '@/components/ui/status-badge';
+import { BOARD_NAME } from '@/components/wizard/DeviceSelection';
 import { summarizeDeviceError } from '@/lib/error-messages';
+import { logLine, type LogLevel } from '@/lib/log';
 import { getProfileInfo } from '@/lib/therapy-profiles';
 import { therapyService } from '@/services/TherapyService';
 import { useTherapyStore } from '@/stores/therapyStore';
-import type {
-  Device,
-  TherapyProfile,
-  TherapyConfigProgress,
-  TherapyConfigResult,
-  ProfileConfigOutcome,
-} from '@/types';
-import {
-  CheckCircle2,
-  CircuitBoard,
-  ClipboardCopy,
-  Loader2,
-  XCircle,
-} from 'lucide-react';
+import type { Device, TherapyConfigProgress, TherapyConfigResult, TherapyProfile, ProfileConfigOutcome } from '@/types';
 
 interface TherapyProgressProps {
   profile: TherapyProfile;
@@ -42,26 +25,21 @@ export function TherapyProgress({
   onComplete,
   onProgressUpdate,
 }: TherapyProgressProps) {
-  const { copyToClipboard } = useCopyToClipboard();
   const { addLog: storeAddLog, logs } = useTherapyStore();
   const [deviceProgress, setDeviceProgress] = useState<
     Map<string, TherapyConfigProgress>
   >(new Map());
   const [isConfiguring, setIsConfiguring] = useState(false);
   const [configuredCount, setConfiguredCount] = useState(0);
-  const [showLogs, setShowLogs] = useState(false);
   const hasStartedRef = useRef(false);
   const cancelledRef = useRef(false);
 
   const profileInfo = getProfileInfo(profile);
 
-  const addLog = (message: string) => {
-    storeAddLog(`[${new Date().toLocaleTimeString()}] ${message}`);
+  const addLog = (level: LogLevel, message: string) => {
+    storeAddLog(logLine(level, `[${new Date().toLocaleTimeString()}] ${message}`));
   };
 
-  const exportLogs = async () => {
-    await copyToClipboard(logs.join('\n'), 'Configuration logs');
-  };
 
   useEffect(() => {
     // Prevent double-execution in React StrictMode (development only)
@@ -74,8 +52,8 @@ export function TherapyProgress({
     if (isConfiguring) return;
     setIsConfiguring(true);
 
-    addLog(`Starting configuration with ${profileInfo?.name} profile...`);
-    addLog(`Configuring ${devices.length} device(s)`);
+    addLog('INFO', `Starting configuration with ${profileInfo?.name} profile...`);
+    addLog('INFO', `Configuring ${devices.length} ${devices.length === 1 ? 'device' : 'devices'}`);
 
     const results: {
       device: Device;
@@ -87,11 +65,11 @@ export function TherapyProgress({
     for (const device of devices) {
       // Check cancellation before starting next device
       if (cancelledRef.current) {
-        addLog(`Skipping ${device.label} — configuration cancelled`);
+        addLog('WARN', `Skipping ${device.label} — configuration cancelled`);
         break;
       }
 
-      addLog(`Starting configuration for ${device.label}...`);
+      addLog('INFO', `Starting configuration for ${device.label}...`);
       try {
         const outcome = await therapyService.configureProfile(
           device,
@@ -108,7 +86,7 @@ export function TherapyProgress({
             // logs with its own status marker — logging it here too printed
             // every outcome twice.
             if (progress.stage !== 'complete' && progress.stage !== 'partial') {
-              addLog(`${device.label}: ${progress.message}`);
+              addLog('INFO', `${device.label}: ${progress.message}`);
             }
           }
         );
@@ -120,17 +98,16 @@ export function TherapyProgress({
             // anything is changed, and after PROFILE_LOAD has landed. Only the
             // backend knows which, so hardcoding "profile loaded" here claims a
             // change that may never have happened.
-            addLog(`✓ ${device.label}: ${outcome.message}`);
+            addLog('INFO', `${device.label}: ${outcome.message}`);
             break;
           case 'partial':
-            addLog(`⚠ ${device.label}: ${outcome.message}`);
+            addLog('WARN', `${device.label}: ${outcome.message}`);
             if (outcome.detail) {
-              addLog(`   Detail: ${outcome.detail.replace(/\n/g, '\n   ')}`);
+              addLog('WARN', `   Detail: ${outcome.detail.replace(/\n/g, '\n   ')}`);
             }
-            setShowLogs(true); // Auto-expand logs — a partial result must not be scrolled past
             break;
           default:
-            addLog(`✓ Successfully configured ${device.label}`);
+            addLog('INFO', `Successfully configured ${device.label}`);
         }
 
         results.push({ device, success: true, outcome });
@@ -161,11 +138,10 @@ export function TherapyProgress({
 
         // Card gets the one-line summary; the log keeps every byte the device
         // sent back, so it stays diagnosable and copyable after the fact.
-        addLog(`✗ Error configuring ${device.label}: ${errorSummary}`);
+        addLog('ERROR', `Error configuring ${device.label}: ${errorSummary}`);
         if (errorDetail !== errorSummary) {
-          addLog(`   Detail: ${errorDetail.replace(/\n/g, '\n   ')}`);
+          addLog('ERROR', `   Detail: ${errorDetail.replace(/\n/g, '\n   ')}`);
         }
-        setShowLogs(true); // Auto-expand logs on error
 
         results.push({
           device,
@@ -183,14 +159,14 @@ export function TherapyProgress({
       results.every((r) => r.outcome?.status === 'success_secondary');
 
     if (cancelledRef.current) {
-      addLog('Configuration cancelled');
+      addLog('WARN', 'Configuration cancelled');
       return;
     }
 
     if (allSuccess) {
-      addLog('All devices configured successfully!');
+      addLog('INFO', 'All devices configured successfully');
     } else {
-      addLog('Configuration completed with errors');
+      addLog('ERROR', 'Configuration completed with errors');
     }
 
     onComplete({
@@ -210,182 +186,78 @@ export function TherapyProgress({
     });
   };
 
-  const getStageIcon = (progress: TherapyConfigProgress | undefined) => {
-    if (!progress) {
-      return <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />;
-    }
-
-    switch (progress.stage) {
-      case 'complete':
-        return <CheckCircle2 className="h-5 w-5 text-primary" />;
-      case 'partial':
-      case 'error':
-        return <XCircle className="h-5 w-5 text-destructive" />;
-      default:
-        return <Loader2 className="h-5 w-5 animate-spin text-primary" />;
-    }
-  };
-
-  const overallProgress =
-    devices.length > 0
-      ? Math.round(
-          Array.from(deviceProgress.values()).reduce(
-            (sum, p) => sum + (p.stage === 'error' ? 0 : p.progress),
-            0
-          ) / devices.length
-        )
-      : 0;
-
+  const plural = devices.length > 1;
   return (
-    <div className="space-y-6">
-      <div className="text-center">
-        <h2 className="text-2xl font-bold mb-2">Configuring Devices</h2>
-        <p className="text-muted-foreground">
-          Setting profile to{' '}
-          <span className="font-medium text-primary">{profileInfo?.name}</span>
-        </p>
-      </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Overall Progress</CardTitle>
-          <CardDescription>
-            {configuredCount} of {devices.length} device
-            {devices.length !== 1 ? 's' : ''} configured
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Progress value={overallProgress} className="h-2" />
-          <p className="text-sm text-muted-foreground mt-2 text-center">
-            {overallProgress}%
-          </p>
-        </CardContent>
-      </Card>
-
-      <div className="space-y-4">
+    <div className="grid max-w-content gap-10">
+      <Banner tone="warning" announce title={`Keep the ${plural ? 'devices' : 'device'} plugged in until this finishes.`}>
+        They restart on their own when setup is done.
+      </Banner>
+      <ProgressBar
+        label="Overall progress"
+        value={devices.length ? (configuredCount / devices.length) * 100 : 0}
+        detail={<span className="body tabular-nums">{`Setting up ${configuredCount} of ${devices.length} ${plural ? 'devices' : 'device'}`}</span>}
+      />
+      <ul className="grid gap-6 sm:grid-cols-2">
         {devices.map((device) => {
           const progress = deviceProgress.get(device.path);
-
+          const state = configState(progress);
           return (
-            <Card
-              key={device.path}
-              className={
-                progress?.stage === 'error' || progress?.stage === 'partial'
-                  ? 'border-destructive/50'
-                  : progress?.stage === 'complete'
-                  ? 'border-primary/50'
-                  : ''
-              }
-            >
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <CircuitBoard className="h-5 w-5" />
-                    <div>
-                      <CardTitle className="text-base">{device.label}</CardTitle>
-                      <CardDescription className="text-xs">
-                        {device.path}
-                      </CardDescription>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {progress?.stage === 'error' && (
-                      <Badge variant="destructive">Failed</Badge>
-                    )}
-                    {progress?.stage === 'partial' && (
-                      <Badge variant="destructive">Partial</Badge>
-                    )}
-                    {progress?.stage === 'complete' && (
-                      <Badge variant="secondary">Configured</Badge>
-                    )}
-                    {getStageIcon(progress)}
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <Progress
-                  value={progress?.progress ?? 0}
-                  className={`h-2 ${
-                    progress?.stage === 'error' || progress?.stage === 'partial'
-                      ? '[&>div]:bg-destructive'
-                      : ''
-                  }`}
-                />
-                <p
-                  className={`text-sm mt-2 ${
-                    progress?.stage === 'error' || progress?.stage === 'partial'
-                      ? 'text-destructive'
-                      : 'text-muted-foreground'
-                  }`}
-                >
-                  {progress?.message ?? 'Waiting...'}
-                </p>
-                {(progress?.stage === 'error' ||
-                  progress?.stage === 'partial') && (
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Full device output is in the configuration log below.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
+            <li key={device.path} className="grid content-start gap-4">
+              <DeviceCard
+                name={BOARD_NAME[device.board]}
+                port={device.path}
+                status={<StatusBadge tone={state.tone}>{state.word}</StatusBadge>}
+                statusLabel={state.word}
+              />
+              <ProgressBar
+                label={stageLabel(progress?.stage)}
+                value={progress?.progress ?? 0}
+                tone={state.tone === 'danger' ? 'danger' : undefined}
+                detail={progress?.message ? <span className={progress.stage === 'error' ? 'code-s' : undefined}>{progress.message}</span> : undefined}
+              />
+              {(progress?.stage === 'error' || progress?.stage === 'partial') && (
+                <p className="body-s text-ink-muted">Full device output is in the log below.</p>
+              )}
+            </li>
           );
         })}
-      </div>
-
-      {/* Logs Section */}
-      <Card>
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="text-base">Configuration Log</CardTitle>
-            <div className="flex items-center gap-2">
-              {logs.length > 0 && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={exportLogs}
-                >
-                  <ClipboardCopy className="h-4 w-4 mr-2" />
-                  Copy Logs
-                </Button>
-              )}
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setShowLogs(!showLogs)}
-              >
-                {showLogs ? 'Hide' : 'Show'} Logs
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
-        {showLogs && (
-          <CardContent>
-            <div className="bg-muted rounded-md p-4 font-mono text-xs space-y-1 max-h-64 overflow-y-auto">
-              {logs.map((log, index) => {
-                const isError = log.includes('✗ Error');
-                return (
-                  <div
-                    key={index}
-                    className={isError ? 'text-destructive font-semibold' : 'text-muted-foreground'}
-                  >
-                    {log}
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        )}
-      </Card>
-
-      <Card className="bg-muted/50">
-        <CardContent className="pt-6">
-          <p className="text-sm text-muted-foreground">
-            <span className="font-medium text-foreground">Note:</span> Devices
-            will restart automatically after configuration. Do not disconnect
-            them until the process is complete.
-          </p>
-        </CardContent>
-      </Card>
+      </ul>
+      <LogPane lines={logs} fileName="bluebuzzah-updater-setup-log.txt" />
     </div>
   );
+}
+
+/** Plain words for each setup step (Copy for approval: Configure progress). */
+function stageLabel(stage?: TherapyConfigProgress['stage']): string {
+  switch (stage) {
+    case undefined:
+      return 'Waiting';
+    case 'connecting':
+      return 'Connecting';
+    case 'sending':
+      return 'Sending settings';
+    case 'rebooting':
+      return 'Restarting';
+    case 'complete':
+      return 'Finished';
+    case 'partial':
+      return 'Partly done';
+    case 'error':
+      return 'Stopped by an error';
+  }
+}
+
+function configState(progress?: TherapyConfigProgress): { tone: Tone; word: string } {
+  switch (progress?.stage) {
+    case undefined:
+      return { tone: 'neutral', word: 'Waiting' };
+    case 'complete':
+      return { tone: 'success', word: 'Done' };
+    case 'partial':
+      return { tone: 'warning', word: 'Partly done' };
+    case 'error':
+      return { tone: 'danger', word: 'Failed' };
+    default:
+      return { tone: 'brand', word: 'Setting up' };
+  }
 }
