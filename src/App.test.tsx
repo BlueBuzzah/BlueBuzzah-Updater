@@ -12,11 +12,7 @@ vi.mock('@tauri-apps/plugin-process', () => ({
 
 // Mock all wizard components to simplify testing
 vi.mock('./components/wizard/FirmwareSelection', () => ({
-  FirmwareSelection: ({ onSelect }: { onSelect: (r: unknown) => void }) => (
-    <div data-testid="firmware-selection">
-      <button onClick={() => onSelect(createMockRelease())}>Select Firmware</button>
-    </div>
-  ),
+  FirmwareSelection: () => <div data-testid="firmware-selection" />,
 }));
 
 vi.mock('./components/wizard/DeviceSelection', () => ({
@@ -118,22 +114,10 @@ describe('App', () => {
     });
   });
 
-  describe('Firmware flow (interim until the one-page rebuild)', () => {
-    it('renders FirmwareSelection on step 0', () => {
+  describe('Firmware section', () => {
+    it('shows device and version choices on one page', () => {
       render(<App />);
-      expect(screen.getByTestId('firmware-selection')).toBeInTheDocument();
-    });
-
-    it('selecting firmware advances to device selection', () => {
-      render(<App />);
-      fireEvent.click(screen.getByText('Select Firmware'));
       expect(screen.getByTestId('device-selection')).toBeInTheDocument();
-    });
-
-    it('back returns to version selection', () => {
-      useWizardStore.setState({ currentStep: 1, selectedRelease: createMockRelease() });
-      render(<App />);
-      fireEvent.click(screen.getByRole('button', { name: /^back$/i }));
       expect(screen.getByTestId('firmware-selection')).toBeInTheDocument();
     });
 
@@ -142,25 +126,28 @@ describe('App', () => {
       ['no roles', [createMockDevice({ role: undefined })]],
       ['both Primary', [createMockDevice({ path: 'a', role: 'PRIMARY' }), createMockDevice({ path: 'b', role: 'PRIMARY' })]],
       ['both Secondary', [createMockDevice({ path: 'a', role: 'SECONDARY' }), createMockDevice({ path: 'b', role: 'SECONDARY' })]],
-    ])('start is disabled with %s', (_label, devices) => {
-      useWizardStore.setState({ currentStep: 1, selectedRelease: createMockRelease(), selectedDevices: devices });
+    ])('Flash firmware is disabled with %s', (_label, devices) => {
+      useWizardStore.setState({ selectedRelease: createMockRelease(), selectedDevices: devices });
       render(<App />);
-      expect(screen.getByRole('button', { name: /start installation/i })).toBeDisabled();
+      expect(screen.getByRole('button', { name: 'Flash firmware' })).toBeDisabled();
     });
 
     it.each([
       ['one device with a role', [createMockDevice({ role: 'PRIMARY' })]],
       ['complementary roles', [createMockDevice({ path: 'a', role: 'PRIMARY' }), createMockDevice({ path: 'b', role: 'SECONDARY' })]],
-    ])('start is enabled with %s', (_label, devices) => {
-      useWizardStore.setState({ currentStep: 1, selectedRelease: createMockRelease(), selectedDevices: devices });
+    ])('Flash firmware is enabled with %s', (_label, devices) => {
+      useWizardStore.setState({ selectedRelease: createMockRelease(), selectedDevices: devices });
       render(<App />);
-      expect(screen.getByRole('button', { name: /start installation/i })).toBeEnabled();
+      expect(screen.getByRole('button', { name: 'Flash firmware' })).toBeEnabled();
     });
 
-    it('renders InstallationProgress on step 2 and SuccessScreen on step 3', () => {
-      useWizardStore.setState({ currentStep: 3, selectedRelease: createMockRelease() });
+    it('flashing replaces the choices; the result can start over', () => {
+      useWizardStore.setState({ currentStep: 2, selectedRelease: createMockRelease() });
+      const { unmount } = render(<App />);
+      expect(screen.getByTestId('installation-progress')).toBeInTheDocument();
+      unmount();
+      useWizardStore.setState({ currentStep: 3, updateResult: { success: true, message: '', deviceUpdates: [] } });
       render(<App />);
-      expect(screen.getByTestId('success-screen')).toBeInTheDocument();
       fireEvent.click(screen.getByText('Reset'));
       expect(screen.getByTestId('firmware-selection')).toBeInTheDocument();
     });

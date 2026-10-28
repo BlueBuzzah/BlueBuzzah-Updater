@@ -13,7 +13,7 @@ interface WizardStore extends WizardState {
   setStep: (step: number) => void;
   nextStep: () => void;
   previousStep: () => void;
-  selectRelease: (release: FirmwareRelease) => void;
+  selectRelease: (release: FirmwareRelease | null) => void;
   setDevices: (devices: Device[]) => void;
   updateDeviceRole: (devicePath: string, role: 'PRIMARY' | 'SECONDARY') => void;
   updateDeviceInfo: (oldPath: string, newLabel: string, newPath: string) => void;

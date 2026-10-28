@@ -1,451 +1,158 @@
-import {
-	AlertDialog,
-	AlertDialogAction,
-	AlertDialogCancel,
-	AlertDialogContent,
-	AlertDialogDescription,
-	AlertDialogFooter,
-	AlertDialogHeader,
-	AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
-import { Badge } from '@/components/ui/badge';
+import { useCallback, useEffect, useId, useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import { ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
+import { ConfirmDialog } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
-import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardFooter,
-	CardHeader,
-	CardTitle,
-} from '@/components/ui/card';
-import { Separator } from '@/components/ui/separator';
+import { Card } from '@/components/ui/card';
+import { ChoiceGroup } from '@/components/ui/choice-group';
+import { StatusBadge } from '@/components/ui/status-badge';
 import { Switch } from '@/components/ui/switch';
-import {
-	Tooltip,
-	TooltipContent,
-	TooltipProvider,
-	TooltipTrigger,
-} from '@/components/ui/tooltip';
-import { useToast } from '@/components/ui/use-toast';
 import { formatBytes, formatDate } from '@/lib/utils';
 import { firmwareService, getAssetForBoard } from '@/services/FirmwareService';
-import { FirmwareRelease } from '@/types';
-import { Calendar, ChevronDown, ChevronUp, Download, FileText, FlaskConical, HardDrive, Loader2, Trash2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
+import type { BoardType, FirmwareRelease } from '@/types';
 
 interface FirmwareSelectionProps {
-  onSelect: (release: FirmwareRelease) => void;
+  value: FirmwareRelease | null;
+  onChange: (release: FirmwareRelease | null) => void;
+  /** Board of the chosen devices, to show the right download size */
+  board?: BoardType;
 }
 
-export function FirmwareSelection({
-  onSelect,
-}: FirmwareSelectionProps) {
+/** updater.md step 2: latest stable preselected, experimental versions behind a labeled toggle. */
+export function FirmwareSelection({ value, onChange, board }: FirmwareSelectionProps) {
   const [releases, setReleases] = useState<FirmwareRelease[]>([]);
   const [loading, setLoading] = useState(true);
-  const [expandedReleases, setExpandedReleases] = useState<Set<string>>(
-    new Set()
-  );
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [releaseToDelete, setReleaseToDelete] = useState<FirmwareRelease | null>(null);
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [showExperimental, setShowExperimental] = useState(false);
-  const [selectingVersion, setSelectingVersion] = useState<string | null>(null);
-  const { toast } = useToast();
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const notesId = useId();
 
-  useEffect(() => {
-    loadReleases();
-  }, []);
-
-  const loadReleases = async () => {
+  const load = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
     try {
-      setLoading(true);
-      const data = await firmwareService.fetchReleases();
-      setReleases(data);
+      setReleases(await firmwareService.fetchReleases());
     } catch (error) {
-      toast({
-        variant: 'destructive',
-        title: 'Error',
-        description:
-          error instanceof Error
-            ? error.message
-            : 'Failed to load firmware releases',
-      });
+      setLoadError(error instanceof Error ? error.message : String(error));
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const toggleExpanded = (tagName: string) => {
-    setExpandedReleases((prev) => {
-      const next = new Set(prev);
-      if (next.has(tagName)) {
-        next.delete(tagName);
-      } else {
-        next.add(tagName);
-      }
-      return next;
-    });
-  };
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  const handleDeleteClick = (release: FirmwareRelease, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setReleaseToDelete(release);
-    setDeleteDialogOpen(true);
-  };
+  const shown = releases.filter((r) => showExperimental || !r.isPrerelease);
+  const latestStable = releases.find((r) => !r.isPrerelease) ?? null;
 
-  const handleDeleteConfirm = async () => {
-    if (!releaseToDelete) return;
+  // Keep a visible choice: the newest stable when nothing (or a hidden one) is chosen.
+  useEffect(() => {
+    if (loading) return;
+    if (value && shown.some((r) => r.tagName === value.tagName)) return;
+    const target = latestStable ?? shown[0] ?? null;
+    if (target?.tagName !== value?.tagName) onChange(target);
+  });
 
-    try {
-      setIsDeleting(true);
-      const entries = releaseToDelete.cachedEntries ?? [];
-      for (const entry of entries) {
-        await firmwareService.deleteCachedFirmware(entry.version, entry.board);
-      }
-
-      toast({
-        title: 'Cache deleted',
-        description: `Deleted cached firmware for ${releaseToDelete.version}`,
-      });
-
-      // Reload releases to update cache status
-      await loadReleases();
-    } catch (error) {
-      toast({
-        variant: 'destructive',
-        title: 'Error',
-        description:
-          error instanceof Error
-            ? error.message
-            : 'Failed to delete cached firmware',
-      });
-    } finally {
-      setIsDeleting(false);
-      setDeleteDialogOpen(false);
-      setReleaseToDelete(null);
+  const deleteDownload = async () => {
+    if (!value) return;
+    for (const entry of value.cachedEntries ?? []) {
+      await firmwareService.deleteCachedFirmware(entry.version, entry.board);
     }
+    await load();
   };
 
-  if (loading) {
+  const sizeOf = (r: FirmwareRelease) => {
+    const asset = board ? getAssetForBoard(r, board) : null;
+    return asset ? `${formatBytes(asset.size)} download` : null;
+  };
+
+  if (!loading && (loadError || releases.length === 0)) {
     return (
-      <div className="space-y-4">
-        <div className="text-center py-8">
-          <div className="animate-pulse space-y-4">
-            <div className="h-8 bg-secondary rounded w-1/3 mx-auto" />
-            <div className="h-4 bg-secondary rounded w-1/2 mx-auto" />
+      <Card title="Choose a version">
+        <div className="grid gap-4">
+          <h4 className="display-l">No firmware found</h4>
+          <p className="body">We couldn't reach the firmware list on GitHub. Check your internet connection, then select Try again.</p>
+          {loadError && <p className="code-s rounded-xs bg-surface-sunken p-2">{loadError}</p>}
+          <div>
+            <Button variant="secondary" onClick={load}>Try again</Button>
           </div>
-          <p className="mt-4 text-muted-foreground">
-            Loading firmware releases...
-          </p>
         </div>
-        <div className="flex flex-col gap-4">
-          {[1, 2, 3, 4].map((i) => (
-            <Card key={i} className="animate-pulse">
-              <CardHeader>
-                <div className="h-6 bg-secondary rounded w-1/2" />
-                <div className="h-4 bg-secondary rounded w-1/3 mt-2" />
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  <div className="h-4 bg-secondary rounded" />
-                  <div className="h-4 bg-secondary rounded w-5/6" />
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      </div>
+      </Card>
     );
   }
-
-  if (releases.length === 0) {
-    return (
-      <div className="text-center py-12">
-        <FileText className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-        <h3 className="text-lg font-semibold mb-2">No Releases Found</h3>
-        <p className="text-muted-foreground mb-4">
-          Unable to find any firmware releases
-        </p>
-        <Button onClick={loadReleases}>Retry</Button>
-      </div>
-    );
-  }
-
-  // Filter releases based on experimental toggle
-  const filteredReleases = releases.filter(
-    (release) => showExperimental || !release.isPrerelease
-  );
-
-  // Check if there are any experimental releases to show the toggle
-  const hasExperimentalReleases = releases.some((r) => r.isPrerelease);
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-bold mb-2">Select Firmware Version</h2>
-          <p className="text-muted-foreground">
-            Choose the firmware version you want to install
-          </p>
-        </div>
-        {hasExperimentalReleases && (
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <label
-                  className={`
-                    group flex items-center gap-2.5 px-3 py-2 rounded-lg
-                    border transition-all duration-200 cursor-pointer select-none
-                    ${showExperimental
-                      ? 'bg-amber-500/10 border-amber-500/40 shadow-[0_0_12px_rgba(245,158,11,0.15)]'
-                      : 'bg-zinc-900/50 border-zinc-700/50 hover:border-zinc-600'
-                    }
-                  `}
-                >
-                  <FlaskConical
-                    className={`h-4 w-4 transition-colors duration-200 ${
-                      showExperimental ? 'text-amber-400' : 'text-zinc-500 group-hover:text-zinc-400'
-                    }`}
-                  />
-                  <span
-                    className={`text-sm font-medium transition-colors duration-200 ${
-                      showExperimental ? 'text-amber-400' : 'text-zinc-400 group-hover:text-zinc-300'
-                    }`}
-                  >
-                    Experimental
-                  </span>
-                  <Switch
-                    checked={showExperimental}
-                    onCheckedChange={setShowExperimental}
-                    className={`
-                      data-[state=checked]:bg-amber-500
-                      data-[state=unchecked]:bg-zinc-700
-                    `}
-                  />
-                </label>
-              </TooltipTrigger>
-              <TooltipContent
-                side="bottom"
-                className="bg-zinc-900 border border-zinc-700"
+    <Card title="Choose a version">
+      <div className="grid gap-6">
+        <p className="body-s text-ink-muted" aria-live="polite">{loading ? 'Loading firmware versions…' : ''}</p>
+        {releases.some((r) => r.isPrerelease) && (
+          <Switch
+            label="Show experimental versions"
+            description="Early builds for testing. They may have bugs."
+            checked={showExperimental}
+            onChange={setShowExperimental}
+          />
+        )}
+        {shown.length > 0 && (
+          <ChoiceGroup
+            label="Choose a version"
+            value={value?.tagName ?? null}
+            onChange={(tag) => {
+              setNotesOpen(false);
+              onChange(shown.find((r) => r.tagName === tag) ?? null);
+            }}
+            options={shown.map((r) => ({
+              value: r.tagName,
+              title: <code className="code">{r.version}</code>,
+              badge: (
+                <span className="flex flex-wrap gap-2">
+                  {r === latestStable && <StatusBadge>Latest</StatusBadge>}
+                  {r.isPrerelease && <StatusBadge tone="warning">Experimental</StatusBadge>}
+                  {r.isCached && <StatusBadge>Downloaded</StatusBadge>}
+                </span>
+              ),
+              body: [`Released ${formatDate(r.publishedAt)}`, sizeOf(r)].filter(Boolean).join(' · '),
+            }))}
+          />
+        )}
+        {value && (
+          <div className="flex flex-wrap items-start justify-between gap-target-gap">
+            {value.releaseNotes && (
+              <Button
+                variant="quiet"
+                icon={notesOpen ? ChevronUp : ChevronDown}
+                aria-expanded={notesOpen}
+                aria-controls={notesId}
+                onClick={() => setNotesOpen(!notesOpen)}
               >
-                <p className="text-zinc-300 text-xs">
-                  {showExperimental ? 'Hide' : 'Show'} pre-release firmware versions
-                </p>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+                {notesOpen ? 'Hide release notes' : 'Show release notes'}
+              </Button>
+            )}
+            {value.isCached && (
+              <Button variant="danger" icon={Trash2} onClick={() => setConfirmDelete(true)}>
+                Delete download
+              </Button>
+            )}
+          </div>
+        )}
+        {value && notesOpen && (
+          <div id={notesId} className="release-notes">
+            <ReactMarkdown>{value.releaseNotes}</ReactMarkdown>
+          </div>
         )}
       </div>
-
-      <div className="flex flex-col gap-4">
-        {filteredReleases.map((release, index) => {
-          const isExpanded = expandedReleases.has(release.tagName);
-          // Lower threshold - markdown with newlines/bullets renders taller than plain text
-          const needsExpansion = release.releaseNotes.length > 100;
-
-          return (
-            <Card
-              key={release.tagName}
-              className={`transition-all hover:shadow-lg ${
-                release.isCached
-                  ? 'border-primary/50 shadow-[0_0_15px_rgba(53,182,242,0.15)]'
-                  : ''
-              }`}
-            >
-              <CardHeader>
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <CardTitle className="flex items-center gap-2 flex-wrap">
-                      {release.version}
-                      {index === 0 && (
-                        <Badge variant="default">Latest</Badge>
-                      )}
-                      {release.isPrerelease && (
-                        <TooltipProvider>
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <span className="cursor-help">
-                                <Badge
-                                  variant="default"
-                                  className="bg-yellow-500/20 text-yellow-400 border-yellow-500/30 hover:bg-yellow-500/30"
-                                >
-                                  Experimental
-                                </Badge>
-                              </span>
-                            </TooltipTrigger>
-                            <TooltipContent
-                              className="max-w-xs bg-zinc-900 border border-amber-500/30 shadow-lg shadow-amber-500/5"
-                              sideOffset={8}
-                            >
-                              <p className="font-semibold text-amber-400 text-sm">
-                                Warning: Experimental Firmware
-                              </p>
-                              <p className="text-zinc-300 text-xs mt-1.5 leading-relaxed">
-                                Pre-release version for testing and evaluation. Not intended for regular therapy use. May contain defects or unexpected behavior.
-                              </p>
-                            </TooltipContent>
-                          </Tooltip>
-                        </TooltipProvider>
-                      )}
-                      {release.isCached && (
-                        <Badge
-                          variant="default"
-                          className="bg-primary/20 text-primary border-primary/30 hover:bg-primary/30"
-                        >
-                          <HardDrive className="h-3 w-3 mr-1" />
-                          Cached
-                        </Badge>
-                      )}
-                    </CardTitle>
-                    <CardDescription className="flex items-center gap-2 mt-2">
-                      <Calendar className="h-3 w-3" />
-                      {formatDate(release.publishedAt)}
-                    </CardDescription>
-                    {release.isCached && release.cachedMetadata && (
-                      <CardDescription className="flex items-center gap-2 mt-1 text-xs">
-                        <HardDrive className="h-3 w-3" />
-                        Downloaded {formatDate(new Date(release.cachedMetadata.downloaded_at))} •{' '}
-                        {formatBytes(release.cachedMetadata.file_size)}
-                      </CardDescription>
-                    )}
-                  </div>
-                  {release.isCached && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 w-8 p-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                      onClick={(e) => handleDeleteClick(release, e)}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-              </CardHeader>
-
-              <CardContent className="space-y-3">
-                <div>
-                  <h4 className="text-sm font-semibold mb-1">Release Notes</h4>
-                  <div className="relative">
-                    <div
-                      className={`prose prose-sm prose-invert max-w-none overflow-hidden transition-all duration-200
-                        prose-headings:text-foreground prose-headings:font-semibold prose-headings:mt-3 prose-headings:mb-1
-                        prose-p:text-muted-foreground prose-p:my-1
-                        prose-ul:text-muted-foreground prose-ul:my-1 prose-ul:pl-4
-                        prose-ol:text-muted-foreground prose-ol:my-1 prose-ol:pl-4
-                        prose-li:my-0.5
-                        prose-code:text-[#35B6F2] prose-code:bg-secondary prose-code:px-1 prose-code:rounded prose-code:text-xs
-                        prose-pre:bg-secondary prose-pre:p-2 prose-pre:rounded prose-pre:my-2
-                        prose-a:text-[#35B6F2] prose-a:no-underline hover:prose-a:underline
-                        prose-strong:text-foreground
-                        ${isExpanded ? 'max-h-[500px]' : 'max-h-[4.5rem]'}`}
-                    >
-                      <ReactMarkdown>{release.releaseNotes}</ReactMarkdown>
-                    </div>
-                    {!isExpanded && needsExpansion && (
-                      <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-card to-transparent pointer-events-none" />
-                    )}
-                  </div>
-                  {needsExpansion && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="mt-1 h-auto p-0 text-xs"
-                      onClick={() => toggleExpanded(release.tagName)}
-                    >
-                      {isExpanded ? (
-                        <>
-                          <ChevronUp className="h-3 w-3 mr-1" />
-                          Show less
-                        </>
-                      ) : (
-                        <>
-                          <ChevronDown className="h-3 w-3 mr-1" />
-                          Read more
-                        </>
-                      )}
-                    </Button>
-                  )}
-                </div>
-
-                <Separator />
-
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Download Size</span>
-                  <span className="font-medium">
-                    {(() => {
-                      const v2 = getAssetForBoard(release, 'nrf52');
-                      const v3 = getAssetForBoard(release, 'esp32s3');
-                      const parts = [
-                        v2 && `v2: ${formatBytes(v2.size)}`,
-                        v3 && `v3: ${formatBytes(v3.size)}`,
-                      ].filter(Boolean);
-                      if (parts.length > 0) return parts.join(' • ');
-                      // Cached-only releases synthesize an asset that matches no pattern
-                      return release.assets.length > 0
-                        ? formatBytes(release.assets[0].size)
-                        : 'N/A';
-                    })()}
-                  </span>
-                </div>
-              </CardContent>
-
-              <CardFooter>
-                <Button
-                  className="w-full"
-                  disabled={selectingVersion !== null}
-                  onClick={() => {
-                    try {
-                      setSelectingVersion(release.version);
-                      onSelect(release);
-                    } catch {
-                      setSelectingVersion(null);
-                    }
-                  }}
-                >
-                  {selectingVersion === release.version ? (
-                    <>
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                      Loading...
-                    </>
-                  ) : (
-                    <>
-                      <Download className="h-4 w-4 mr-2" />
-                      Install {release.version}
-                    </>
-                  )}
-                </Button>
-              </CardFooter>
-            </Card>
-          );
-        })}
-      </div>
-
-      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Cached Firmware</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete the cached firmware for{' '}
-              <span className="font-semibold text-foreground">
-                {releaseToDelete?.version}
-              </span>
-              ? This will remove the downloaded files from your computer. You can
-              always download it again later.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDeleteConfirm}
-              disabled={isDeleting}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              {isDeleting ? 'Deleting...' : 'Delete'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </div>
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title="Delete this download?"
+        cancelLabel="Keep it"
+        confirmLabel="Delete"
+        onConfirm={deleteDownload}
+      >
+        Firmware {value?.version} will be removed from this computer. You can download it again any time.
+      </ConfirmDialog>
+    </Card>
   );
 }
