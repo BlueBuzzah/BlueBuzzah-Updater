@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockDevice } from '@/test/factories';
 import { useTherapyStore } from '@/stores/therapyStore';
@@ -19,10 +19,10 @@ function config(
   };
 }
 
-function renderWith(configs: DeviceConfigResult[], overallSuccess: boolean) {
+function renderWith(configs: DeviceConfigResult[], overallSuccess: boolean, profile: 'CUSTOM' | 'REGULAR' = 'CUSTOM') {
   render(
     <TherapySuccess
-      profile="CUSTOM"
+      profile={profile}
       devices={configs.map((c) => c.device)}
       result={{
         success: overallSuccess,
@@ -35,63 +35,51 @@ function renderWith(configs: DeviceConfigResult[], overallSuccess: boolean) {
   );
 }
 
-describe('TherapySuccess header counts', () => {
-  beforeEach(() => {
-    useTherapyStore.getState().reset();
+describe('TherapySuccess', () => {
+  beforeEach(() => useTherapyStore.getState().reset());
+
+  it('confirms the pattern on both devices', () => {
+    renderWith([config('a', true, 'success'), config('b', true, 'success')], true, 'REGULAR');
+    expect(screen.getByRole('status')).toHaveTextContent('Regular is set on both devices');
+    expect(screen.getAllByText('Done', { selector: '.bb-badge span' })).toHaveLength(2);
   });
 
-  // A partial is `success: true` by design — the profile change did land — so
-  // counting only `!success` reported "0 of 2 devices failed" on a screen that
-  // was simultaneously showing a Partial badge.
-  it('counts a partial device distinctly rather than as a clean success', () => {
-    renderWith(
-      [
-        config('/dev/cu.a', true, 'success'),
-        config('/dev/cu.b', true, 'partial'),
-      ],
-      false
+  it('says custom settings were not applied when no device answered as Primary', () => {
+    renderWith([config('a', true, 'success_secondary'), config('b', true, 'success_secondary')], true);
+    const banner = screen.getByRole('status');
+    expect(banner).toHaveTextContent("Custom settings weren't applied");
+    expect(banner).toHaveTextContent('No device answered as the Primary device.');
+    expect(document.body).not.toHaveTextContent('is set on');
+  });
+
+  it('warns about a partial result and names the device state', () => {
+    renderWith([config('a', true, 'partial'), config('b', true, 'success')], false);
+    expect(screen.getByRole('status')).toHaveTextContent('The pattern changed, but your custom settings may not have saved');
+    expect(screen.getByText('Partly done', { selector: '.bb-badge span' })).toBeInTheDocument();
+  });
+
+  it('reports failures as a danger banner with Copy details', () => {
+    renderWith([config('a', false), config('b', true, 'success')], false);
+    expect(screen.getByRole('alert')).toHaveTextContent("Setup didn't finish on 1 of 2 devices");
+    expect(screen.getByRole('button', { name: 'Copy details' })).toBeInTheDocument();
+    expect(screen.getByText('Failed', { selector: '.bb-badge span' })).toBeInTheDocument();
+  });
+
+  it('offers to set up another device or finish', () => {
+    const onReset = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <TherapySuccess
+        profile="REGULAR"
+        devices={[createMockDevice()]}
+        result={{ success: true, message: '', deviceConfigs: [config('a', true, 'success')] }}
+        onReset={onReset}
+        onClose={onClose}
+      />
     );
-
-    expect(screen.getByText(/1 of 2 devices finished only partially/i))
-      .toBeInTheDocument();
-    expect(screen.queryByText(/0 of 2/)).not.toBeInTheDocument();
-  });
-
-  it('reports failures and partials together when both occurred', () => {
-    renderWith(
-      [
-        config('/dev/cu.a', false),
-        config('/dev/cu.b', true, 'partial'),
-        config('/dev/cu.c', true, 'success'),
-      ],
-      false
-    );
-
-    const summary = screen.getByTestId('outcome-summary').textContent ?? '';
-    expect(summary).toMatch(/1 of 3 devices failed/i);
-    expect(summary).toMatch(/1 finished only partially/i);
-  });
-
-  it('keeps the plain failure wording when nothing was partial', () => {
-    renderWith([config('/dev/cu.a', false), config('/dev/cu.b', false)], false);
-
-    expect(
-      screen.getByText(/all devices failed to configure/i)
-    ).toBeInTheDocument();
-  });
-
-  it('does not count a secondary glove as a problem', () => {
-    renderWith(
-      [
-        config('/dev/cu.a', true, 'success'),
-        config('/dev/cu.b', true, 'success_secondary'),
-      ],
-      true
-    );
-
-    expect(screen.getByText(/configuration complete/i)).toBeInTheDocument();
-    expect(
-      screen.getByText(/all 2 devices have been configured successfully/i)
-    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Set up another device' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Done$/ }));
+    expect(onReset).toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalled();
   });
 });

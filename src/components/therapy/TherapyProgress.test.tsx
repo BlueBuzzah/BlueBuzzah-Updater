@@ -91,7 +91,7 @@ describe('TherapyProgress outcome reporting', () => {
     expect(cardStatus.textContent).not.toContain('[BLE]');
     expect(screen.getByText('Failed')).toBeInTheDocument();
     expect(
-      screen.getByText('Full device output is in the configuration log below.')
+      screen.getByText('Full device output is in the log below.')
     ).toBeInTheDocument();
 
     // Log: the raw text, retained for copying.
@@ -157,8 +157,8 @@ describe('TherapyProgress outcome reporting', () => {
 
     await waitFor(() => expect(onComplete).toHaveBeenCalled());
 
-    expect(screen.getByText('Partial')).toBeInTheDocument();
-    expect(screen.queryByText('Configured')).not.toBeInTheDocument();
+    expect(screen.getByText('Partly done', { selector: '.bb-badge span' })).toBeInTheDocument();
+    expect(screen.queryByText('Done', { selector: '.bb-badge span' })).not.toBeInTheDocument();
   });
 
   it('carries the backend outcome into the per-device result', async () => {
@@ -262,5 +262,29 @@ describe('TherapyProgress outcome reporting', () => {
 
     await waitFor(() => expect(onComplete).toHaveBeenCalled());
     expect(onComplete.mock.calls[0][0].message).toMatch(/not applied/i);
+  });
+
+  it('warns to keep the devices plugged in and shows each device percentage', async () => {
+    mockConfigure.mockImplementation(async (_d, _p, onProgress) => {
+      onProgress!({ devicePath: '/dev/cu.a', stage: 'sending', progress: 64, message: 'Sending' });
+      return new Promise(() => {});
+    });
+    render(
+      <TherapyProgress profile="REGULAR" devices={[device('/dev/cu.a', 'A'), device('/dev/cu.b', 'B')]} onComplete={vi.fn()} onProgressUpdate={vi.fn()} />
+    );
+    expect(screen.getByRole('status')).toHaveTextContent('Keep the devices plugged in until this finishes.');
+    expect(await screen.findByText('64%')).toBeInTheDocument();
+    expect(screen.getByText('Setting up')).toBeInTheDocument();
+    expect(screen.getByText('Setting up 0 of 2 devices')).toBeInTheDocument();
+  });
+
+  it('writes log lines that start with a level word', async () => {
+    mockConfigure.mockRejectedValue('Device not found');
+    const onComplete = vi.fn();
+    render(<TherapyProgress profile="REGULAR" devices={[device('/dev/cu.a', 'A')]} onComplete={onComplete} onProgressUpdate={vi.fn()} />);
+    await waitFor(() => expect(onComplete).toHaveBeenCalled());
+    const lines = useTherapyStore.getState().logs.flatMap((l) => l.split('\n')).filter((l) => !l.startsWith('   '));
+    lines.forEach((l) => expect(l).toMatch(/^(INFO|WARN|ERROR) {2}/));
+    expect(lines.some((l) => l.startsWith('ERROR  '))).toBe(true);
   });
 });
