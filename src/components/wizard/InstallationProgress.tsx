@@ -64,7 +64,7 @@ interface InstallationProgressProps {
 }
 
 export function InstallationProgress({ release, devices, onComplete, onProgressUpdate }: InstallationProgressProps) {
-  const { updateDeviceInfo, addLog: storeAddLog, logs, reset } = useWizardStore();
+  const { updateDeviceInfo, addLog: storeAddLog, logs, reset, setUpdateResult } = useWizardStore();
   const [stage, setStage] = useState<RunStage>('validating');
   const [downloadProgress, setDownloadProgress] = useState(0);
   const [deviceProgress, setDeviceProgress] = useState<Map<string, UpdateProgress>>(new Map());
@@ -76,6 +76,8 @@ export function InstallationProgress({ release, devices, onComplete, onProgressU
   const [retryCount, setRetryCount] = useState(0);
   const hasStartedRef = useRef(false);
   const cancelledRef = useRef(false);
+  // Each run gets an id; a stopped or replaced run must not report afterwards.
+  const runIdRef = useRef(0);
   const completedDevices = useRef<Set<string>>(new Set());
   const devicePathMap = useRef<Map<string, { path: string; label: string }>>(new Map());
   const deviceResults = useRef<DeviceUpdateResult[]>([]);
@@ -116,6 +118,8 @@ export function InstallationProgress({ release, devices, onComplete, onProgressU
     setIsCancelling(false);
     cancelledRef.current = false;
     deviceResults.current = deviceResults.current.filter((r) => completedDevices.current.has(r.device.path));
+    // The run is live again: clearing the result turns the run guards back on (nav lock, close guard, update hold).
+    setUpdateResult(null);
     addLog('INFO', '--- Retrying failed devices ---');
     startInstallation(retryDevices);
   };
@@ -125,11 +129,19 @@ export function InstallationProgress({ release, devices, onComplete, onProgressU
     setIsCancelling(true);
     cancelledRef.current = true;
     addLog('WARN', 'Cancellation requested - stopping installation...');
+    runIdRef.current += 1; // the stopped run's late results are ignored
     try {
       await deviceService.cancelFlash();
     } catch (err) {
       console.error('Failed to cancel:', err);
     }
+    // End the run now so the person isn't left on a dead progress view.
+    fail(
+      'Installation cancelled',
+      updatedDevices.map((d) =>
+        completedDevices.current.has(d.path) ? { device: d, success: true } : { device: d, success: false, error: 'Installation cancelled' }
+      )
+    );
   };
 
   const fail = (message: string, outcome: DeviceUpdateResult[]) => {
@@ -140,6 +152,8 @@ export function InstallationProgress({ release, devices, onComplete, onProgressU
 
   const startInstallation = async (devicesToFlash?: Device[]) => {
     const targetDevices = devicesToFlash ?? updatedDevices;
+    const runId = ++runIdRef.current;
+    const stale = () => runId !== runIdRef.current;
     try {
       // Stage 0: validate devices
       addLog('INFO', 'Validating devices before installation...');
@@ -237,8 +251,8 @@ export function InstallationProgress({ release, devices, onComplete, onProgressU
         }
       }
 
-      // Stage 3: complete (only if not cancelled)
-      if (!cancelledRef.current) {
+      // Stage 3: complete (a stopped run already reported)
+      if (!cancelledRef.current && !stale()) {
         const overallSuccess = deviceResults.current.every((r) => r.success);
         setStage('complete');
         if (overallSuccess) {
@@ -253,13 +267,15 @@ export function InstallationProgress({ release, devices, onComplete, onProgressU
         }
       }
     } catch (err) {
+      if (stale()) return;
       const message =
         typeof err === 'string' ? err : err instanceof Error ? err.message : JSON.stringify(err) || 'Unknown error occurred';
       addLog('ERROR', `Error: ${message}`);
-      fail(
-        message,
-        targetDevices.map((d) => ({ device: d, success: false, error: message }))
-      );
+      // Keep devices that already succeeded (e.g. on a retry) as successes.
+      fail(message, [
+        ...deviceResults.current.filter((r) => r.success),
+        ...targetDevices.map((d) => ({ device: d, success: false, error: message })),
+      ]);
     }
   };
 

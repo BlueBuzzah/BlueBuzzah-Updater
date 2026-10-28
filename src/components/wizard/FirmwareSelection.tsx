@@ -31,6 +31,7 @@ export function FirmwareSelection({ value, onChange, board }: FirmwareSelectionP
   const [pickerOpen, setPickerOpen] = useState(false);
   const [notesFor, setNotesFor] = useState<string | null>(null);
   const [toDelete, setToDelete] = useState<FirmwareRelease | null>(null);
+  const [deleteStatus, setDeleteStatus] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -54,17 +55,27 @@ export function FirmwareSelection({ value, onChange, board }: FirmwareSelectionP
   // Keep a visible choice: the newest stable when nothing (or a hidden one) is chosen.
   useEffect(() => {
     if (loading) return;
-    if (value && shown.some((r) => r.tagName === value.tagName)) return;
+    // After a reload (e.g. a deleted download), switch to the fresh copy of the same version.
+    const fresh = value && shown.find((r) => r.tagName === value.tagName);
+    if (fresh) {
+      if (fresh !== value) onChange(fresh);
+      return;
+    }
     const target = latestStable ?? shown[0] ?? null;
     if (target?.tagName !== value?.tagName) onChange(target);
   });
 
   const deleteDownload = async () => {
     if (!toDelete) return;
-    for (const entry of toDelete.cachedEntries ?? []) {
-      await firmwareService.deleteCachedFirmware(entry.version, entry.board);
+    setDeleteStatus('');
+    try {
+      for (const entry of toDelete.cachedEntries ?? []) {
+        await firmwareService.deleteCachedFirmware(entry.version, entry.board);
+      }
+      await load();
+    } catch {
+      setDeleteStatus("Couldn't delete the download.");
     }
-    await load();
   };
 
   const details = (r: FirmwareRelease) => {
@@ -150,7 +161,8 @@ export function FirmwareSelection({ value, onChange, board }: FirmwareSelectionP
                 />
               ))}
             </ul>
-            <div>
+            <div className="flex flex-wrap items-center gap-target-gap">
+              <p className="body-s" aria-live="polite">{deleteStatus}</p>
               <DialogPrimitive.Close asChild>
                 <Button variant="quiet">Close</Button>
               </DialogPrimitive.Close>

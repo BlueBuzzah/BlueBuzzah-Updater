@@ -15,10 +15,10 @@
 code, .code, .code-s { overflow-wrap: anywhere; }
 
 /* Release notes (plan choice PC-13): body-s, theme ink, underlined links, nothing clipped */
-.release-notes { font-size: 0.9375rem; line-height: 1.375rem; color: var(--ink); max-width: var(--prose-max); }
+.release-notes { font-size: 0.9375rem; line-height: 1.375rem; color: var(--ink); max-width: var(--prose-max); overflow-wrap: anywhere; }
 .release-notes > * + * { margin-top: var(--space-2); }
 .release-notes :where(ul, ol) { padding-left: var(--space-6); list-style: revert; }
 .release-notes :where(h1, h2, h3, h4) { font-family: var(--font-display); font-size: 1.125rem; line-height: 1.5rem; font-weight: 500; }
 .release-notes a { color: var(--link); text-decoration: underline; }
 .release-notes code { font-family: var(--font-mono); font-size: 0.9375rem; background: var(--surface-sunken); border-radius: var(--radius-xs); padding: 0 var(--space-1); }
-.release-notes pre { background: var(--surface-sunken); border-radius: var(--radius-md); padding: var(--space-3); overflow-x: auto; }
+.release-notes pre { background: var(--surface-sunken); border-radius: var(--radius-md); padding: var(--space-3); white-space: pre-wrap; }

@@ -4,8 +4,14 @@ import { SettingsPage } from './SettingsPage';
 import { useThemeStore } from '@/stores/themeStore';
 import { useUpdaterStore } from '@/stores/updaterStore';
 import { useTheme } from '@/hooks/useTheme';
+import { updaterService } from '@/services/UpdaterService';
+import { waitFor } from '@testing-library/react';
 
 vi.mock('@tauri-apps/api/app', () => ({ getVersion: () => Promise.resolve('1.2.3') }));
+vi.mock('@/services/UpdaterService', async (orig) => ({
+  ...(await orig<typeof import('@/services/UpdaterService')>()),
+  updaterService: { checkForUpdate: vi.fn() },
+}));
 
 function WithTheme() {
   useTheme();
@@ -40,5 +46,17 @@ describe('SettingsPage', () => {
   it('shows the app version in code', async () => {
     render(<SettingsPage />);
     expect(await screen.findByText('1.2.3')).toHaveClass('code');
+  });
+
+  it('a manual check offers the update again after "Not now"', async () => {
+    const info = { version: '9.9.9', currentVersion: '1.0.0', releaseNotes: '', releaseDate: null };
+    act(() => {
+      useUpdaterStore.getState().setUpdateAvailable(info);
+      useUpdaterStore.getState().dismiss();
+    });
+    vi.mocked(updaterService.checkForUpdate).mockResolvedValue(info);
+    render(<SettingsPage />);
+    fireEvent.click(screen.getByRole('button', { name: 'Check for updates' }));
+    await waitFor(() => expect(useUpdaterStore.getState().dismissed).toBe(false));
   });
 });

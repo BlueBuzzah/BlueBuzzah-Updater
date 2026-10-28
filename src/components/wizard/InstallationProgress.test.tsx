@@ -12,7 +12,7 @@ vi.mock('@/services/DeviceService', () => ({
   deviceService: { validateDevices: vi.fn(), deployFirmware: vi.fn(), cancelFlash: vi.fn() },
 }));
 
-const store = { reset: vi.fn(), updateDeviceInfo: vi.fn(), addLog: vi.fn(), logs: [] as string[] };
+const store = { reset: vi.fn(), updateDeviceInfo: vi.fn(), addLog: vi.fn(), setUpdateResult: vi.fn(), logs: [] as string[] };
 vi.mock('@/stores/wizardStore', () => ({ useWizardStore: () => store }));
 
 const release = createMockRelease({ version: '2.0.4' });

@@ -19,7 +19,7 @@ const THEMES: { value: Appearance; label: string }[] = [
 /** Settings: the theme override (README Color) and the app version. */
 export function SettingsPage() {
   const { appearance, highContrast, setAppearance, setHighContrast } = useThemeStore();
-  const { isChecking, checkError, checked, updateAvailable, setChecking, setUpdateAvailable, setCheckError } = useUpdaterStore();
+  const { isChecking, checkError, checked, updateAvailable, setChecking, setUpdateAvailable, setCheckError, clearError } = useUpdaterStore();
   const [version, setVersion] = useState('');
   const osMore = window.matchMedia('(prefers-contrast: more)').matches;
   const overridden = appearance !== 'system' || highContrast !== null;
@@ -29,6 +29,7 @@ export function SettingsPage() {
   }, []);
 
   const checkNow = async () => {
+    clearError(); // a manual check offers the update again, even after "Not now"
     setChecking(true);
     try {
       setUpdateAvailable(await updaterService.checkForUpdate());

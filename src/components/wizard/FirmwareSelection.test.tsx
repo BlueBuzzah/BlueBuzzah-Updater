@@ -149,4 +149,26 @@ describe('FirmwareSelection', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     await waitFor(() => expect(screen.getByRole('button', { name: 'Change version' })).toHaveFocus());
   });
+
+  it('drops the Downloaded mark after deleting the chosen version', async () => {
+    const cached = { ...stable, isCached: true, cachedEntries: [createMockCachedMetadata({ version: '2.0.4' })] };
+    vi.mocked(firmwareService.fetchReleases).mockResolvedValueOnce([cached]).mockResolvedValue([stable]);
+    render(<Harness />);
+    await waitFor(() => expect(screen.getByText('Downloaded')).toBeInTheDocument());
+    const dialog = await openPicker();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete download of version 2.0.4' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    await waitFor(() => expect(screen.queryByText('Downloaded')).toBeNull());
+  });
+
+  it('says so when a delete fails', async () => {
+    const cached = { ...stable, isCached: true, cachedEntries: [createMockCachedMetadata({ version: '2.0.4' })] };
+    vi.mocked(firmwareService.fetchReleases).mockResolvedValue([cached]);
+    vi.mocked(firmwareService.deleteCachedFirmware).mockRejectedValue(new Error('locked'));
+    render(<Harness />);
+    const dialog = await openPicker();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete download of version 2.0.4' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    expect(await within(screen.getByRole('dialog')).findByText("Couldn't delete the download.")).toBeInTheDocument();
+  });
 });

@@ -31,15 +31,17 @@ const PROFILE_DISPLAY_NAMES: Record<string, string> = {
 const NUMERIC_FIELDS: CustomNumericField[] = ['on', 'off', 'jitter', 'ampMin', 'ampMax', 'session'];
 const INTEGER_FIELDS = new Set<CustomNumericField>(['ampMin', 'ampMax', 'session']);
 
+// A missing or invalid saved number shows as an empty field, never "null" or "NaN".
+const show = (n: number) => (Number.isFinite(n) ? String(n) : '');
 const toRaw = (v: CustomProfileParams) =>
-  Object.fromEntries(NUMERIC_FIELDS.map((f) => [f, String(v[f])])) as Record<CustomNumericField, string>;
+  Object.fromEntries(NUMERIC_FIELDS.map((f) => [f, show(v[f])])) as Record<CustomNumericField, string>;
 const parse = (raw: string) => (raw.trim() === '' ? Number.NaN : Number(raw));
 
 export function CustomProfilePanel(): JSX.Element {
   const { settings, setSettings } = useSettingsStore();
   const values: CustomProfileParams = settings.customProfile ?? CUSTOM_DEFAULTS;
   const [raw, setRaw] = useState(() => toRaw(values));
-  const [touched, setTouched] = useState<Set<CustomNumericField>>(new Set());
+  const [focused, setFocused] = useState<CustomNumericField | null>(null);
   const [beforeReset, setBeforeReset] = useState<CustomProfileParams | null>(null);
   const [read, setRead] = useState<CustomProfileRead | null>(null);
   const [isReading, setIsReading] = useState(false);
@@ -51,8 +53,16 @@ export function CustomProfilePanel(): JSX.Element {
   const replaceAll = (next: CustomProfileParams) => {
     setSettings({ customProfile: next });
     setRaw(toRaw(next));
-    setTouched(new Set());
   };
+
+  // Follow store changes made elsewhere (the saved copy loading, a device read),
+  // except in the field someone is typing in.
+  useEffect(() => {
+    setRaw((r) => {
+      const changed = NUMERIC_FIELDS.filter((f) => f !== focused && !Object.is(parse(r[f]), values[f]) && r[f] !== show(values[f]));
+      return changed.length ? { ...r, ...Object.fromEntries(changed.map((f) => [f, show(values[f])])) } : r;
+    });
+  }, [values, focused]);
 
   const doRead = async () => {
     setIsReading(true);
@@ -81,13 +91,14 @@ export function CustomProfilePanel(): JSX.Element {
   // Validate on blur only (TextField README: don't validate while typing).
   const commit = (field: CustomNumericField) => {
     setSettings({ customProfile: { ...values, [field]: parse(raw[field]) } });
-    setTouched((t) => new Set(t).add(field));
+    setFocused(null);
     setBeforeReset(null);
   };
 
   const errors = validateCustomParams(values);
-  const shownError = (field: CustomNumericField) =>
-    touched.has(field) || (field === 'ampMax' && touched.has('ampMin')) ? errors[field] : undefined;
+  // The store only changes on blur or from outside, so this never validates
+  // mid-typing; an invalid saved value is highlighted as soon as the panel opens.
+  const shownError = (field: CustomNumericField) => (field === focused ? undefined : errors[field]);
   const deviating = isDeviatingFromDefaults(values);
   const jitterCap = effectiveJitterCapPct(values);
 
@@ -152,6 +163,7 @@ export function CustomProfilePanel(): JSX.Element {
               className="tabular-nums"
               value={raw[field]}
               onChange={(e) => setRaw((r) => ({ ...r, [field]: e.target.value }))}
+              onFocus={() => setFocused(field)}
               onBlur={() => commit(field)}
             />
           ))}

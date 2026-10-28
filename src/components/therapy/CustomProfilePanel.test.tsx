@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CUSTOM_DEFAULTS } from '@/lib/therapy-bounds';
 import { therapyService } from '@/services/TherapyService';
@@ -129,5 +129,31 @@ describe('CustomProfilePanel', () => {
     await waitFor(() => expect(mockRead).toHaveBeenCalledTimes(1));
     fireEvent.click(screen.getByRole('button', { name: 'Load from device' }));
     await waitFor(() => expect(mockRead).toHaveBeenCalledTimes(2));
+  });
+
+  it('follows settings that arrive after it opened (e.g. the saved copy loading)', async () => {
+    render(<CustomProfilePanel />);
+    await waitFor(() => expect(mockRead).toHaveBeenCalled());
+    act(() => useSettingsStore.getState().setSettings({ customProfile: { ...CUSTOM_DEFAULTS, on: 150 } }));
+    expect(field('Buzz length')).toHaveValue('150');
+  });
+
+  it('shows a missing saved number as an empty field, not "null"', async () => {
+    useSettingsStore.setState({
+      settings: { disableLedDuringTherapy: false, debugMode: false, customProfile: { ...CUSTOM_DEFAULTS, on: null as unknown as number } },
+    });
+    render(<CustomProfilePanel />);
+    await waitFor(() => expect(mockRead).toHaveBeenCalled());
+    expect(field('Buzz length')).toHaveValue('');
+    expect(field('Buzz length')).toHaveAttribute('aria-invalid', 'true');
+  });
+
+  it('highlights an invalid saved value as soon as it opens, so Apply\'s reason matches', async () => {
+    useSettingsStore.setState({
+      settings: { disableLedDuringTherapy: false, debugMode: false, customProfile: { ...CUSTOM_DEFAULTS, on: 500 } },
+    });
+    render(<CustomProfilePanel />);
+    await waitFor(() => expect(mockRead).toHaveBeenCalled());
+    expect(field('Buzz length')).toHaveAccessibleDescription(/Enter a number from 50 to 200\./);
   });
 });

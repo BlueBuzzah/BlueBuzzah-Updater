@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { UpdateDialog } from './UpdateDialog';
 import { useUpdaterStore } from '@/stores/updaterStore';
 import { useWizardStore } from '@/stores/wizardStore';
@@ -16,6 +16,11 @@ describe('UpdateDialog', () => {
   beforeEach(() => {
     useUpdaterStore.getState().reset();
     useWizardStore.getState().reset();
+  });
+
+  // Radix's focus scope restores focus on a timer; let it run before the environment tears down.
+  afterEach(async () => {
+    await act(() => new Promise((r) => setTimeout(r, 20)));
   });
 
   it('offers the app update in plain words', () => {
