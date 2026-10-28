@@ -9,6 +9,8 @@
     "core:event:allow-emit",
     "process:allow-exit",
     "process:allow-restart",
-    "updater:default"
+    "updater:default",
+    "dialog:allow-save",
+    "fs:allow-write-text-file"
   ]
 }

@@ -2,6 +2,7 @@ import * as React from 'react';
 import { Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { ICON } from './icon';
+import { arrowTarget } from './roving';
 
 export interface SegmentedControlProps<T extends string> {
   label?: string;
@@ -13,9 +14,6 @@ export interface SegmentedControlProps<T extends string> {
   className?: string;
   'aria-describedby'?: string;
 }
-
-const NEXT = new Set(['ArrowRight', 'ArrowDown']);
-const PREV = new Set(['ArrowLeft', 'ArrowUp']);
 
 /** A radio group: arrow keys move and select. */
 export function SegmentedControl<T extends string>({ label, options, value, defaultValue, onChange, className, ...aria }: SegmentedControlProps<T>) {
@@ -30,10 +28,8 @@ export function SegmentedControl<T extends string>({ label, options, value, defa
     onChange?.(opt.value);
   };
   const onKey = (e: React.KeyboardEvent, i: number) => {
-    const step = NEXT.has(e.key) ? 1 : PREV.has(e.key) ? -1 : 0;
-    if (!step) return;
-    e.preventDefault();
-    const n = (i + step + options.length) % options.length;
+    const n = arrowTarget(e, i, options.length);
+    if (n === null) return;
     pick(n);
     refs.current[n]?.focus();
   };
