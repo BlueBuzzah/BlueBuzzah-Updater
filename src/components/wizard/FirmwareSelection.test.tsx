@@ -171,4 +171,17 @@ describe('FirmwareSelection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     expect(await within(screen.getByRole('dialog')).findByText("Couldn't delete the download.")).toBeInTheDocument();
   });
+
+  it('orders row buttons Release notes, Delete download, then a compact primary Choose on the right', async () => {
+    const cached = { ...older, isCached: true, cachedEntries: [createMockCachedMetadata({ version: '2.0.3' })] };
+    vi.mocked(firmwareService.fetchReleases).mockResolvedValue([stable, cached]);
+    render(<Harness />);
+    const dialog = await openPicker();
+    const buttons = within(row(dialog, '2.0.3')).getAllByRole('button');
+    expect(buttons.map((b) => b.textContent)).toEqual(['Release notes', 'Delete download', 'Choose']);
+    buttons.forEach((b) => expect(b).toHaveClass('bb-btn--compact'));
+    const choose = buttons[2];
+    expect(choose).toHaveClass('bb-btn--primary');
+    expect(choose).toHaveClass('ml-auto');
+  });
 });

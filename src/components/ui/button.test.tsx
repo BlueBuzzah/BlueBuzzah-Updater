@@ -46,4 +46,9 @@ describe('Button', () => {
     expect(btn).toHaveClass('bb-btn', 'bb-btn--secondary', 'bb-btn--lg');
     expect(btn).toHaveAttribute('type', 'button');
   });
+
+  it('compact buttons keep the 44px target floor and use small icons', () => {
+    render(<Button compact>Choose</Button>);
+    expect(screen.getByRole('button')).toHaveClass('bb-btn--compact');
+  });
 });

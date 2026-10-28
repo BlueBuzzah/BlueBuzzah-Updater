@@ -214,20 +214,20 @@ function VersionRow({ release: r, chosen, badges, details, notesOpen, onToggleNo
         </span>
         <p className="body-s text-ink-muted">{details}</p>
       </div>
-      <div className="flex flex-wrap gap-target-gap">
+      <div className="flex flex-wrap items-center gap-target-gap">
         {r.releaseNotes && (
-          <Button variant="quiet" icon={notesOpen ? ChevronUp : ChevronDown} aria-expanded={notesOpen} aria-controls={notesId} onClick={onToggleNotes}>
+          <Button compact variant="quiet" icon={notesOpen ? ChevronUp : ChevronDown} aria-expanded={notesOpen} aria-controls={notesId} onClick={onToggleNotes}>
             Release notes
           </Button>
         )}
-        {!chosen && (
-          <Button variant="secondary" aria-label={`Choose version ${r.version}`} onClick={onChoose}>
-            Choose
+        {r.isCached && (
+          <Button compact variant="danger" icon={Trash2} aria-label={`Delete download of version ${r.version}`} onClick={onDelete}>
+            Delete download
           </Button>
         )}
-        {r.isCached && (
-          <Button variant="danger" icon={Trash2} aria-label={`Delete download of version ${r.version}`} onClick={onDelete}>
-            Delete download
+        {!chosen && (
+          <Button compact className="ml-auto" aria-label={`Choose version ${r.version}`} onClick={onChoose}>
+            Choose
           </Button>
         )}
       </div>

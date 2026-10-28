@@ -14,6 +14,10 @@
 
 code, .code, .code-s { overflow-wrap: anywhere; }
 
+/* Compact button for dense Updater lists (owner request): the target-min
+   floor tokens.json allows for dense Updater lists, never smaller. */
+.bb-btn.bb-btn--compact { min-height: var(--target-min); padding: 0 var(--space-3); }
+
 /* Release notes (plan choice PC-13): body-s, theme ink, underlined links, nothing clipped */
 .release-notes { font-size: 0.9375rem; line-height: 1.375rem; color: var(--ink); max-width: var(--prose-max); overflow-wrap: anywhere; }
 .release-notes > * + * { margin-top: var(--space-2); }

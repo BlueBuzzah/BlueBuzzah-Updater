@@ -12,24 +12,26 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
   icon?: LucideIcon;
   iconEnd?: LucideIcon;
   fullWidth?: boolean;
+  /** Dense lists only: 44px (target-min) with tighter padding and small icons */
+  compact?: boolean;
   /** Ignore repeat activations within 400ms. Defaults to true for size xl. */
   guardRepeat?: boolean;
 }
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   (
-    { variant = 'primary', size = 'md', icon: Icon, iconEnd: IconEnd, fullWidth, guardRepeat, className, children, onClick, ...rest },
+    { variant = 'primary', size = 'md', icon: Icon, iconEnd: IconEnd, fullWidth, compact, guardRepeat, className, children, onClick, ...rest },
     ref
   ) => {
     const guard = guardRepeat ?? size === 'xl';
     const last = React.useRef(0);
-    const iconSize = size === 'xl' ? ICON.l : ICON.m;
+    const iconSize = size === 'xl' ? ICON.l : compact ? ICON.s : ICON.m;
     return (
       <button
         type="button"
         ref={ref}
         {...rest}
-        className={cn('bb-btn', `bb-btn--${variant}`, `bb-btn--${size}`, fullWidth && 'bb-btn--full', className)}
+        className={cn('bb-btn', `bb-btn--${variant}`, `bb-btn--${size}`, fullWidth && 'bb-btn--full', compact && 'bb-btn--compact', className)}
         onClick={(e) => {
           const now = Date.now();
           if (guard && now - last.current < 400) {
