@@ -17,10 +17,12 @@ import { HomeScreen, AppMode } from './components/home/HomeScreen';
 import { Toaster } from './components/ui/toaster';
 import { UpdateDialog } from './components/updater/UpdateDialog';
 import { useAppUpdater } from './hooks/useAppUpdater';
+import { useTheme } from './hooks/useTheme';
 import type { FirmwareRelease, TherapyProfile, UpdateResult } from './types';
 
 function App() {
   const [appMode, setAppMode] = useState<AppMode>('home');
+  useTheme();
 
   // Initialize app updater (checks on startup)
   useAppUpdater();
