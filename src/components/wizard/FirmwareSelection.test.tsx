@@ -78,7 +78,12 @@ describe('FirmwareSelection', () => {
     render(<Harness />);
     await waitFor(() => expect(screen.getByText('2.0.4')).toBeInTheDocument());
     const dialog = await openPicker();
-    expect(within(row(dialog, '2.0.4')).getByText('Chosen')).toBeInTheDocument();
+    const chosenRow = row(dialog, '2.0.4');
+    expect(within(chosenRow).queryByText('Chosen')).toBeNull();
+    const check = within(chosenRow).getByRole('img', { name: 'Chosen' });
+    expect(check).toHaveAttribute('width', '24');
+    expect(check.parentElement).toHaveClass('justify-between');
+    expect(within(row(dialog, '2.0.3')).queryByRole('img', { name: 'Chosen' })).toBeNull();
     expect(within(dialog).queryByRole('button', { name: 'Choose version 2.0.4' })).toBeNull();
   });
 

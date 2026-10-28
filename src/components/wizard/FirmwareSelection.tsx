@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useId, useState } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import ReactMarkdown from 'react-markdown';
-import { ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
+import { ChevronDown, ChevronUp, CircleCheck, Trash2 } from 'lucide-react';
 import { ConfirmDialog } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
+import { ICON } from '@/components/ui/icon';
 import { StatusBadge } from '@/components/ui/status-badge';
 import { Switch } from '@/components/ui/switch';
 import { formatBytes, formatDate } from '@/lib/utils';
@@ -207,11 +208,11 @@ function VersionRow({ release: r, chosen, badges, details, notesOpen, onToggleNo
     >
       <div className="grid gap-2">
         <span id={titleId} className="sr-only">Version {r.version}</span>
-        <code className="code">{r.version}</code>
-        <span className="flex flex-wrap gap-2">
-          {chosen && <StatusBadge tone="brand">Chosen</StatusBadge>}
-          {badges}
-        </span>
+        <div className="flex items-center justify-between gap-3">
+          <code className="code">{r.version}</code>
+          {chosen && <CircleCheck size={ICON.m} role="img" aria-label="Chosen" aria-hidden={false} className="shrink-0 text-brand" />}
+        </div>
+        {badges}
         <p className="body-s text-ink-muted">{details}</p>
       </div>
       <div className="flex flex-wrap items-center gap-target-gap">
