@@ -24,7 +24,7 @@ export function Banner({ tone = 'info', title, children, action, icon, announce,
       <Icon size={ICON.banner} className="bb-banner__icon" />
       <div className="bb-banner__body">
         {title && <p className="bb-banner__title">{title}</p>}
-        {children && <div className="bb-banner__text">{children}</div>}
+        {children && <div className="bb-banner__text grid gap-2">{children}</div>}
         {action && <div className="bb-banner__action">{action}</div>}
       </div>
     </div>

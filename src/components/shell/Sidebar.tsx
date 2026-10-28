@@ -35,7 +35,7 @@ export function Sidebar({ section, onSectionChange, busy }: SidebarProps) {
         aria-keyshortcuts={`${mac ? 'Meta' : 'Control'}+${r.key}`}
         onClick={() => onSectionChange(r.id)}
         className={cn(
-          'label flex min-h-target w-full items-center gap-3 rounded-md px-4 text-left text-ink disabled:text-ink-disabled',
+          'label flex min-h-target items-center gap-3 rounded-md px-4 text-left text-ink disabled:text-ink-disabled md:w-full',
           current && 'bg-brand-soft text-brand'
         )}
       >
@@ -48,7 +48,7 @@ export function Sidebar({ section, onSectionChange, busy }: SidebarProps) {
     );
   };
   return (
-    <aside className="flex w-sidebar shrink-0 flex-col gap-6 border-r border-line bg-surface-raised p-4">
+    <aside className="flex shrink-0 flex-col gap-6 border-b border-line bg-surface-raised p-4 md:w-sidebar md:overflow-y-auto md:border-b-0 md:border-r">
       <div data-tauri-drag-region className={cn('flex items-center gap-3 p-2', mac && 'pt-12')}>
         <img src={mark} alt="" className="h-8 w-auto" />
         <span>
@@ -56,9 +56,9 @@ export function Sidebar({ section, onSectionChange, busy }: SidebarProps) {
           <span className="title-m font-display font-normal text-ink-muted">Updater</span>
         </span>
       </div>
-      <nav aria-label="Sections" className="flex flex-1 flex-col gap-3">
+      <nav aria-label="Sections" className="flex flex-wrap gap-3 md:flex-1 md:flex-col md:flex-nowrap">
         {ROWS.slice(0, 2).map(row)}
-        <div className="mt-auto grid gap-3">
+        <div className="flex flex-wrap gap-3 md:mt-auto md:grid">
           {busy && <p className="caption text-ink-muted">{LOCKED[busy]}</p>}
           {row(ROWS[2])}
         </div>

@@ -108,7 +108,7 @@ export function DeviceSelection({ selectedDevices, onDevicesChange, onRoleChange
         {scanError && (
           <Banner tone="danger" title="Couldn't look for devices" announce>
             <p>Select Rescan to try again.</p>
-            <p className="code-s mt-2 rounded-xs bg-surface-sunken p-2">{scanError}</p>
+            <p className="code-s rounded-xs bg-surface-sunken p-2">{scanError}</p>
           </Banner>
         )}
 

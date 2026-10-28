@@ -15,13 +15,13 @@ interface AppShellProps {
 /** updater.md Window and layout; the header band turns abyss while running. */
 export function AppShell({ section, onSectionChange, title, busy, children }: AppShellProps) {
   return (
-    <div className="flex min-h-screen bg-surface text-ink">
+    <div className="flex min-h-screen flex-col bg-surface text-ink md:h-screen md:flex-row md:overflow-hidden">
       <Sidebar section={section} onSectionChange={onSectionChange} busy={busy} />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header data-tauri-drag-region className={cn('px-10 py-6', busy ? 'bg-abyss text-on-abyss' : 'bg-surface')}>
+      <div className="flex min-w-0 flex-1 flex-col md:overflow-y-auto">
+        <header data-tauri-drag-region className={cn('px-4 py-6 md:px-10', busy ? 'bg-abyss text-on-abyss' : 'bg-surface')}>
           <h1 className="headline">{title}</h1>
         </header>
-        <main className="min-w-0 flex-1 p-10">{children}</main>
+        <main className="min-w-0 flex-1 p-4 md:p-10">{children}</main>
       </div>
     </div>
   );

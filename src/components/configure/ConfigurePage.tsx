@@ -28,7 +28,7 @@ export function ConfigurePage() {
       <div className="grid max-w-content gap-10">
         <Banner tone="info">
           <p>{MEDICAL_DISCLAIMER}</p>
-          <p className="mt-2">{IMPLANT_NOTICE}</p>
+          <p>{IMPLANT_NOTICE}</p>
         </Banner>
         <ProfileSelection />
         <TherapyDeviceSelection selectedDevices={selectedDevices} onToggleDevice={toggleDevice} />

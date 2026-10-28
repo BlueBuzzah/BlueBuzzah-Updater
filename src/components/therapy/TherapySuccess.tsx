@@ -65,7 +65,7 @@ export function TherapySuccess({ profile, devices, result, onReset, onClose }: T
         >
           {guidance && <p>{guidance.description}</p>}
           {guidance && (
-            <ol className="mt-2 list-decimal pl-6">
+            <ol className="list-decimal pl-6">
               {guidance.resolutionSteps.map((step) => (
                 <li key={step}>{step}</li>
               ))}
