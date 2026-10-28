@@ -8,6 +8,8 @@
 //! 5. Role configuration (post-reboot)
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -17,8 +19,8 @@ use super::config::{
     ACK_TIMEOUT_MS, CONFIG_RETRY_DELAY_MS, FIRMWARE_TRANSFER_TIMEOUT_SECS,
     FLASH_PAGE_WRITE_TIME_MS, FRAMES_PER_FLASH_PAGE, MAX_CONFIG_RETRIES, MAX_PACKET_RETRIES,
     PROFILE_CONFIG_TIMEOUT_MS, PROFILE_GENTLE_COMMAND, PROFILE_HYBRID_COMMAND,
-    PROFILE_NOISY_COMMAND, PROFILE_REGULAR_COMMAND, RETRY_BASE_DELAY_MS, ROLE_CONFIG_TIMEOUT_MS,
-    ROLE_PRIMARY_COMMAND, ROLE_SECONDARY_COMMAND,
+    PROFILE_NOISY_COMMAND, PROFILE_REGULAR_COMMAND, RETRY_BASE_DELAY_MS, ROLE_CONFIG_DEADLINE_MS,
+    ROLE_CONFIG_TIMEOUT_MS, ROLE_PRIMARY_COMMAND, ROLE_SECONDARY_COMMAND,
 };
 use super::device::{
     get_device_by_port, snapshot_ports, wait_for_application_by_serial,
@@ -574,15 +576,20 @@ where
     // Step 10: Configure device role (instrumented)
     on_progress(DfuStage::ConfiguringRole);
     let role_started = std::time::Instant::now();
-    let role_result =
-        configure_device_role_flexible(&app_device.port, device_role, &device_identifier, |_| {}, || false).map_err(
-            |e| match e {
-                DfuError::RoleConfigFailed { .. } => e,
-                other => DfuError::RoleConfigFailed {
-                    reason: other.to_string(),
-                },
-            },
-        );
+    let role_result = configure_role_with_deadline(
+        &app_device.port,
+        device_role,
+        &device_identifier,
+        |m| {
+            on_progress(DfuStage::Log {
+                message: m.to_string(),
+            })
+        },
+        &is_cancelled,
+    );
+    if let Err(DfuError::Cancelled) = &role_result {
+        on_progress(DfuStage::Cancelled);
+    }
     on_progress(DfuStage::Log {
         message: format!(
             "Role config finished in {}ms (ok={}) | snapshot: {}",
@@ -773,6 +780,83 @@ pub(crate) fn wrap_role_error(e: DfuError) -> DfuError {
             reason: other.to_string(),
         },
     }
+}
+
+enum RoleMsg {
+    Log(String),
+    Done(DfuResult<()>),
+}
+
+/// Run `work` on a worker thread, forwarding its log lines, and give up when
+/// cancelled or at `deadline`. A serial call stuck in the kernel then costs a
+/// bounded wait instead of freezing the install. The worker is never joined:
+/// it exits when its blocked call returns or at its next stop check.
+fn run_with_deadline<W, L, C>(work: W, log: L, is_cancelled: C, deadline: Duration) -> DfuResult<()>
+where
+    W: FnOnce(&dyn Fn(&str), &dyn Fn() -> bool) -> DfuResult<()> + Send + 'static,
+    L: Fn(&str),
+    C: Fn() -> bool,
+{
+    let (tx, rx) = mpsc::channel();
+    let stop = Arc::new(AtomicBool::new(false));
+    let worker_stop = Arc::clone(&stop);
+    std::thread::spawn(move || {
+        let log_tx = tx.clone();
+        let result = work(
+            &|m: &str| {
+                let _ = log_tx.send(RoleMsg::Log(m.to_string()));
+            },
+            &|| worker_stop.load(Ordering::SeqCst),
+        );
+        let _ = tx.send(RoleMsg::Done(result));
+    });
+
+    let start = Instant::now();
+    loop {
+        match rx.recv_timeout(Duration::from_millis(100)) {
+            Ok(RoleMsg::Log(m)) => log(&m),
+            Ok(RoleMsg::Done(result)) => return result,
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                // The worker panicked before reporting.
+                return Err(DfuError::RoleConfigFailed {
+                    reason: "role configuration stopped unexpectedly".to_string(),
+                });
+            }
+        }
+        if is_cancelled() {
+            stop.store(true, Ordering::SeqCst);
+            return Err(DfuError::Cancelled);
+        }
+        if start.elapsed() >= deadline {
+            stop.store(true, Ordering::SeqCst);
+            return Err(DfuError::RoleConfigFailed {
+                reason: format!(
+                    "role configuration did not finish within {}s",
+                    deadline.as_secs()
+                ),
+            });
+        }
+    }
+}
+
+/// Configure the device role under one overall deadline (`ROLE_CONFIG_DEADLINE_MS`),
+/// honoring cancel. Errors other than `Cancelled` come back as `RoleConfigFailed`.
+pub(crate) fn configure_role_with_deadline<L: Fn(&str), C: Fn() -> bool>(
+    port_name: &str,
+    role: &str,
+    identifier: &DeviceIdentifier,
+    log: L,
+    is_cancelled: C,
+) -> DfuResult<()> {
+    let (port, role, identifier) = (port_name.to_string(), role.to_string(), identifier.clone());
+    run_with_deadline(
+        move |log, stop| configure_device_role_flexible(&port, &role, &identifier, log, stop),
+        log,
+        is_cancelled,
+        Duration::from_millis(ROLE_CONFIG_DEADLINE_MS),
+    )
+    .map_err(wrap_role_error)
 }
 
 /// Inner implementation of role configuration without retry logic.
@@ -1442,6 +1526,56 @@ pub fn configure_custom_profile<L: Fn(&str) + Clone>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn deadline_runner_forwards_logs_and_result() {
+        let logged = std::cell::RefCell::new(Vec::<String>::new());
+        let r = run_with_deadline(
+            |log, _stop| {
+                log("hello");
+                Ok(())
+            },
+            |m| logged.borrow_mut().push(m.into()),
+            || false,
+            Duration::from_secs(2),
+        );
+        assert!(r.is_ok());
+        assert_eq!(*logged.borrow(), vec!["hello".to_string()]);
+    }
+
+    #[test]
+    fn never_finishing_work_hits_deadline() {
+        let start = Instant::now();
+        let err = run_with_deadline(
+            |_log, _stop| {
+                std::thread::sleep(Duration::from_secs(30));
+                Ok(())
+            },
+            |_| {},
+            || false,
+            Duration::from_millis(300),
+        )
+        .unwrap_err();
+        assert!(matches!(err, DfuError::RoleConfigFailed { .. }));
+        assert!(start.elapsed() < Duration::from_millis(800));
+    }
+
+    #[test]
+    fn cancel_returns_promptly_while_work_is_stuck() {
+        let start = Instant::now();
+        let err = run_with_deadline(
+            |_log, _stop| {
+                std::thread::sleep(Duration::from_secs(30));
+                Ok(())
+            },
+            |_| {},
+            || true,
+            Duration::from_secs(60),
+        )
+        .unwrap_err();
+        assert!(matches!(err, DfuError::Cancelled));
+        assert!(start.elapsed() < Duration::from_millis(400));
+    }
 
     #[test]
     fn role_config_cancelled_before_touching_port() {
