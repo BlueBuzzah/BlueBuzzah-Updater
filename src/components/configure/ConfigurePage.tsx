@@ -1,6 +1,7 @@
-import { ProfileSelection, TherapyDeviceSelection, TherapyProgress, TherapySuccess } from '@/components/therapy';
+import { ProfileSelection, TherapyProgress, TherapySuccess } from '@/components/therapy';
 import { Banner } from '@/components/ui/banner';
 import { Button } from '@/components/ui/button';
+import { DeviceSelection } from '@/components/wizard/DeviceSelection';
 import { IMPLANT_NOTICE, MEDICAL_DISCLAIMER } from '@/lib/legal';
 import { CUSTOM_DEFAULTS, validateCustomParams } from '@/lib/therapy-bounds';
 import { useSettingsStore } from '@/stores/settingsStore';
@@ -8,7 +9,7 @@ import { useTherapyStore } from '@/stores/therapyStore';
 
 /** Configure section: one page, like Firmware (plan choice PC-1); the legal notices are its one Banner (PC-15). */
 export function ConfigurePage() {
-  const { step, selectedProfile, selectedDevices, result, toggleDevice, setProgress, setResult, reset, setStep } = useTherapyStore();
+  const { step, selectedProfile, selectedDevices, result, setDevices, setProgress, setResult, reset, setStep } = useTherapyStore();
   const settings = useSettingsStore((s) => s.settings);
   const startOver = () => {
     reset();
@@ -31,7 +32,7 @@ export function ConfigurePage() {
           <p>{IMPLANT_NOTICE}</p>
         </Banner>
         <ProfileSelection />
-        <TherapyDeviceSelection selectedDevices={selectedDevices} onToggleDevice={toggleDevice} />
+        <DeviceSelection mode="configure" selectedDevices={selectedDevices} onDevicesChange={setDevices} />
         <div className="grid justify-items-start gap-3">
           <Button size="xl" disabled={!!blocked} aria-describedby={blocked ? 'apply-blocked' : undefined} onClick={() => setStep(2)}>
             {selectedDevices.length === 1 ? 'Apply to Device' : 'Apply to Devices'}

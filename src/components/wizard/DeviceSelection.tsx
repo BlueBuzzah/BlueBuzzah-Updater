@@ -19,13 +19,13 @@ const ROLE_OPTIONS: { value: DeviceRole; label: string }[] = [
 const MSG = {
   missingRole: 'Choose a role for this device.',
   duplicateRole: 'Give each device a different role: one Primary, one Secondary.',
-  max: 'You can flash up to 2 devices at once.',
+  max: { flash: 'You can flash up to 2 devices at once.', configure: 'You can configure up to 2 devices at once.' },
   mixed: "You can't flash a v2 and a v3 device together. Flash one kind at a time.",
   pruned: 'A selected device was unplugged or changed, so we deselected it.',
 };
 
-/** Empty state shared by both device lists (copy: Firmware choose devices). */
-export function NoDevicesFound() {
+/** Empty state (copy: Firmware choose devices). */
+function NoDevicesFound() {
   return (
     <div className="grid gap-4">
       <h4 className="display-l">No devices found</h4>
@@ -40,12 +40,20 @@ export function NoDevicesFound() {
 }
 
 interface DeviceSelectionProps {
+  /**
+   * flash: roles and one board version per run. configure: no roles, any mix
+   * of boards, and only devices running firmware (settings can't be written to
+   * a device in bootloader mode).
+   */
+  mode?: 'flash' | 'configure';
   selectedDevices: Device[];
   onDevicesChange: (devices: Device[]) => void;
-  onRoleChange: (devicePath: string, role: DeviceRole) => void;
+  onRoleChange?: (devicePath: string, role: DeviceRole) => void;
 }
 
-export function DeviceSelection({ selectedDevices, onDevicesChange, onRoleChange }: DeviceSelectionProps) {
+/** The Choose Devices card, shared by the Firmware and Configure pages. */
+export function DeviceSelection({ mode = 'flash', selectedDevices, onDevicesChange, onRoleChange }: DeviceSelectionProps) {
+  const flash = mode === 'flash';
   const [notice, setNotice] = useState<string | null>(null);
   const [autoAssigned, setAutoAssigned] = useState(false);
   const selectedRef = useRef(selectedDevices);
@@ -54,7 +62,7 @@ export function DeviceSelection({ selectedDevices, onDevicesChange, onRoleChange
 
   // A replug can reuse a port for different hardware (Windows COM reuse),
   // and a stale board would drive the wrong flasher: drop it.
-  const { devices: available, loading, error: scanError, rescan } = useDeviceScan((devices) => {
+  const { devices: found, loading, error: scanError, rescan } = useDeviceScan((devices) => {
     const current = selectedRef.current;
     const stillValid = current.filter((sel) =>
       devices.some((d) => d.path === sel.path && d.board === sel.board && d.serialNumber === sel.serialNumber)
@@ -64,6 +72,7 @@ export function DeviceSelection({ selectedDevices, onDevicesChange, onRoleChange
       setNotice(MSG.pruned);
     }
   });
+  const available = flash ? found : found.filter((d) => !d.inBootloader);
 
   const toggle = (device: Device) => {
     setNotice(null);
@@ -72,11 +81,11 @@ export function DeviceSelection({ selectedDevices, onDevicesChange, onRoleChange
       setAutoAssigned(false);
       return;
     }
-    if (selectedDevices.length >= 2) return setNotice(MSG.max);
+    if (selectedDevices.length >= 2) return setNotice(MSG.max[mode]);
     // Batch flashing is single-board only: one download, one flasher per run.
-    if (selectedDevices.length > 0 && selectedDevices[0].board !== device.board) return setNotice(MSG.mixed);
+    if (flash && selectedDevices.length > 0 && selectedDevices[0].board !== device.board) return setNotice(MSG.mixed);
     const next = [...selectedDevices, device];
-    if (next.length === 2) {
+    if (flash && next.length === 2) {
       onDevicesChange(next.map((d, i) => ({ ...d, role: (i === 0 ? 'PRIMARY' : 'SECONDARY') as DeviceRole })));
       setAutoAssigned(true);
     } else {
@@ -85,7 +94,7 @@ export function DeviceSelection({ selectedDevices, onDevicesChange, onRoleChange
   };
 
   const roles = selectedDevices.map((d) => d.role);
-  const duplicate = selectedDevices.length === 2 && roles[0] !== undefined && roles[0] === roles[1];
+  const duplicate = flash && selectedDevices.length === 2 && roles[0] !== undefined && roles[0] === roles[1];
   const status = loading
     ? 'Looking for devices…'
     : scanError
@@ -123,19 +132,19 @@ export function DeviceSelection({ selectedDevices, onDevicesChange, onRoleChange
                 <li key={device.path} className="grid content-start gap-4">
                   <DeviceCard
                     name={BOARD_NAME[device.board]}
-                    role={selected?.role}
+                    role={flash ? selected?.role : undefined}
                     port={device.path}
                     serial={device.serialNumber}
                     selected={!!selected}
                     onSelect={() => toggle(device)}
                   />
-                  {selected && (
+                  {flash && selected && (
                     <div className="grid gap-2">
                       <SegmentedControl
                         label="Role"
                         options={ROLE_OPTIONS}
                         value={selected.role}
-                        onChange={(role) => onRoleChange(device.path, role)}
+                        onChange={(role) => onRoleChange?.(device.path, role)}
                         aria-describedby={duplicate ? `${errId}-dup` : roleErr}
                       />
                       {roleErr && <p id={roleErr} className="body-s text-danger">{MSG.missingRole}</p>}
@@ -147,7 +156,7 @@ export function DeviceSelection({ selectedDevices, onDevicesChange, onRoleChange
           </ul>
         )}
 
-        {selectedDevices.length > 0 && (
+        {flash && selectedDevices.length > 0 && (
           <div className="grid gap-2">
             {autoAssigned && <p className="body-s">We set the roles for you. You can change them.</p>}
             <p className="body-s text-ink-muted">The Primary device connects to the BuzzahBuddy app. The Secondary device follows it.</p>

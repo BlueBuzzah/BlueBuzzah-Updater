@@ -48,7 +48,6 @@ vi.mock('./components/therapy', () => ({
       <button onClick={() => onSelect('REGULAR')}>Select Profile</button>
     </div>
   ),
-  TherapyDeviceSelection: () => <div data-testid="therapy-device-selection" />,
   TherapyProgress: () => <div data-testid="therapy-progress" />,
   TherapySuccess: () => <div data-testid="therapy-success" />,
 }));

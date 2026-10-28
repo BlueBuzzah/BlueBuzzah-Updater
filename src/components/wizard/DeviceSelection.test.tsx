@@ -16,10 +16,11 @@ const v2c = createMockDevice({ path: '/dev/cu.c', serialNumber: 'C3', board: 'nr
 const v3 = createMockDevice({ path: 'COM7', serialNumber: 'E1', board: 'esp32s3', vid: 0x303a, pid: 0x1001 });
 
 /** Holds selection state like the store does, so role changes re-render. */
-function Harness({ initial = [] as Device[], onChange = vi.fn() }) {
+function Harness({ initial = [] as Device[], onChange = vi.fn(), mode = 'flash' as 'flash' | 'configure' }) {
   const [selected, setSelected] = useState<Device[]>(initial);
   return (
     <DeviceSelection
+      mode={mode}
       selectedDevices={selected}
       onDevicesChange={(d) => {
         onChange(d);
@@ -164,5 +165,42 @@ describe('DeviceSelection', () => {
     render(<Harness initial={[{ ...v2a, role: 'PRIMARY' }]} onChange={onChange} />);
     await screen.findByText('Primary device');
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  describe('configure mode (same card, no roles)', () => {
+    const boot = createMockDevice({ path: '/dev/cu.boot', serialNumber: 'Z9', inBootloader: true });
+
+    it('uses the same card, copy and rescan, without role controls', async () => {
+      vi.mocked(deviceService.detectDevices).mockResolvedValue([v2a, v2b]);
+      render(<Harness mode="configure" />);
+      expect(screen.getByRole('region', { name: 'Choose Devices' })).toBeInTheDocument();
+      expect(screen.getByText('Plug in up to 2 devices with a USB data cable.')).toBeInTheDocument();
+      fireEvent.click(await screen.findByRole('button', { name: /port \/dev\/cu\.a/ }));
+      fireEvent.click(screen.getByRole('button', { name: /port \/dev\/cu\.b/ }));
+      expect(screen.queryByRole('radiogroup', { name: 'Role' })).toBeNull();
+      expect(screen.queryByText('We set the roles for you. You can change them.')).toBeNull();
+      expect(screen.queryByText('Primary device')).toBeNull();
+      expect(screen.getByText(/Found 2 devices\. 2 selected/)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Rescan' })).toBeInTheDocument();
+    });
+
+    it('hides devices in bootloader mode, since settings can only be written to running firmware', async () => {
+      vi.mocked(deviceService.detectDevices).mockResolvedValue([v2a, boot]);
+      render(<Harness mode="configure" />);
+      await screen.findByRole('button', { name: /port \/dev\/cu\.a/ });
+      expect(screen.queryByRole('button', { name: /cu\.boot/ })).toBeNull();
+      expect(screen.getByText('Found 1 device.')).toBeInTheDocument();
+    });
+
+    it('allows a v2 and a v3 together, and says when the limit is reached', async () => {
+      vi.mocked(deviceService.detectDevices).mockResolvedValue([v2a, v3, v2c]);
+      const onChange = vi.fn();
+      render(<Harness mode="configure" onChange={onChange} />);
+      fireEvent.click(await screen.findByRole('button', { name: /port \/dev\/cu\.a/ }));
+      fireEvent.click(screen.getByRole('button', { name: /port COM7/ }));
+      expect(onChange).toHaveBeenLastCalledWith([v2a, v3]);
+      fireEvent.click(screen.getByRole('button', { name: /port \/dev\/cu\.c/ }));
+      expect(screen.getByText('You can configure up to 2 devices at once.')).toBeInTheDocument();
+    });
   });
 });

@@ -6,9 +6,11 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import { CUSTOM_DEFAULTS } from '@/lib/therapy-bounds';
 import { createMockDevice } from '@/test/factories';
 
+vi.mock('@/components/wizard/DeviceSelection', () => ({
+  DeviceSelection: ({ mode }: { mode: string }) => <div data-testid="device-selection" data-mode={mode} />,
+}));
 vi.mock('@/components/therapy', () => ({
   ProfileSelection: () => <div data-testid="profile-selection" />,
-  TherapyDeviceSelection: () => <div data-testid="therapy-device-selection" />,
   TherapyProgress: () => <div data-testid="therapy-progress" />,
   TherapySuccess: () => <div data-testid="therapy-success" />,
 }));
@@ -57,5 +59,10 @@ describe('ConfigurePage choose phase', () => {
     expect(setStep).toHaveBeenCalledTimes(1);
     expect(setStep).toHaveBeenCalledWith(2);
     vi.useRealTimers();
+  });
+
+  it('uses the Firmware page device card in configure mode', () => {
+    render(<ConfigurePage />);
+    expect(screen.getByTestId('device-selection')).toHaveAttribute('data-mode', 'configure');
   });
 });
