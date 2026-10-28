@@ -139,6 +139,12 @@ pub const REBOOT_SETTLE_DELAY_MS: u64 = 2000;
 /// Timeout for role configuration command.
 pub const ROLE_CONFIG_TIMEOUT_MS: u64 = 5000;
 
+/// Max wait for the device to take queued serial output before `flush` gives up.
+pub const SERIAL_FLUSH_TIMEOUT_MS: u64 = 1000;
+
+/// Overall bound on the post-flash role step, retries included.
+pub const ROLE_CONFIG_DEADLINE_MS: u64 = 150_000;
+
 // ============================================================================
 // Retry Configuration
 // ============================================================================

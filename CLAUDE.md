@@ -103,6 +103,7 @@ grep -rnE "text-(xs|sm|base|lg|[0-9]?xl)\b|text-\[|#[0-9a-fA-F]{3,8}\b|rgba?\(|h
 - **Windows COM renumbering**: port numbers change across DFU reboots — always track devices via `DeviceIdentifier`, never a stored port string. Windows also gets longer touch waits and more re-detection polls (`#[cfg(target_os = "windows")]` throughout).
 - **macOS duplicate ports**: devices appear as both `cu.*` and `tty.*`; `find_nrf52_devices` filters `tty.*` — bypassing it double-counts devices.
 - **macOS stale port**: `wait_with_drain` keep-alives the port during the long flash-erase wait; removing it causes macOS-only flakiness.
+- **Flush is bounded**: `SerialTransport::flush` polls the output queue for at most `SERIAL_FLUSH_TIMEOUT_MS` and discards stuck output. Never call the raw `port.flush()`: it's `tcdrain`, which blocks forever on macOS once a device stops reading USB serial (the 2026-10-28 role-config hang).
 - **Boot noise**: firmware boot logs can contain `ERROR` text; always `drain_boot_output` before sending a command or responses get misparsed.
 - **`[SETTING]` ack timeout = success**: `send_setting_command` treats no-ack as success for backward compat with older firmware.
 - **Format detection**: a firmware zip's `manifest.json` has `manifest_version` for v3 or a top-level `manifest` key for Nordic — never feed one reader the other's zip.
