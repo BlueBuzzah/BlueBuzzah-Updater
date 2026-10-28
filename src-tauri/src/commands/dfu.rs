@@ -955,6 +955,14 @@ mod tests {
     }
 
     #[test]
+    fn cancelled_display_is_not_operation_retriable() {
+        // A cancelled role step must never re-flash.
+        assert!(!is_operation_retriable(
+            &crate::dfu::DfuError::Cancelled.to_string()
+        ));
+    }
+
+    #[test]
     fn genuine_bootloader_timeout_still_retriable() {
         // Regression guard: real flash-phase failures must still retry.
         assert!(is_operation_retriable(

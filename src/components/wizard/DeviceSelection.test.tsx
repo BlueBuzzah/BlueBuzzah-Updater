@@ -33,6 +33,9 @@ function Harness({ initial = [] as Device[], onChange = vi.fn(), mode = 'flash' 
   );
 }
 
+const MSG_SAME_SETTINGS =
+  'Give both devices the same settings so they work properly as a pair. If only one is plugged in, configure the other one the same way next.';
+
 describe('DeviceSelection', () => {
   beforeEach(() => {
     vi.resetAllMocks();
@@ -182,6 +185,17 @@ describe('DeviceSelection', () => {
       expect(screen.queryByText('Primary device')).toBeNull();
       expect(screen.getByText(/Found 2 devices\. 2 selected/)).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Rescan' })).toBeInTheDocument();
+    });
+
+    it('reminds that both devices need the same settings', async () => {
+      vi.mocked(deviceService.detectDevices).mockResolvedValue([v2a]);
+      const { unmount } = render(<Harness mode="configure" />);
+      await screen.findByRole('button', { name: /port \/dev\/cu\.a/ });
+      expect(screen.getByText(MSG_SAME_SETTINGS)).toBeInTheDocument();
+      unmount();
+      render(<Harness mode="flash" />);
+      await screen.findByRole('button', { name: /port \/dev\/cu\.a/ });
+      expect(screen.queryByText(MSG_SAME_SETTINGS)).toBeNull();
     });
 
     it('hides devices in bootloader mode, since settings can only be written to running firmware', async () => {

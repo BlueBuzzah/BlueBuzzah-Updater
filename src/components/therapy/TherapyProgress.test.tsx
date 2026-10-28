@@ -103,7 +103,7 @@ describe('TherapyProgress outcome reporting', () => {
   it('keeps a partial outcome detail out of the card and in the log', async () => {
     mockConfigure.mockResolvedValue({
       status: 'partial',
-      message: 'Profile loaded, but the glove never came back to confirm the parameters.',
+      message: 'Profile loaded, but the device never came back to confirm the parameters.',
       detail:
         'Timeout waiting for menu response to INFO. Received: [DIAG] silk port 3 (F2): MOTOR PRESENT (STATUS=0xE4)',
     });
@@ -203,7 +203,7 @@ describe('TherapyProgress outcome reporting', () => {
   it('reports overall success when a device answers secondary', async () => {
     mockConfigure.mockResolvedValue({
       status: 'success_secondary',
-      message: 'parameters apply to the primary glove',
+      message: 'parameters apply to the primary device',
     });
     const onComplete = vi.fn();
 
@@ -225,7 +225,7 @@ describe('TherapyProgress outcome reporting', () => {
     // anything is written, so the log must not assert a profile change.
     mockConfigure.mockResolvedValue({
       status: 'success_secondary',
-      message: 'This glove did not answer as the primary.',
+      message: 'This device did not answer as the primary.',
     });
 
     render(
@@ -247,7 +247,7 @@ describe('TherapyProgress outcome reporting', () => {
   it('states that parameters were not applied when no device answered primary', async () => {
     mockConfigure.mockResolvedValue({
       status: 'success_secondary',
-      message: 'parameters apply to the primary glove',
+      message: 'parameters apply to the primary device',
     });
     const onComplete = vi.fn();
 

@@ -60,7 +60,7 @@ grep -rnE "text-(xs|sm|base|lg|[0-9]?xl)\b|text-\[|#[0-9a-fA-F]{3,8}\b|rgba?\(|h
 
 | Rust module (`src-tauri/src/`) | Purpose |
 |--------------------------------|---------|
-| `dfu/protocol.rs` | DFU state machine — `upload_firmware()`, `configure_device_role_flexible()`, `configure_device_with_settings()`, `drain_boot_output()` |
+| `dfu/protocol.rs` | DFU state machine — `upload_firmware()`, `configure_role_with_deadline()` (wraps `configure_device_role_flexible()` in an overall deadline), `configure_device_with_settings()`, `drain_boot_output()` |
 | `dfu/transport.rs` | Serial transport, 1200-baud touch reset, port-open retry; `open()` (resets board) vs `open_for_query()` (doesn't) |
 | `dfu/device.rs` | Device detection; `DeviceIdentifier` tracks devices across re-enumeration (serial number preferred, VID/PID+port-pattern fallback) |
 | `dfu/slip.rs`, `dfu/packet.rs` | SLIP/HCI framing, CRC16 |
@@ -69,7 +69,7 @@ grep -rnE "text-(xs|sm|base|lg|[0-9]?xl)\b|text-\[|#[0-9a-fA-F]{3,8}\b|rgba?\(|h
 | `dfu/config.rs` | VID/PIDs, opcodes, all timing/retry constants |
 | `dfu/error.rs` | `DfuError` taxonomy — `is_retriable()`, `is_operation_retriable()`, stable `error_code()` (DFU-0xx) |
 | `esp/manifest.rs` | v3 (ESP32-S3/PentaBuzzer) firmware zip parsing — validates `manifest_version` 1, board `pentabuzzer_esp32s3`, chip `esp32s3`, per-part SHA256; parses manifest flash offsets |
-| `esp/flasher.rs` | espflash 4.5-based multi-part flash over the ESP32-S3 USB-JTAG/Serial bootloader; reuses `DfuStage` progress and `configure_device_role_flexible` role config; exposes Tauri command `flash_v3_firmware` |
+| `esp/flasher.rs` | espflash 4.5-based multi-part flash over the ESP32-S3 USB-JTAG/Serial bootloader; reuses `DfuStage` progress and `configure_role_with_deadline` role config; exposes Tauri command `flash_v3_firmware` |
 | `commands/` | Tauri command boundary (`dfu.rs`, `firmware.rs`, `settings.rs`); stringifies errors for frontend |
 | `cache.rs` | Per-version firmware cache with SHA256 verification |
 | `settings.rs` | `AdvancedSettings` persistence + pre-profile serial command generation |
@@ -103,6 +103,7 @@ grep -rnE "text-(xs|sm|base|lg|[0-9]?xl)\b|text-\[|#[0-9a-fA-F]{3,8}\b|rgba?\(|h
 - **Windows COM renumbering**: port numbers change across DFU reboots — always track devices via `DeviceIdentifier`, never a stored port string. Windows also gets longer touch waits and more re-detection polls (`#[cfg(target_os = "windows")]` throughout).
 - **macOS duplicate ports**: devices appear as both `cu.*` and `tty.*`; `find_nrf52_devices` filters `tty.*` — bypassing it double-counts devices.
 - **macOS stale port**: `wait_with_drain` keep-alives the port during the long flash-erase wait; removing it causes macOS-only flakiness.
+- **Flush is bounded**: `SerialTransport::flush` polls the output queue for at most `SERIAL_FLUSH_TIMEOUT_MS` and discards stuck output. Never call the raw `port.flush()`: it's `tcdrain`, which blocks forever on macOS once a device stops reading USB serial (the 2026-10-28 role-config hang).
 - **Boot noise**: firmware boot logs can contain `ERROR` text; always `drain_boot_output` before sending a command or responses get misparsed.
 - **`[SETTING]` ack timeout = success**: `send_setting_command` treats no-ack as success for backward compat with older firmware.
 - **Format detection**: a firmware zip's `manifest.json` has `manifest_version` for v3 or a top-level `manifest` key for Nordic — never feed one reader the other's zip.

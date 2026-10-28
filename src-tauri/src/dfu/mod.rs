@@ -64,7 +64,7 @@ pub(crate) use config::{get_reboot_settle_delay, get_reboot_timeout};
 
 // Protocol
 pub use protocol::{configure_device_with_settings, upload_firmware, DfuStage};
-pub(crate) use protocol::configure_device_role_flexible;
+pub(crate) use protocol::configure_role_with_deadline;
 pub(crate) use protocol::configure_custom_profile;
 
 // Error types — re-exported for use in tests outside this module and by the

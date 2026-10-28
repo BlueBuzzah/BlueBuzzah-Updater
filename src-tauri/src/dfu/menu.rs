@@ -532,8 +532,8 @@ pub fn preflight_primary_check_with_budget<T: DfuTransport>(
     }
 
     Some(ProfileConfigOutcome::success_secondary(
-        "This glove did not answer as the primary. Custom parameters apply to \
-         the primary glove, which drives both.",
+        "This device did not answer as the primary. Custom parameters apply to \
+         the primary device, which drives both.",
     ))
 }
 
@@ -547,7 +547,7 @@ pub fn write_custom_params<T: DfuTransport>(
         Ok(info) => info,
         Err(e) => {
             return Ok(ProfileConfigOutcome::partial_with_detail(
-                "Profile loaded, but the glove never came back to confirm the parameters. \
+                "Profile loaded, but the device never came back to confirm the parameters. \
                  It may still be running its previous custom settings.",
                 e.to_string(),
             ))
@@ -556,7 +556,7 @@ pub fn write_custom_params<T: DfuTransport>(
 
     if info.get("ROLE").map(str::trim) != Some("PRIMARY") {
         return Ok(ProfileConfigOutcome::success_secondary(
-            "Profile loaded. Custom parameters apply to the primary glove.",
+            "Profile loaded. Custom parameters apply to the primary device.",
         ));
     }
 
@@ -619,7 +619,7 @@ pub fn write_custom_params<T: DfuTransport>(
             .collect();
         Ok(ProfileConfigOutcome::partial_with_detail(
             format!(
-                "Profile loaded, but the glove reported different values for: {}. \
+                "Profile loaded, but the device reported different values for: {}. \
                  It may still be running its previous custom settings.",
                 fields.join(", ")
             ),
@@ -1009,6 +1009,7 @@ SESSION:90\nAMPMIN:70\nAMPMAX:100\nPATTERN:rndp\nMIRROR:1\nJITTER:23.5\nFINGERS:
             .expect("a SECONDARY glove must stop the flow before PROFILE_LOAD");
 
         assert_eq!(outcome.status, "success_secondary");
+        assert!(!outcome.message.contains("glove"), "say device: {}", outcome.message);
     }
 
     #[test]
@@ -1106,6 +1107,7 @@ SESSION:90\nAMPMIN:70\nAMPMAX:100\nPATTERN:rndp\nMIRROR:1\nJITTER:23.5\nFINGERS:
         let outcome = write_custom_params(&mut transport, &target_params()).unwrap();
 
         assert_eq!(outcome.status, "success_secondary");
+        assert!(!outcome.message.contains("glove"), "say device: {}", outcome.message);
         assert_eq!(
             transport.written(),
             &["INFO\n".to_string()],

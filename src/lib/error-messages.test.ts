@@ -261,6 +261,10 @@ describe('matcher fixes', () => {
     expect(getErrorGuidance('Role configuration failed after config write')).toBe(ERROR_GUIDANCE.ROLE_CONFIG_FAILED);
   });
 
+  it('sends a role-config deadline to ROLE_CONFIG_FAILED', () => {
+    expect(getErrorGuidance('Failed to configure device role: role configuration did not finish within 300s')).toBe(ERROR_GUIDANCE.ROLE_CONFIG_FAILED);
+  });
+
   it('sends an unstable USB connection to DFU_CONNECTION_UNSTABLE, not the GitHub message', () => {
     expect(getErrorGuidance('USB connection unstable')).toBe(ERROR_GUIDANCE.DFU_CONNECTION_UNSTABLE);
   });

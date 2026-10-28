@@ -8,6 +8,8 @@
 //! 5. Role configuration (post-reboot)
 
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -17,8 +19,8 @@ use super::config::{
     ACK_TIMEOUT_MS, CONFIG_RETRY_DELAY_MS, FIRMWARE_TRANSFER_TIMEOUT_SECS,
     FLASH_PAGE_WRITE_TIME_MS, FRAMES_PER_FLASH_PAGE, MAX_CONFIG_RETRIES, MAX_PACKET_RETRIES,
     PROFILE_CONFIG_TIMEOUT_MS, PROFILE_GENTLE_COMMAND, PROFILE_HYBRID_COMMAND,
-    PROFILE_NOISY_COMMAND, PROFILE_REGULAR_COMMAND, RETRY_BASE_DELAY_MS, ROLE_CONFIG_TIMEOUT_MS,
-    ROLE_PRIMARY_COMMAND, ROLE_SECONDARY_COMMAND,
+    PROFILE_NOISY_COMMAND, PROFILE_REGULAR_COMMAND, RETRY_BASE_DELAY_MS, ROLE_CONFIG_DEADLINE_MS,
+    ROLE_CONFIG_TIMEOUT_MS, ROLE_PRIMARY_COMMAND, ROLE_SECONDARY_COMMAND,
 };
 use super::device::{
     get_device_by_port, snapshot_ports, wait_for_application_by_serial,
@@ -574,15 +576,17 @@ where
     // Step 10: Configure device role (instrumented)
     on_progress(DfuStage::ConfiguringRole);
     let role_started = std::time::Instant::now();
-    let role_result =
-        configure_device_role_flexible(&app_device.port, device_role, &device_identifier).map_err(
-            |e| match e {
-                DfuError::RoleConfigFailed { .. } => e,
-                other => DfuError::RoleConfigFailed {
-                    reason: other.to_string(),
-                },
-            },
-        );
+    let role_result = configure_role_with_deadline(
+        &app_device.port,
+        device_role,
+        &device_identifier,
+        |m| {
+            on_progress(DfuStage::Log {
+                message: m.to_string(),
+            })
+        },
+        &is_cancelled,
+    );
     on_progress(DfuStage::Log {
         message: format!(
             "Role config finished in {}ms (ok={}) | snapshot: {}",
@@ -591,6 +595,9 @@ where
             snapshot_ports()
         ),
     });
+    if let Err(DfuError::Cancelled) = &role_result {
+        on_progress(DfuStage::Cancelled);
+    }
     role_result?;
 
     on_progress(DfuStage::Complete);
@@ -708,15 +715,21 @@ fn configure_device_role(port_name: &str, role: &str, serial_number: &str) -> Df
 ///
 /// Works with both serial number and VID/PID+port pattern tracking.
 /// Includes automatic retry for timing-related failures.
-pub(crate) fn configure_device_role_flexible(
+pub(crate) fn configure_device_role_flexible<L: Fn(&str), C: Fn() -> bool>(
     port_name: &str,
     role: &str,
     identifier: &DeviceIdentifier,
+    log: L,
+    is_cancelled: C,
 ) -> DfuResult<()> {
     let mut last_error: Option<DfuError> = None;
     let mut current_port = port_name.to_string();
 
     for attempt in 0..=MAX_CONFIG_RETRIES {
+        if is_cancelled() {
+            return Err(DfuError::Cancelled);
+        }
+
         // On retry, wait for device to stabilize and update port
         if attempt > 0 {
             std::thread::sleep(Duration::from_millis(CONFIG_RETRY_DELAY_MS));
@@ -732,9 +745,26 @@ pub(crate) fn configure_device_role_flexible(
             }
         }
 
-        match configure_device_role_flexible_inner(&current_port, role, identifier) {
+        log(&format!(
+            "Role config attempt {}/{} on {}",
+            attempt + 1,
+            MAX_CONFIG_RETRIES + 1,
+            current_port
+        ));
+        match configure_device_role_flexible_inner(
+            &current_port,
+            role,
+            identifier,
+            &log,
+            &is_cancelled,
+        ) {
             Ok(()) => return Ok(()),
             Err(e) if e.is_retriable() && attempt < MAX_CONFIG_RETRIES => {
+                log(&format!(
+                    "Role config attempt {} failed: {}",
+                    attempt + 1,
+                    e
+                ));
                 last_error = Some(e);
             }
             Err(e) => return Err(e),
@@ -747,11 +777,104 @@ pub(crate) fn configure_device_role_flexible(
     }))
 }
 
-/// Inner implementation of role configuration without retry logic.
-fn configure_device_role_flexible_inner(
+/// Wrap a role-step error as `RoleConfigFailed` so it never triggers a re-flash.
+/// `Cancelled` passes through so a stopped run reads as cancelled.
+pub(crate) fn wrap_role_error(e: DfuError) -> DfuError {
+    match e {
+        DfuError::Cancelled | DfuError::RoleConfigFailed { .. } => e,
+        other => DfuError::RoleConfigFailed {
+            reason: other.to_string(),
+        },
+    }
+}
+
+enum RoleMsg {
+    Log(String),
+    Done(DfuResult<()>),
+}
+
+/// Run `work` on a worker thread, forwarding its log lines, and give up when
+/// cancelled or at `deadline`. A serial call stuck in the kernel then costs a
+/// bounded wait instead of freezing the install. The worker is never joined:
+/// it exits when its blocked call returns or at its next stop check.
+fn run_with_deadline<W, L, C>(work: W, log: L, is_cancelled: C, deadline: Duration) -> DfuResult<()>
+where
+    W: FnOnce(&dyn Fn(&str), &dyn Fn() -> bool) -> DfuResult<()> + Send + 'static,
+    L: Fn(&str),
+    C: Fn() -> bool,
+{
+    let (tx, rx) = mpsc::channel();
+    let stop = Arc::new(AtomicBool::new(false));
+    let worker_stop = Arc::clone(&stop);
+    std::thread::spawn(move || {
+        let log_tx = tx.clone();
+        let result = work(
+            &|m: &str| {
+                let _ = log_tx.send(RoleMsg::Log(m.to_string()));
+            },
+            &|| worker_stop.load(Ordering::SeqCst),
+        );
+        let _ = tx.send(RoleMsg::Done(result));
+    });
+
+    let start = Instant::now();
+    loop {
+        match rx.recv_timeout(Duration::from_millis(100)) {
+            Ok(RoleMsg::Log(m)) => log(&m),
+            Ok(RoleMsg::Done(result)) => return result,
+            Err(mpsc::RecvTimeoutError::Timeout) => {}
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                // The worker panicked before reporting.
+                return Err(DfuError::RoleConfigFailed {
+                    reason: "role configuration stopped unexpectedly".to_string(),
+                });
+            }
+        }
+        if is_cancelled() {
+            stop.store(true, Ordering::SeqCst);
+            return Err(DfuError::Cancelled);
+        }
+        if start.elapsed() >= deadline {
+            stop.store(true, Ordering::SeqCst);
+            return Err(DfuError::RoleConfigFailed {
+                reason: format!(
+                    "role configuration did not finish within {}s",
+                    deadline.as_secs()
+                ),
+            });
+        }
+    }
+}
+
+/// Configure the device role under one overall deadline (`ROLE_CONFIG_DEADLINE_MS`),
+/// honoring cancel. Errors other than `Cancelled` come back as `RoleConfigFailed`.
+pub(crate) fn configure_role_with_deadline<L: Fn(&str), C: Fn() -> bool>(
     port_name: &str,
     role: &str,
     identifier: &DeviceIdentifier,
+    log: L,
+    is_cancelled: C,
+) -> DfuResult<()> {
+    let (port, role, identifier) = (port_name.to_string(), role.to_string(), identifier.clone());
+    run_with_deadline(
+        move |log, stop| configure_device_role_flexible(&port, &role, &identifier, log, stop),
+        log,
+        is_cancelled,
+        Duration::from_millis(ROLE_CONFIG_DEADLINE_MS),
+    )
+    .map_err(wrap_role_error)
+}
+
+/// Inner implementation of role configuration without retry logic.
+///
+/// Checks `is_cancelled` between steps so a stopped attempt releases the port
+/// and never sends SET_ROLE after the run has ended.
+fn configure_device_role_flexible_inner<L: Fn(&str), C: Fn() -> bool>(
+    port_name: &str,
+    role: &str,
+    identifier: &DeviceIdentifier,
+    log: &L,
+    is_cancelled: &C,
 ) -> DfuResult<()> {
     let command = match role.to_uppercase().as_str() {
         "PRIMARY" => ROLE_PRIMARY_COMMAND,
@@ -763,17 +886,38 @@ fn configure_device_role_flexible_inner(
         }
     };
 
-    // Open port and send command
-    let mut transport = SerialTransport::open(port_name)?;
+    // Opening pulses DTR, which resets the glove: never do it once stopped.
+    if is_cancelled() {
+        return Err(DfuError::Cancelled);
+    }
+    let transport = SerialTransport::open(port_name)?;
+    send_role_command(transport, command, identifier, log, is_cancelled)
+}
+
+/// Send one role command on an open port and wait for the ack and reboot.
+fn send_role_command<L: Fn(&str), C: Fn() -> bool>(
+    mut transport: SerialTransport,
+    command: &str,
+    identifier: &DeviceIdentifier,
+    log: &L,
+    is_cancelled: &C,
+) -> DfuResult<()> {
+    if is_cancelled() {
+        return Err(DfuError::Cancelled);
+    }
 
     // Drain boot output using enhanced detection
-    drain_boot_output(&mut transport)?;
+    drain_boot_output_until(&mut transport, is_cancelled)?;
 
     // Clear any remaining input
     transport.clear_input().ok();
 
     // Small delay then send command
     std::thread::sleep(Duration::from_millis(100));
+    if is_cancelled() {
+        return Err(DfuError::Cancelled);
+    }
+    log(&format!("Sending {}", command.trim_end()));
     transport.write(command.as_bytes())?;
     transport.flush()?;
 
@@ -785,8 +929,14 @@ fn configure_device_role_flexible_inner(
     let mut buffer = [0u8; 256];
 
     while start.elapsed() < timeout {
-        let remaining = timeout.saturating_sub(start.elapsed());
-        let bytes_read = transport.read(&mut buffer, remaining.as_millis() as u64)?;
+        if is_cancelled() {
+            return Err(DfuError::Cancelled);
+        }
+        // Read in short slices so a stop is noticed while waiting for the ack.
+        let wait = timeout
+            .saturating_sub(start.elapsed())
+            .min(Duration::from_millis(100));
+        let bytes_read = transport.read(&mut buffer, wait.as_millis() as u64)?;
 
         if bytes_read > 0 {
             response.extend_from_slice(&buffer[..bytes_read]);
@@ -798,6 +948,7 @@ fn configure_device_role_flexible_inner(
                 // Success! Device will now reboot.
                 // Close the transport before device disconnects
                 drop(transport);
+                log("Role acknowledged, waiting for device to restart");
 
                 // Wait for device to reboot and reappear
                 std::thread::sleep(Duration::from_millis(get_reboot_settle_delay()));
@@ -833,6 +984,14 @@ fn configure_device_role_flexible_inner(
 ///
 /// Returns true if a boot completion marker was detected.
 fn drain_boot_output(transport: &mut SerialTransport) -> DfuResult<bool> {
+    drain_boot_output_until(transport, &|| false)
+}
+
+/// `drain_boot_output` that returns `Cancelled` between reads once stopped.
+fn drain_boot_output_until<C: Fn() -> bool>(
+    transport: &mut SerialTransport,
+    is_cancelled: &C,
+) -> DfuResult<bool> {
     let mut buffer = [0u8; 256];
     let drain_timeout = Duration::from_millis(5000);
     let drain_start = Instant::now();
@@ -845,6 +1004,9 @@ fn drain_boot_output(transport: &mut SerialTransport) -> DfuResult<bool> {
     let mut accumulated = String::new();
 
     while drain_start.elapsed() < drain_timeout {
+        if is_cancelled() {
+            return Err(DfuError::Cancelled);
+        }
         let bytes_read = transport.read(&mut buffer, 200)?;
         if bytes_read > 0 {
             last_data_time = Instant::now();
@@ -1374,7 +1536,7 @@ pub fn configure_custom_profile<L: Fn(&str) + Clone>(
         Ok(device) => device,
         Err(e) => {
             return Ok(ProfileConfigOutcome::partial_with_detail(
-                "Profile loaded, but the glove did not reappear after rebooting. \
+                "Profile loaded, but the device did not reappear after rebooting. \
                  It may still be running its previous custom settings.",
                 e.to_string(),
             ))
@@ -1411,6 +1573,178 @@ pub fn configure_custom_profile<L: Fn(&str) + Clone>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Opening the port pulses DTR (resets the glove), so a stopped attempt must
+    /// not open it at all: a new flash may already be restarting that glove.
+    #[test]
+    fn stopped_role_attempt_never_opens_port() {
+        let id = DeviceIdentifier::Serial {
+            serial: "X".into(),
+            vid: 0x239A,
+            pid: 0x8029,
+            port_pattern: String::new(),
+        };
+        let start = Instant::now();
+        let stop = || true;
+        let err = configure_device_role_flexible_inner(
+            "/dev/cu.does-not-exist",
+            "PRIMARY",
+            &id,
+            &|_: &str| {},
+            &stop,
+        )
+        .unwrap_err();
+        assert!(matches!(err, DfuError::Cancelled), "got {err:?}");
+        assert!(start.elapsed() < Duration::from_millis(100));
+    }
+
+    /// A stop during the boot-output drain must release the port promptly, not
+    /// after the drain's 5 s budget, or a quick Try Again finds the port busy.
+    #[cfg(unix)]
+    #[test]
+    fn stop_during_boot_drain_returns_promptly() {
+        use std::io::Write;
+        use std::sync::atomic::AtomicUsize;
+        let (mut master, slave) = serialport::TTYPort::pair().unwrap();
+        let transport = SerialTransport::from_port(Box::new(slave));
+        let noisy = Arc::new(AtomicBool::new(true));
+        let still_noisy = Arc::clone(&noisy);
+        std::thread::spawn(move || {
+            while still_noisy.load(Ordering::SeqCst) {
+                let _ = master.write_all(b"[BOOT] diagnostics\n");
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        });
+        let id = DeviceIdentifier::Serial {
+            serial: "X".into(),
+            vid: 0x239A,
+            pid: 0x8029,
+            port_pattern: String::new(),
+        };
+        // Not stopped at the first check, stopped from then on.
+        let calls = AtomicUsize::new(0);
+        let stop = || calls.fetch_add(1, Ordering::SeqCst) > 0;
+        let start = Instant::now();
+        let err = send_role_command(transport, ROLE_PRIMARY_COMMAND, &id, &|_: &str| {}, &stop)
+            .unwrap_err();
+        noisy.store(false, Ordering::SeqCst);
+        assert!(matches!(err, DfuError::Cancelled), "got {err:?}");
+        assert!(
+            start.elapsed() < Duration::from_millis(1500),
+            "took {:?}",
+            start.elapsed()
+        );
+    }
+
+    /// A stopped role attempt must let go of the port without sending SET_ROLE,
+    /// or Try Again finds the port busy and the stopped role still gets written.
+    #[cfg(unix)]
+    #[test]
+    fn stopped_role_attempt_sends_nothing() {
+        use serialport::SerialPort;
+        use std::io::Read;
+        let (mut master, slave) = serialport::TTYPort::pair().unwrap();
+        let transport = SerialTransport::from_port(Box::new(slave));
+        let id = DeviceIdentifier::Serial {
+            serial: "X".into(),
+            vid: 0x239A,
+            pid: 0x8029,
+            port_pattern: String::new(),
+        };
+        let stop = || true;
+        let err = send_role_command(transport, ROLE_PRIMARY_COMMAND, &id, &|_: &str| {}, &stop)
+            .unwrap_err();
+        assert!(matches!(err, DfuError::Cancelled), "got {err:?}");
+        master.set_timeout(Duration::from_millis(200)).unwrap();
+        let mut buf = [0u8; 64];
+        let sent = master.read(&mut buf).unwrap_or(0);
+        assert_eq!(sent, 0, "SET_ROLE was written after stop");
+    }
+
+    #[test]
+    fn deadline_runner_forwards_logs_and_result() {
+        let logged = std::cell::RefCell::new(Vec::<String>::new());
+        let r = run_with_deadline(
+            |log, _stop| {
+                log("hello");
+                Ok(())
+            },
+            |m| logged.borrow_mut().push(m.into()),
+            || false,
+            Duration::from_secs(2),
+        );
+        assert!(r.is_ok());
+        assert_eq!(*logged.borrow(), vec!["hello".to_string()]);
+    }
+
+    #[test]
+    fn never_finishing_work_hits_deadline() {
+        let start = Instant::now();
+        let err = run_with_deadline(
+            |_log, _stop| {
+                std::thread::sleep(Duration::from_secs(30));
+                Ok(())
+            },
+            |_| {},
+            || false,
+            Duration::from_millis(300),
+        )
+        .unwrap_err();
+        assert!(matches!(err, DfuError::RoleConfigFailed { .. }));
+        assert!(start.elapsed() < Duration::from_millis(800));
+    }
+
+    #[test]
+    fn cancel_returns_promptly_while_work_is_stuck() {
+        let start = Instant::now();
+        let err = run_with_deadline(
+            |_log, _stop| {
+                std::thread::sleep(Duration::from_secs(30));
+                Ok(())
+            },
+            |_| {},
+            || true,
+            Duration::from_secs(60),
+        )
+        .unwrap_err();
+        assert!(matches!(err, DfuError::Cancelled));
+        assert!(start.elapsed() < Duration::from_millis(400));
+    }
+
+    #[test]
+    fn role_config_cancelled_before_touching_port() {
+        let id = DeviceIdentifier::Serial {
+            serial: "X".into(),
+            vid: 0x239A,
+            pid: 0x8029,
+            port_pattern: String::new(),
+        };
+        let logged = std::cell::RefCell::new(Vec::<String>::new());
+        let err = configure_device_role_flexible(
+            "/dev/does-not-exist",
+            "PRIMARY",
+            &id,
+            |m| logged.borrow_mut().push(m.into()),
+            || true,
+        )
+        .unwrap_err();
+        assert!(matches!(err, DfuError::Cancelled));
+        assert!(logged.borrow().iter().all(|m| !m.starts_with("Sending")));
+    }
+
+    #[test]
+    fn wrap_role_error_keeps_cancel_distinct() {
+        assert!(matches!(
+            wrap_role_error(DfuError::Cancelled),
+            DfuError::Cancelled
+        ));
+        let wrapped = wrap_role_error(DfuError::Timeout);
+        assert!(matches!(wrapped, DfuError::RoleConfigFailed { .. }));
+        assert!(wrapped
+            .to_string()
+            .to_lowercase()
+            .contains("failed to configure device role"));
+    }
 
     #[test]
     fn test_dfu_stage_percent() {

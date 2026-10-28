@@ -12,8 +12,8 @@ use serialport::SerialPort;
 use super::config::{
     get_touch_wait_multiplier, BOOTLOADER_RESET_RETRY_DELAY_MS, DFU_BAUD_RATE,
     MAX_BOOTLOADER_RESET_RETRIES, MAX_PORT_OPEN_RETRIES, MAX_TOUCH_OPEN_RETRIES, MAX_TOUCH_RETRIES,
-    PORT_OPEN_BASE_DELAY_MS, PORT_OPEN_MAX_DELAY_MS, PORT_OPEN_TIMEOUT_MS, SERIAL_READ_TIMEOUT,
-    TOUCH_RETRY_DELAY_MS,
+    PORT_OPEN_BASE_DELAY_MS, PORT_OPEN_MAX_DELAY_MS, PORT_OPEN_TIMEOUT_MS, SERIAL_FLUSH_TIMEOUT_MS,
+    SERIAL_READ_TIMEOUT, TOUCH_RETRY_DELAY_MS,
 };
 use super::error::{DfuError, DfuResult};
 
@@ -60,6 +60,12 @@ pub struct SerialTransport {
 }
 
 impl SerialTransport {
+    /// Wrap an already-open port (tests drive a pseudo-terminal this way).
+    #[cfg(test)]
+    pub(crate) fn from_port(port: Box<dyn SerialPort>) -> Self {
+        Self { port }
+    }
+
     /// Open a serial port for DFU communication.
     ///
     /// Uses the standard DFU baud rate (115200) and typical settings.
@@ -301,6 +307,25 @@ impl SerialTransport {
     }
 }
 
+/// Poll the output queue until it empties. Bounded replacement for `port.flush()`,
+/// which is `tcdrain` and blocks forever on macOS once a device stops reading.
+fn wait_for_output_drain<F: FnMut() -> DfuResult<u32>>(
+    mut pending: F,
+    timeout: Duration,
+) -> DfuResult<()> {
+    let deadline = std::time::Instant::now() + timeout;
+    while pending()? > 0 {
+        if std::time::Instant::now() >= deadline {
+            return Err(DfuError::Io(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                format!("serial output not taken by device within {}ms", timeout.as_millis()),
+            )));
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    Ok(())
+}
+
 impl DfuTransport for SerialTransport {
     fn write(&mut self, data: &[u8]) -> DfuResult<()> {
         use std::io::Write;
@@ -333,7 +358,15 @@ impl DfuTransport for SerialTransport {
     }
 
     fn flush(&mut self) -> DfuResult<()> {
-        self.port.flush().map_err(DfuError::Io)
+        let result = wait_for_output_drain(
+            || self.port.bytes_to_write().map_err(DfuError::Serial),
+            Duration::from_millis(SERIAL_FLUSH_TIMEOUT_MS),
+        );
+        if matches!(&result, Err(DfuError::Io(e)) if e.kind() == std::io::ErrorKind::TimedOut) {
+            // Discard what the device never took so the port can close cleanly.
+            let _ = self.port.clear(serialport::ClearBuffer::Output);
+        }
+        result
     }
 
     fn clear_input(&mut self) -> DfuResult<()> {
@@ -623,6 +656,62 @@ fn normalize_port_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn drain_returns_ok_once_queue_empties() {
+        let mut left = vec![17u32, 5, 0].into_iter();
+        assert!(
+            wait_for_output_drain(|| Ok(left.next().unwrap_or(0)), Duration::from_millis(500))
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn drain_times_out_when_device_never_reads() {
+        let start = std::time::Instant::now();
+        let err = wait_for_output_drain(|| Ok(17), Duration::from_millis(100)).unwrap_err();
+        assert!(matches!(&err, DfuError::Io(e) if e.kind() == std::io::ErrorKind::TimedOut));
+        assert!(err.is_retriable());
+        assert!(start.elapsed() < Duration::from_millis(400));
+    }
+
+    #[test]
+    fn drain_propagates_query_error_immediately() {
+        let start = std::time::Instant::now();
+        let err = wait_for_output_drain(
+            || {
+                Err(DfuError::DeviceDisconnected {
+                    operation: "flush".into(),
+                })
+            },
+            Duration::from_secs(5),
+        )
+        .unwrap_err();
+        assert!(matches!(err, DfuError::DeviceDisconnected { .. }));
+        assert!(start.elapsed() < Duration::from_millis(100));
+    }
+
+    /// Reproduces the 2026-10-28 stall: macOS tcdrain blocks forever on unread output.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn flush_does_not_hang_when_peer_never_reads() {
+        let (_master, slave) = serialport::TTYPort::pair().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut t = SerialTransport { port: Box::new(slave) };
+            t.write(b"SET_ROLE:PRIMARY\n").unwrap();
+            let result = t.flush();
+            let pending = t.port.bytes_to_write().unwrap();
+            let _ = tx.send((result, pending));
+        });
+        let (result, pending) = rx
+            .recv_timeout(Duration::from_millis(SERIAL_FLUSH_TIMEOUT_MS + 1500))
+            .expect("flush hung (tcdrain)");
+        assert!(
+            matches!(result, Err(DfuError::Io(ref e)) if e.kind() == std::io::ErrorKind::TimedOut)
+        );
+        assert_eq!(pending, 0, "stuck output must be discarded on timeout");
+    }
 
     #[test]
     fn describe_serial_error_includes_context_and_message() {
