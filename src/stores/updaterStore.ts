@@ -12,6 +12,7 @@ interface UpdaterStore extends UpdaterState {
   setUpdateAvailable: (info: AppUpdateInfo | null) => void;
   setProgress: (progress: AppUpdateProgress | null) => void;
   setError: (error: UpdaterErrorInfo | null) => void;
+  setCheckError: (error: UpdaterErrorInfo | null) => void;
   dismiss: () => void;
   reset: () => void;
   clearError: () => void;
@@ -24,6 +25,8 @@ const initialState: UpdaterState = {
   progress: null,
   error: null,
   dismissed: false,
+  checkError: null,
+  checked: false,
 };
 
 export const useUpdaterStore = create<UpdaterStore>((set) => ({
@@ -36,6 +39,8 @@ export const useUpdaterStore = create<UpdaterStore>((set) => ({
       updateAvailable: info !== null,
       updateInfo: info,
       isChecking: false,
+      checkError: null,
+      checked: true,
     }),
 
   setProgress: (progress) => set({ progress }),
@@ -45,6 +50,8 @@ export const useUpdaterStore = create<UpdaterStore>((set) => ({
       error,
       isChecking: false,
     }),
+
+  setCheckError: (checkError) => set({ checkError, isChecking: false, checked: true }),
 
   dismiss: () => set({ dismissed: true }),
 

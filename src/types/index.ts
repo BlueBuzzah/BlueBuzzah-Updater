@@ -283,4 +283,8 @@ export interface UpdaterState {
   progress: AppUpdateProgress | null;
   error: UpdaterErrorInfo | null;
   dismissed: boolean;
+  /** A failed update check; shown on Settings, never as a dialog */
+  checkError: UpdaterErrorInfo | null;
+  /** A check has finished at least once */
+  checked: boolean;
 }
