@@ -22,6 +22,8 @@ const MSG = {
   max: { flash: 'You can flash up to 2 devices at once.', configure: 'You can configure up to 2 devices at once.' },
   mixed: "You can't flash a v2 and a v3 device together. Flash one kind at a time.",
   pruned: 'A selected device was unplugged or changed, so we deselected it.',
+  sameSettings:
+    'Give both devices the same settings so they work properly as a pair. If only one is plugged in, configure the other one the same way next.',
 };
 
 /** Empty state (copy: Firmware choose devices). */
@@ -112,6 +114,7 @@ export function DeviceSelection({ mode = 'flash', selectedDevices, onDevicesChan
     >
       <div className="grid gap-6">
         <p className="body">Plug in up to 2 devices with a USB data cable.</p>
+        {!flash && <p className="body-s text-ink-muted">{MSG.sameSettings}</p>}
         <p className="body-s tabular-nums text-ink-muted" aria-live="polite">{status}</p>
 
         {scanError && (
