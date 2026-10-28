@@ -14,27 +14,27 @@ export const THERAPY_PROFILES: TherapyProfileInfo[] = [
   {
     id: 'REGULAR',
     name: 'Regular',
-    description: 'Default vCR pattern - non-mirrored, no jitter',
+    description: 'The standard pattern. Fingers buzz one at a time at a steady pace. Each device follows its own order.',
   },
   {
     id: 'NOISY',
     name: 'Noisy',
-    description: 'Mirrored pattern with 23.5% jitter for varied stimulation',
+    description: 'Like Regular, but the timing varies a little each time. Both devices follow the same order.',
   },
   {
     id: 'HYBRID',
     name: 'Hybrid',
-    description: 'Non-mirrored pattern with 23.5% jitter',
+    description: 'Like Regular, but the timing varies a little each time. Each device follows its own order.',
   },
   {
     id: 'GENTLE',
     name: 'Gentle',
-    description: 'Lower amplitude with sequential pattern for sensitive users',
+    description: 'Softer buzzing. Fingers buzz one after another in a fixed order.',
   },
   {
     id: 'CUSTOM',
     name: 'Custom',
-    description: 'Your own timing, amplitude, and session length',
+    description: 'Set your own timing, strength and session length.',
   },
 ];
 

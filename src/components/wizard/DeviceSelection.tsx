@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { RefreshCw, TriangleAlert } from 'lucide-react';
 import { Banner } from '@/components/ui/banner';
 import { Button } from '@/components/ui/button';
@@ -6,7 +6,7 @@ import { Card } from '@/components/ui/card';
 import { DeviceCard } from '@/components/ui/device-card';
 import { ICON } from '@/components/ui/icon';
 import { SegmentedControl } from '@/components/ui/segmented-control';
-import { deviceService } from '@/services/DeviceService';
+import { foundStatus, useDeviceScan } from '@/hooks/useDeviceScan';
 import type { BoardType, Device, DeviceRole } from '@/types';
 
 export const BOARD_NAME: Record<BoardType, string> = { nrf52: 'BlueBuzzah v2', esp32s3: 'BlueBuzzah v3' };
@@ -24,6 +24,21 @@ const MSG = {
   pruned: 'A selected device was unplugged or changed, so we deselected it.',
 };
 
+/** Empty state shared by both device lists (copy: Firmware choose devices). */
+export function NoDevicesFound() {
+  return (
+    <div className="grid gap-4">
+      <h4 className="display-l">No devices found</h4>
+      <p className="body">Plug in a device with a USB data cable. Some cables only charge.</p>
+      <ul className="body grid list-disc gap-2 pl-6">
+        <li>Check that the device is turned on.</li>
+        <li>Try a different USB port.</li>
+        <li>Unplug the device, wait 5 seconds, then plug it back in.</li>
+      </ul>
+    </div>
+  );
+}
+
 interface DeviceSelectionProps {
   selectedDevices: Device[];
   onDevicesChange: (devices: Device[]) => void;
@@ -31,48 +46,24 @@ interface DeviceSelectionProps {
 }
 
 export function DeviceSelection({ selectedDevices, onDevicesChange, onRoleChange }: DeviceSelectionProps) {
-  const [available, setAvailable] = useState<Device[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [scanError, setScanError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [autoAssigned, setAutoAssigned] = useState(false);
-  const callId = useRef(0);
   const selectedRef = useRef(selectedDevices);
   selectedRef.current = selectedDevices;
   const errId = useId();
 
-  const detect = useCallback(async () => {
-    const id = ++callId.current;
-    setLoading(true);
-    setScanError(null);
-    try {
-      const devices = await deviceService.detectDevices();
-      if (id !== callId.current) return; // a newer scan owns the result
-      setAvailable(devices);
-      // A replug can reuse a port for different hardware (Windows COM reuse),
-      // and a stale board would drive the wrong flasher: drop it.
-      const current = selectedRef.current;
-      const stillValid = current.filter((sel) =>
-        devices.some((d) => d.path === sel.path && d.board === sel.board && d.serialNumber === sel.serialNumber)
-      );
-      if (stillValid.length !== current.length) {
-        onDevicesChange(stillValid);
-        setNotice(MSG.pruned);
-      }
-    } catch (error) {
-      if (id !== callId.current) return;
-      setScanError(error instanceof Error ? error.message : String(error));
-    } finally {
-      if (id === callId.current) setLoading(false);
+  // A replug can reuse a port for different hardware (Windows COM reuse),
+  // and a stale board would drive the wrong flasher: drop it.
+  const { devices: available, loading, error: scanError, rescan } = useDeviceScan((devices) => {
+    const current = selectedRef.current;
+    const stillValid = current.filter((sel) =>
+      devices.some((d) => d.path === sel.path && d.board === sel.board && d.serialNumber === sel.serialNumber)
+    );
+    if (stillValid.length !== current.length) {
+      onDevicesChange(stillValid);
+      setNotice(MSG.pruned);
     }
-  }, [onDevicesChange]);
-
-  useEffect(() => {
-    detect();
-    window.addEventListener('bb:rescan', detect);
-    return () => window.removeEventListener('bb:rescan', detect);
-    // Scan once on mount; detect reads the selection through a ref.
-  }, []);
+  });
 
   const toggle = (device: Device) => {
     setNotice(null);
@@ -99,13 +90,13 @@ export function DeviceSelection({ selectedDevices, onDevicesChange, onRoleChange
     ? 'Looking for devices…'
     : scanError
       ? ''
-      : `${available.length === 1 ? 'Found 1 device.' : `Found ${available.length} devices.`}${selectedDevices.length ? ` ${selectedDevices.length} selected` : ''}`;
+      : foundStatus(available.length, selectedDevices.length);
 
   return (
     <Card
       title="Choose devices"
       actions={
-        <Button variant="quiet" icon={RefreshCw} onClick={detect} disabled={loading}>
+        <Button variant="quiet" icon={RefreshCw} onClick={rescan} disabled={loading}>
           Rescan
         </Button>
       }
@@ -121,17 +112,7 @@ export function DeviceSelection({ selectedDevices, onDevicesChange, onRoleChange
           </Banner>
         )}
 
-        {!loading && !scanError && available.length === 0 && (
-          <div className="grid gap-4">
-            <h4 className="display-l">No devices found</h4>
-            <p className="body">Plug in a device with a USB data cable. Some cables only charge.</p>
-            <ul className="body grid list-disc gap-2 pl-6">
-              <li>Check that the device is turned on.</li>
-              <li>Try a different USB port.</li>
-              <li>Unplug the device, wait 5 seconds, then plug it back in.</li>
-            </ul>
-          </div>
-        )}
+        {!loading && !scanError && available.length === 0 && <NoDevicesFound />}
 
         {available.length > 0 && (
           <ul className="grid gap-6 sm:grid-cols-2">

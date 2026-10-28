@@ -1,5 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CUSTOM_DEFAULTS } from '@/lib/therapy-bounds';
 import { therapyService } from '@/services/TherapyService';
@@ -7,221 +6,128 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import { CustomProfilePanel } from './CustomProfilePanel';
 
 vi.mock('@/services/TherapyService', () => ({
-  therapyService: {
-    readCustomProfile: vi.fn(),
-    configureProfile: vi.fn(),
-  },
+  therapyService: { readCustomProfile: vi.fn(), configureProfile: vi.fn() },
 }));
 
 const mockRead = vi.mocked(therapyService.readCustomProfile);
+const noDevice = { case: 'no_device' as const, values: null, profileName: null, motors: null };
+
+function field(name: RegExp | string) {
+  return screen.getByRole('textbox', { name });
+}
 
 describe('CustomProfilePanel', () => {
   beforeEach(() => {
     mockRead.mockReset();
-    useSettingsStore.setState({
-      settings: { disableLedDuringTherapy: false, debugMode: false },
-    });
+    mockRead.mockResolvedValue(noDevice);
+    useSettingsStore.setState({ settings: { disableLedDuringTherapy: false, debugMode: false } });
   });
 
-  it('prefills from the glove and says so when it is on Custom', async () => {
-    mockRead.mockResolvedValue({
-      case: 'custom',
-      values: { ...CUSTOM_DEFAULTS, on: 150 },
-      profileName: 'custom_vcr',
-      motors: 4,
-    });
-
+  it('prefills from the Primary device and says so', async () => {
+    mockRead.mockResolvedValue({ case: 'custom', values: { ...CUSTOM_DEFAULTS, on: 150 }, profileName: 'custom_vcr', motors: 4 });
     render(<CustomProfilePanel />);
-
-    expect(await screen.findByText('Loaded from your primary glove.')).toBeInTheDocument();
-    await waitFor(() => {
-      expect(screen.getByLabelText(/burst duration/i)).toHaveValue(150);
-    });
+    expect(await screen.findByText('Loaded from your Primary device.')).toBeInTheDocument();
+    await waitFor(() => expect(field('Buzz length')).toHaveValue('150'));
   });
 
-  it('shows research defaults and names the loaded profile when the glove is elsewhere', async () => {
-    mockRead.mockResolvedValue({
-      case: 'not_custom',
-      values: null,
-      profileName: 'regular_vcr',
-      motors: 4,
-    });
-
+  it('explains that defaults are shown when the device runs another pattern', async () => {
+    mockRead.mockResolvedValue({ case: 'not_custom', values: null, profileName: 'noisy_vcr', motors: 4 });
     render(<CustomProfilePanel />);
+    expect(await screen.findByText("Your device uses Noisy. These are the default settings. They're saved when you apply.")).toBeInTheDocument();
+  });
 
+  it('says what to do when no device is connected', async () => {
+    render(<CustomProfilePanel />);
     expect(
-      await screen.findByText(
-        /Your glove is set to Regular\. Showing research defaults — these will be saved when you apply\./
-      )
-    ).toBeInTheDocument();
-    expect(screen.getByLabelText(/burst duration/i)).toHaveValue(CUSTOM_DEFAULTS.on);
-  });
-
-  it('shows research defaults with the no-glove message when nothing answers', async () => {
-    mockRead.mockResolvedValue({
-      case: 'no_device',
-      values: null,
-      profileName: null,
-      motors: null,
-    });
-
-    render(<CustomProfilePanel />);
-
-    expect(
-      await screen.findByText('No glove connected. Showing research defaults.')
+      await screen.findByText('No device connected. Showing the default settings. Plug in your Primary device to load its settings.')
     ).toBeInTheDocument();
   });
 
-  it('shows both motor counts in the derived line when no glove was read', async () => {
-    mockRead.mockResolvedValue({
-      case: 'no_device',
-      values: null,
-      profileName: null,
-      motors: null,
-    });
-
+  it('falls back to defaults quietly when the read itself fails', async () => {
+    mockRead.mockRejectedValue(new Error('ipc'));
     render(<CustomProfilePanel />);
-
-    const derived = await screen.findByTestId('derived-timing');
-    expect(derived).toHaveTextContent('668 ms');
-    expect(derived).toHaveTextContent('835 ms');
-    expect(derived).toHaveTextContent('4 motors');
-  });
-
-  it('shows one motor count when the glove reported its motors', async () => {
-    mockRead.mockResolvedValue({
-      case: 'custom',
-      values: CUSTOM_DEFAULTS,
-      profileName: 'custom_vcr',
-      motors: 5,
-    });
-
-    render(<CustomProfilePanel />);
-
-    // The element renders before the read resolves, showing both counts, so
-    // the assertion has to retry — finding the element is not enough.
-    await waitFor(() => {
-      const derived = screen.getByTestId('derived-timing');
-      expect(derived).toHaveTextContent('835 ms');
-      expect(derived).not.toHaveTextContent('668 ms');
-    });
-  });
-
-  it('shows the deviation banner and resets on demand', async () => {
-    const user = userEvent.setup();
-    mockRead.mockResolvedValue({
-      case: 'custom',
-      values: { ...CUSTOM_DEFAULTS, on: 150 },
-      profileName: 'custom_vcr',
-      motors: 4,
-    });
-
-    render(<CustomProfilePanel />);
-
-    expect(
-      await screen.findByText('These settings differ from the researched therapy configuration.')
-    ).toBeInTheDocument();
-
-    await user.click(screen.getByRole('button', { name: 'Reset to research defaults' }));
-
-    await waitFor(() => {
-      expect(screen.getByLabelText(/burst duration/i)).toHaveValue(CUSTOM_DEFAULTS.on);
-      expect(
-        screen.queryByText('These settings differ from the researched therapy configuration.')
-      ).not.toBeInTheDocument();
-    });
-  });
-
-  it('warns when jitter exceeds what the burst gap can absorb', async () => {
-    mockRead.mockResolvedValue({
-      case: 'custom',
-      values: { ...CUSTOM_DEFAULTS, on: 100, off: 30, jitter: 50 },
-      profileName: 'custom_vcr',
-      motors: 4,
-    });
-
-    render(<CustomProfilePanel />);
-
-    expect(await screen.findByTestId('jitter-advisory')).toHaveTextContent('38');
-  });
-
-  it('surfaces a validation error for an out-of-range value', async () => {
-    const user = userEvent.setup();
-    mockRead.mockResolvedValue({
-      case: 'no_device',
-      values: null,
-      profileName: null,
-      motors: null,
-    });
-
-    render(<CustomProfilePanel />);
-
-    const input = await screen.findByLabelText(/burst duration/i);
-    await user.clear(input);
-    await user.type(input, '400');
-
-    expect(await screen.findByText(/must be between 50 and 200 ms/i)).toBeInTheDocument();
-  });
-
-  it('re-reads the glove on demand', async () => {
-    const user = userEvent.setup();
-    mockRead.mockResolvedValue({
-      case: 'no_device',
-      values: null,
-      profileName: null,
-      motors: null,
-    });
-
-    render(<CustomProfilePanel />);
-    await screen.findByText('No glove connected. Showing research defaults.');
-
-    mockRead.mockResolvedValue({
-      case: 'custom',
-      values: { ...CUSTOM_DEFAULTS, on: 90 },
-      profileName: 'custom_vcr',
-      motors: 4,
-    });
-
-    await user.click(screen.getByRole('button', { name: /re-read from glove/i }));
-
-    expect(await screen.findByText('Loaded from your primary glove.')).toBeInTheDocument();
-    expect(mockRead).toHaveBeenCalledTimes(2);
-  });
-
-  // The command answers 'no_device' instead of rejecting, so a rejection is an
-  // IPC-level failure. Unhandled, it surfaced as a console error out of the
-  // effect; the panel must simply fall back to the defaults.
-  it('falls back to the defaults when the prefill read rejects', async () => {
-    mockRead.mockRejectedValue('IPC failure');
-
-    render(<CustomProfilePanel />);
-
     await waitFor(() => expect(mockRead).toHaveBeenCalled());
-    expect(screen.getByLabelText(/burst duration/i)).toHaveValue(
-      CUSTOM_DEFAULTS.on
-    );
-    expect(
-      screen.queryByText(/Loaded from your primary glove/i)
-    ).not.toBeInTheDocument();
+    expect(field('Buzz length')).toHaveValue(String(CUSTOM_DEFAULTS.on));
   });
 
-  it('persists edits to the settings store', async () => {
-    const user = userEvent.setup();
-    mockRead.mockResolvedValue({
-      case: 'no_device',
-      values: null,
-      profileName: null,
-      motors: null,
-    });
-
+  it('shows each range and unit in the hint', async () => {
     render(<CustomProfilePanel />);
+    await waitFor(() => expect(mockRead).toHaveBeenCalled());
+    expect(field('Buzz length')).toHaveAccessibleDescription('50–200 milliseconds');
+    expect(field('Timing variation')).toHaveAccessibleDescription('0–50%');
+    expect(field('Session length')).toHaveAccessibleDescription('1–240 minutes');
+  });
 
-    const input = await screen.findByLabelText(/session length/i);
-    await user.clear(input);
-    await user.type(input, '60');
+  it('does not complain while typing, only after leaving the field', async () => {
+    render(<CustomProfilePanel />);
+    await waitFor(() => expect(mockRead).toHaveBeenCalled());
+    const input = field('Buzz length');
+    fireEvent.change(input, { target: { value: '' } });
+    expect(input).not.toHaveAttribute('aria-invalid');
+    fireEvent.blur(input);
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(input).toHaveAccessibleDescription(/Enter a number from 50 to 200\./);
+  });
 
-    await waitFor(() => {
-      expect(useSettingsStore.getState().settings.customProfile?.session).toBe(60);
-    });
+  it('treats 1e3 as out of range and a decimal session length as not whole', async () => {
+    render(<CustomProfilePanel />);
+    await waitFor(() => expect(mockRead).toHaveBeenCalled());
+    fireEvent.change(field('Buzz length'), { target: { value: '1e3' } });
+    fireEvent.blur(field('Buzz length'));
+    expect(field('Buzz length')).toHaveAccessibleDescription(/Enter a number from 50 to 200\./);
+    fireEvent.change(field('Session length'), { target: { value: '12.5' } });
+    fireEvent.blur(field('Session length'));
+    expect(field('Session length')).toHaveAccessibleDescription(/Enter a whole number, like 1\./);
+  });
+
+  it('ties the strength conflict to Highest strength', async () => {
+    render(<CustomProfilePanel />);
+    await waitFor(() => expect(mockRead).toHaveBeenCalled());
+    fireEvent.change(field('Lowest strength'), { target: { value: '80' } });
+    fireEvent.blur(field('Lowest strength'));
+    fireEvent.change(field('Highest strength'), { target: { value: '60' } });
+    fireEvent.blur(field('Highest strength'));
+    expect(field('Highest strength')).toHaveAccessibleDescription(/Lowest strength can't be higher than highest strength\./);
+    expect(field('Lowest strength')).not.toHaveAttribute('aria-invalid');
+  });
+
+  it('resets to defaults and can undo it', async () => {
+    render(<CustomProfilePanel />);
+    await waitFor(() => expect(mockRead).toHaveBeenCalled());
+    fireEvent.change(field('Buzz length'), { target: { value: '120' } });
+    fireEvent.blur(field('Buzz length'));
+    expect(screen.getByText('You changed these from the defaults.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Reset to defaults' }));
+    expect(field('Buzz length')).toHaveValue(String(CUSTOM_DEFAULTS.on));
+    expect(screen.getByText('Settings reset.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Undo' }));
+    expect(field('Buzz length')).toHaveValue('120');
+  });
+
+  it('notes when the pause limits how much timing can vary', async () => {
+    useSettingsStore.setState({ settings: { disableLedDuringTherapy: false, debugMode: false, customProfile: { ...CUSTOM_DEFAULTS, off: 30, jitter: 50 } } });
+    render(<CustomProfilePanel />);
+    expect(await screen.findByText(/With this pause, timing can vary by at most \d+(\.\d)?%\./)).toBeInTheDocument();
+  });
+
+  it('keeps timing details one click away', async () => {
+    render(<CustomProfilePanel />);
+    await waitFor(() => expect(mockRead).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: 'Show timing details' }));
+    expect(screen.getByText(/Finger slot \d+ ms · Cycle \d+ ms \([\d.]+ Hz\) on v2/)).toHaveClass('code-s');
+  });
+
+  it('labels the mirror switch in plain words', async () => {
+    render(<CustomProfilePanel />);
+    await waitFor(() => expect(mockRead).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('switch', { name: 'Same order on both devices' }));
+    expect(useSettingsStore.getState().settings.customProfile?.mirror).toBe(true);
+  });
+
+  it('can load the settings from the device again', async () => {
+    render(<CustomProfilePanel />);
+    await waitFor(() => expect(mockRead).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: 'Load from device' }));
+    await waitFor(() => expect(mockRead).toHaveBeenCalledTimes(2));
   });
 });

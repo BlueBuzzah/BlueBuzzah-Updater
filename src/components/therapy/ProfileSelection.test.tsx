@@ -1,76 +1,56 @@
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { therapyService } from '@/services/TherapyService';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { useTherapyStore } from '@/stores/therapyStore';
 import { ProfileSelection } from './ProfileSelection';
 
 vi.mock('@/services/TherapyService', () => ({
-  therapyService: {
-    readCustomProfile: vi.fn(),
-    configureProfile: vi.fn(),
-  },
+  therapyService: { readCustomProfile: vi.fn(), configureProfile: vi.fn() },
 }));
-
-const mockRead = vi.mocked(therapyService.readCustomProfile);
 
 describe('ProfileSelection', () => {
   beforeEach(() => {
-    mockRead.mockReset();
-    mockRead.mockResolvedValue({
-      case: 'no_device',
-      values: null,
-      profileName: null,
-      motors: null,
-    });
-    useSettingsStore.setState({
-      settings: { disableLedDuringTherapy: false, debugMode: false },
-      isLoaded: true,
-    });
+    vi.mocked(therapyService.readCustomProfile).mockResolvedValue({ case: 'no_device', values: null, profileName: null, motors: null });
+    useSettingsStore.setState({ settings: { disableLedDuringTherapy: false, debugMode: false, selectedProfile: null }, isLoaded: true, loadError: null });
+    useTherapyStore.getState().reset();
   });
 
-  it('offers five profile cards', () => {
-    render(<ProfileSelection onSelect={vi.fn()} />);
-    for (const name of ['Regular', 'Noisy', 'Hybrid', 'Gentle', 'Custom']) {
-      expect(screen.getByText(name)).toBeInTheDocument();
-    }
+  it('offers the five patterns as a radio group in plain words', () => {
+    render(<ProfileSelection />);
+    const group = screen.getByRole('radiogroup', { name: 'Choose a pattern' });
+    expect(screen.getAllByRole('radio')).toHaveLength(5);
+    expect(group).not.toHaveTextContent(/therapeutic|stimulation|vCR|jitter/i);
   });
 
-  it('does not show the parameter panel until Custom is selected', () => {
-    render(<ProfileSelection onSelect={vi.fn()} />);
-    expect(screen.queryByTestId('derived-timing')).not.toBeInTheDocument();
-    expect(therapyService.readCustomProfile).not.toHaveBeenCalled();
+  it('arrow keys move the choice and store it for the configure step', () => {
+    useSettingsStore.setState({ settings: { disableLedDuringTherapy: false, debugMode: false, selectedProfile: 'REGULAR' } });
+    render(<ProfileSelection />);
+    fireEvent.keyDown(screen.getByRole('radio', { name: /^Regular/ }), { key: 'ArrowDown' });
+    expect(screen.getByRole('radio', { name: /^Noisy/ })).toHaveAttribute('aria-checked', 'true');
+    expect(useTherapyStore.getState().selectedProfile).toBe('NOISY');
+    expect(useSettingsStore.getState().settings.selectedProfile).toBe('NOISY');
   });
 
-  it('expands the parameter panel when Custom is selected', async () => {
-    const user = userEvent.setup();
-    render(<ProfileSelection onSelect={vi.fn()} />);
-
-    await user.click(screen.getByText('Custom'));
-
-    expect(await screen.findByTestId('derived-timing')).toBeInTheDocument();
-    expect(useSettingsStore.getState().settings.selectedProfile).toBe('CUSTOM');
+  it('shows the custom settings only for Custom', () => {
+    render(<ProfileSelection />);
+    expect(screen.queryByText('Custom pattern')).toBeNull();
+    fireEvent.click(screen.getByRole('radio', { name: /^Custom/ }));
+    expect(screen.getByText('Custom pattern')).toBeInTheDocument();
   });
 
-  it('collapses the panel when another profile is selected', async () => {
-    const user = userEvent.setup();
-    render(<ProfileSelection onSelect={vi.fn()} />);
-
-    await user.click(screen.getByText('Custom'));
-    await screen.findByTestId('derived-timing');
-    await user.click(screen.getByText('Regular'));
-
-    expect(screen.queryByTestId('derived-timing')).not.toBeInTheDocument();
+  it('shows device behavior switches without an Advanced toggle', () => {
+    render(<ProfileSelection />);
+    expect(screen.queryByText(/advanced/i)).toBeNull();
+    fireEvent.click(screen.getByRole('switch', { name: 'Turn off the light during sessions' }));
+    expect(useSettingsStore.getState().settings.disableLedDuringTherapy).toBe(true);
+    expect(screen.getByRole('switch', { name: 'Debug output' })).toHaveAccessibleDescription('Sends extra details over USB for troubleshooting.');
   });
 
-  it('applies CUSTOM through onSelect', async () => {
-    const user = userEvent.setup();
-    const onSelect = vi.fn();
-    render(<ProfileSelection onSelect={onSelect} />);
-
-    await user.click(screen.getByText('Custom'));
-    await user.click(screen.getByRole('button', { name: /apply settings/i }));
-
-    expect(onSelect).toHaveBeenCalledWith('CUSTOM');
+  it('explains a settings load problem inline instead of a toast', () => {
+    useSettingsStore.setState({ loadError: 'file locked' });
+    render(<ProfileSelection />);
+    expect(screen.getByText("We couldn't load your saved settings, so these are the defaults.")).toBeInTheDocument();
+    expect(screen.getByText('file locked')).toHaveClass('code-s');
   });
 });

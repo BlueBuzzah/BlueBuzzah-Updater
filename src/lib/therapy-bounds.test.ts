@@ -6,6 +6,7 @@ import {
   effectiveJitterCapPct,
   isDeviatingFromDefaults,
   validateCustomParams,
+  rangeHint,
   type CustomProfileParams,
 } from './therapy-bounds';
 
@@ -50,7 +51,7 @@ describe('CUSTOM_BOUNDS', () => {
 
 describe('validateCustomParams', () => {
   it('accepts the defaults', () => {
-    expect(validateCustomParams(CUSTOM_DEFAULTS)).toEqual([]);
+    expect(validateCustomParams(CUSTOM_DEFAULTS)).toEqual({});
   });
 
   it.each([
@@ -65,7 +66,9 @@ describe('validateCustomParams', () => {
     ['session', 0],
     ['session', 241],
   ] as const)('rejects %s = %d', (field, value) => {
-    expect(validateCustomParams(withField(field, value)).length).toBeGreaterThan(0);
+    expect(validateCustomParams(withField(field, value))[field]).toBe(
+      `Enter a number from ${CUSTOM_BOUNDS[field].min} to ${CUSTOM_BOUNDS[field].max}.`
+    );
   });
 
   it.each([
@@ -78,22 +81,22 @@ describe('validateCustomParams', () => {
     ['session', 1],
     ['session', 240],
   ] as const)('accepts the boundary value %s = %d', (field, value) => {
-    expect(validateCustomParams(withField(field, value))).toEqual([]);
+    expect(validateCustomParams(withField(field, value))).toEqual({});
   });
 
   it('rejects ampMin greater than ampMax', () => {
     const errors = validateCustomParams({ ...CUSTOM_DEFAULTS, ampMin: 90, ampMax: 80 });
-    expect(errors.length).toBeGreaterThan(0);
-    expect(errors.join(' ')).toMatch(/amplitude/i);
+    expect(errors.ampMax).toBe("Lowest strength can't be higher than highest strength.");
+    expect(errors.ampMin).toBeUndefined();
   });
 
   it('accepts ampMin equal to ampMax', () => {
-    expect(validateCustomParams({ ...CUSTOM_DEFAULTS, ampMin: 80, ampMax: 80 })).toEqual([]);
+    expect(validateCustomParams({ ...CUSTOM_DEFAULTS, ampMin: 80, ampMax: 80 })).toEqual({});
   });
 
   it('rejects a non-finite value', () => {
     const errors = validateCustomParams(withField('on', Number.NaN));
-    expect(errors.length).toBeGreaterThan(0);
+    expect(errors.on).toBe('Enter a number from 50 to 200.');
   });
 
   // ampMin/ampMax/session deserialize into u8/u16, so a decimal that passes
@@ -102,12 +105,19 @@ describe('validateCustomParams', () => {
     'rejects a fractional %s',
     (field) => {
       const errors = validateCustomParams(withField(field, 70.5));
-      expect(errors.join(' ')).toMatch(/whole number/i);
+      expect(errors[field]).toBe(`Enter a whole number, like ${CUSTOM_BOUNDS[field].min}.`);
     }
   );
 
+  it('uses plain labels and spelled-out units in the range hint', () => {
+    expect(CUSTOM_BOUNDS.on.label).toBe('Buzz length');
+    expect(rangeHint(CUSTOM_BOUNDS.on)).toBe('50–200 milliseconds');
+    expect(rangeHint(CUSTOM_BOUNDS.jitter)).toBe('0–50%');
+    expect(rangeHint(CUSTOM_BOUNDS.session)).toBe('1–240 minutes');
+  });
+
   it('accepts a fractional jitter, which the backend takes as f32', () => {
-    expect(validateCustomParams(withField('jitter', 23.5))).toEqual([]);
+    expect(validateCustomParams(withField('jitter', 23.5))).toEqual({});
   });
 });
 
