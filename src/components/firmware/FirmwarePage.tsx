@@ -47,11 +47,11 @@ export function FirmwarePage() {
             It&apos;s for testing and may have bugs. Use the latest release for everyday use.
           </Banner>
         )}
-        <div className="grid justify-items-start gap-3">
+        <div className="grid justify-items-end gap-3">
           <Button size="xl" disabled={!!blocked} aria-describedby={blocked ? 'flash-blocked' : undefined} onClick={() => setStep(2)}>
-            Flash firmware
+            Update firmware
           </Button>
-          {blocked && <p id="flash-blocked" className="body-s text-ink-muted">{blocked}</p>}
+          {blocked && <p id="flash-blocked" className="body-s text-right text-ink-muted">{blocked}</p>}
         </div>
       </div>
     );

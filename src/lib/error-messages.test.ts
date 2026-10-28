@@ -272,4 +272,8 @@ describe('matcher fixes', () => {
   it('extracts a DFU error code for the detail line', () => {
     expect(getErrorGuidance('DFU-014 timeout waiting for device')?.code).toBe('DFU-014');
   });
+
+  it('names the Update firmware button in the stopped-flash steps', () => {
+    expect(ERROR_GUIDANCE.DFU_CANCELLED.resolutionSteps).toContain('Select Update firmware to start again.');
+  });
 });

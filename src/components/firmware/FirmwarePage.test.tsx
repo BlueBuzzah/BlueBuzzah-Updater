@@ -17,9 +17,11 @@ describe('FirmwarePage choose phase', () => {
     expect(screen.getByTestId('firmware-selection')).toBeInTheDocument();
   });
 
-  it('explains why Flash firmware is unavailable', () => {
+  it('explains why Update firmware is unavailable, aligned right', () => {
     render(<FirmwarePage />);
-    expect(screen.getByRole('button', { name: 'Flash firmware' })).toBeDisabled();
+    const btn = screen.getByRole('button', { name: 'Update firmware' });
+    expect(btn).toBeDisabled();
+    expect(btn.parentElement).toHaveClass('justify-items-end');
     expect(screen.getByText('Choose a device and a version first.')).toBeInTheDocument();
   });
 
@@ -41,7 +43,7 @@ describe('FirmwarePage choose phase', () => {
     useWizardStore.setState({ selectedRelease: createMockRelease(), selectedDevices: [createMockDevice({ role: 'PRIMARY' })] });
     const setStep = vi.spyOn(useWizardStore.getState(), 'setStep');
     render(<FirmwarePage />);
-    const btn = screen.getByRole('button', { name: 'Flash firmware' });
+    const btn = screen.getByRole('button', { name: 'Update firmware' });
     fireEvent.click(btn);
     vi.setSystemTime(1100);
     fireEvent.click(btn);

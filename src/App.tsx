@@ -12,7 +12,7 @@ import { useTheme } from './hooks/useTheme';
 import { useIsBusy } from './stores/busy';
 
 const TITLES: Record<Section, string> = {
-  firmware: 'Flash firmware',
+  firmware: 'Update firmware',
   configure: 'Configure devices',
   settings: 'Settings',
 };
@@ -27,7 +27,7 @@ function App() {
   const rescan = useCallback(() => window.dispatchEvent(new Event('bb:rescan')), []);
   useShortcuts({ onSection: setSection, onRescan: rescan, enabled: !busy });
 
-  const title = kind === 'flash' ? 'Flashing firmware' : kind === 'configure' ? 'Setting up devices' : TITLES[section];
+  const title = kind === 'flash' ? 'Updating firmware' : kind === 'configure' ? 'Setting up devices' : TITLES[section];
 
   return (
     <>

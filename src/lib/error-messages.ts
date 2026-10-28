@@ -85,7 +85,7 @@ export const ERROR_GUIDANCE: Record<string, ErrorGuidance> = {
   DFU_CANCELLED: {
     title: 'Flash stopped',
     description: 'The flash stopped before it finished. The device may not start until you flash it again.',
-    resolutionSteps: ['Keep the device plugged in.', 'Select Flash firmware to start again.'],
+    resolutionSteps: ['Keep the device plugged in.', 'Select Update firmware to start again.'],
   },
   DFU_MAX_RETRIES: {
     title: 'Flash failed after several tries',
