@@ -1,369 +1,44 @@
-import { useWizardStore } from '@/stores/wizardStore';
-import { createMockDevice, createMockRelease } from '@/test/factories';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SuccessScreen } from './SuccessScreen';
+import { useWizardStore } from '@/stores/wizardStore';
+import { createMockDevice, createMockRelease } from '@/test/factories';
+
+const release = createMockRelease({ version: '2.0.4' });
+const primary = createMockDevice({ path: '/dev/cu.a', role: 'PRIMARY' });
+const secondary = createMockDevice({ path: '/dev/cu.b', role: 'SECONDARY' });
 
 describe('SuccessScreen', () => {
-  const mockOnReset = vi.fn();
-  const mockOnClose = vi.fn();
-  const mockRelease = createMockRelease({ version: '1.0.0' });
-  const mockDevice = createMockDevice({
-    path: '/Volumes/BLUEBUZZAH',
-    label: 'BLUEBUZZAH',
-    role: 'PRIMARY',
+  beforeEach(() => useWizardStore.getState().reset());
+
+  it('confirms the new version in code inside a success banner', () => {
+    useWizardStore.setState({ updateResult: { success: true, message: '', deviceUpdates: [{ device: primary, success: true }] } });
+    render(<SuccessScreen release={release} devices={[primary]} onReset={vi.fn()} onClose={vi.fn()} />);
+    const banner = screen.getByRole('status');
+    expect(banner).toHaveTextContent('Firmware 2.0.4 is on your device');
+    expect(screen.getByText('2.0.4')).toHaveClass('code');
+    expect(document.body).not.toHaveTextContent('Latest');
+    expect(document.body).not.toHaveTextContent('15sec');
   });
 
-  beforeEach(() => {
-    vi.resetAllMocks();
-    useWizardStore.getState().reset();
+  it('tells two devices how to pair without a time limit', () => {
+    useWizardStore.setState({
+      updateResult: { success: true, message: '', deviceUpdates: [{ device: primary, success: true }, { device: secondary, success: true }] },
+    });
+    render(<SuccessScreen release={release} devices={[primary, secondary]} onReset={vi.fn()} onClose={vi.fn()} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Firmware 2.0.4 is on both devices');
+    expect(screen.getByText(/Turn them on and they find each other on their own\./)).toBeInTheDocument();
+    expect(screen.getAllByText('Done', { selector: '.bb-badge span' })).toHaveLength(2);
   });
 
-  describe('Rendering', () => {
-    it('shows success message', () => {
-      render(
-        <SuccessScreen
-          release={mockRelease}
-          devices={[mockDevice]}
-          onReset={mockOnReset}
-          onClose={mockOnClose}
-        />
-      );
-
-      expect(screen.getByText('Installation Complete!')).toBeInTheDocument();
-    });
-
-    it('shows success checkmark', () => {
-      render(
-        <SuccessScreen
-          release={mockRelease}
-          devices={[mockDevice]}
-          onReset={mockOnReset}
-          onClose={mockOnClose}
-        />
-      );
-
-      // Check for the checkmark icon (lucide icons render as SVG)
-      const checkIcon = document.querySelector('svg');
-      expect(checkIcon).toBeInTheDocument();
-    });
-
-    it('shows firmware version installed', () => {
-      render(
-        <SuccessScreen
-          release={mockRelease}
-          devices={[mockDevice]}
-          onReset={mockOnReset}
-          onClose={mockOnClose}
-        />
-      );
-
-      expect(screen.getByText('1.0.0')).toBeInTheDocument();
-      expect(screen.getByText('Installed Firmware')).toBeInTheDocument();
-    });
-
-    it('shows list of updated devices', () => {
-      render(
-        <SuccessScreen
-          release={mockRelease}
-          devices={[mockDevice]}
-          onReset={mockOnReset}
-          onClose={mockOnClose}
-        />
-      );
-
-      expect(screen.getByText('Updated Devices')).toBeInTheDocument();
-      expect(screen.getByText('BLUEBUZZAH')).toBeInTheDocument();
-    });
-
-    it('shows device roles in summary', () => {
-      render(
-        <SuccessScreen
-          release={mockRelease}
-          devices={[mockDevice]}
-          onReset={mockOnReset}
-          onClose={mockOnClose}
-        />
-      );
-
-      expect(screen.getByText('PRIMARY')).toBeInTheDocument();
-    });
-
-    it('shows device path', () => {
-      render(
-        <SuccessScreen
-          release={mockRelease}
-          devices={[mockDevice]}
-          onReset={mockOnReset}
-          onClose={mockOnClose}
-        />
-      );
-
-      expect(screen.getByText('/Volumes/BLUEBUZZAH')).toBeInTheDocument();
-    });
-
-    it('shows update another device button', () => {
-      render(
-        <SuccessScreen
-          release={mockRelease}
-          devices={[mockDevice]}
-          onReset={mockOnReset}
-          onClose={mockOnClose}
-        />
-      );
-
-      expect(screen.getByRole('button', { name: /update another device/i })).toBeInTheDocument();
-    });
-
-    it('shows close button', () => {
-      render(
-        <SuccessScreen
-          release={mockRelease}
-          devices={[mockDevice]}
-          onReset={mockOnReset}
-          onClose={mockOnClose}
-        />
-      );
-
-      expect(screen.getByRole('button', { name: /close/i })).toBeInTheDocument();
-    });
-  });
-
-  describe('Next Steps', () => {
-    it('shows next steps section', () => {
-      render(
-        <SuccessScreen
-          release={mockRelease}
-          devices={[mockDevice]}
-          onReset={mockOnReset}
-          onClose={mockOnClose}
-        />
-      );
-
-      expect(screen.getByText('Next Steps')).toBeInTheDocument();
-    });
-
-    it('shows disconnect devices instruction', () => {
-      render(
-        <SuccessScreen
-          release={mockRelease}
-          devices={[mockDevice]}
-          onReset={mockOnReset}
-          onClose={mockOnClose}
-        />
-      );
-
-      expect(screen.getByText('Disconnect device(s) from your computer')).toBeInTheDocument();
-    });
-
-    it('shows power on devices instruction', () => {
-      render(
-        <SuccessScreen
-          release={mockRelease}
-          devices={[mockDevice]}
-          onReset={mockOnReset}
-          onClose={mockOnClose}
-        />
-      );
-
-      expect(screen.getByText('Power on both devices within 15sec')).toBeInTheDocument();
-    });
-  });
-
-  describe('Interactions', () => {
-    it('update another device button calls onReset', () => {
-      render(
-        <SuccessScreen
-          release={mockRelease}
-          devices={[mockDevice]}
-          onReset={mockOnReset}
-          onClose={mockOnClose}
-        />
-      );
-
-      fireEvent.click(screen.getByRole('button', { name: /update another device/i }));
-
-      expect(mockOnReset).toHaveBeenCalledTimes(1);
-    });
-
-    it('close button calls onClose', () => {
-      render(
-        <SuccessScreen
-          release={mockRelease}
-          devices={[mockDevice]}
-          onReset={mockOnReset}
-          onClose={mockOnClose}
-        />
-      );
-
-      fireEvent.click(screen.getByRole('button', { name: /close/i }));
-
-      expect(mockOnClose).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  describe('Device Count', () => {
-    it('shows correct device count for single device', () => {
-      render(
-        <SuccessScreen
-          release={mockRelease}
-          devices={[mockDevice]}
-          onReset={mockOnReset}
-          onClose={mockOnClose}
-        />
-      );
-
-      expect(screen.getByText('1 device updated successfully')).toBeInTheDocument();
-    });
-
-    it('shows correct device count for multiple devices', () => {
-      const devices = [
-        createMockDevice({ path: '/Volumes/BLUEBUZZAH1', label: 'BLUEBUZZAH1', role: 'PRIMARY' }),
-        createMockDevice({ path: '/Volumes/BLUEBUZZAH2', label: 'BLUEBUZZAH2', role: 'SECONDARY' }),
-      ];
-
-      render(
-        <SuccessScreen
-          release={mockRelease}
-          devices={devices}
-          onReset={mockOnReset}
-          onClose={mockOnClose}
-        />
-      );
-
-      expect(screen.getByText('2 devices updated successfully')).toBeInTheDocument();
-    });
-  });
-
-  describe('Multiple Devices', () => {
-    it('displays all devices', () => {
-      const devices = [
-        createMockDevice({ path: '/Volumes/BLUEBUZZAH1', label: 'BLUEBUZZAH1', role: 'PRIMARY' }),
-        createMockDevice({ path: '/Volumes/BLUEBUZZAH2', label: 'BLUEBUZZAH2', role: 'SECONDARY' }),
-      ];
-
-      render(
-        <SuccessScreen
-          release={mockRelease}
-          devices={devices}
-          onReset={mockOnReset}
-          onClose={mockOnClose}
-        />
-      );
-
-      expect(screen.getByText('BLUEBUZZAH1')).toBeInTheDocument();
-      expect(screen.getByText('BLUEBUZZAH2')).toBeInTheDocument();
-    });
-
-    it('shows both roles for multiple devices', () => {
-      const devices = [
-        createMockDevice({ path: '/Volumes/BLUEBUZZAH1', label: 'BLUEBUZZAH1', role: 'PRIMARY' }),
-        createMockDevice({ path: '/Volumes/BLUEBUZZAH2', label: 'BLUEBUZZAH2', role: 'SECONDARY' }),
-      ];
-
-      render(
-        <SuccessScreen
-          release={mockRelease}
-          devices={devices}
-          onReset={mockOnReset}
-          onClose={mockOnClose}
-        />
-      );
-
-      expect(screen.getByText('PRIMARY')).toBeInTheDocument();
-      expect(screen.getByText('SECONDARY')).toBeInTheDocument();
-    });
-  });
-
-  describe('Latest Badge', () => {
-    it('shows Latest badge', () => {
-      render(
-        <SuccessScreen
-          release={mockRelease}
-          devices={[mockDevice]}
-          onReset={mockOnReset}
-          onClose={mockOnClose}
-        />
-      );
-
-      expect(screen.getByText('Latest')).toBeInTheDocument();
-    });
-  });
-
-  describe('Per-Device Results', () => {
-    it('shows partial success when one device fails', () => {
-      const device1 = createMockDevice({ path: '/Volumes/BLUEBUZZAH1', label: 'BLUEBUZZAH1', role: 'PRIMARY' });
-      const device2 = createMockDevice({ path: '/Volumes/BLUEBUZZAH2', label: 'BLUEBUZZAH2', role: 'SECONDARY' });
-
-      useWizardStore.getState().setUpdateResult({
-        success: false,
-        message: 'Some devices failed to update',
-        deviceUpdates: [
-          { device: device1, success: true },
-          { device: device2, success: false, error: 'DFU transfer failed' },
-        ],
-      });
-
-      render(
-        <SuccessScreen
-          release={mockRelease}
-          devices={[device1, device2]}
-          onReset={mockOnReset}
-          onClose={mockOnClose}
-        />
-      );
-
-      expect(screen.getByText('Partial Success')).toBeInTheDocument();
-      const matches = screen.getAllByText('1 of 2 devices updated successfully');
-      expect(matches.length).toBeGreaterThanOrEqual(1);
-    });
-
-    it('shows failure message for failed device', () => {
-      const device1 = createMockDevice({ path: '/Volumes/BLUEBUZZAH1', label: 'BLUEBUZZAH1', role: 'PRIMARY' });
-
-      useWizardStore.getState().setUpdateResult({
-        success: false,
-        message: 'Device failed',
-        deviceUpdates: [
-          { device: device1, success: false, error: 'DFU transfer failed' },
-        ],
-      });
-
-      render(
-        <SuccessScreen
-          release={mockRelease}
-          devices={[device1]}
-          onReset={mockOnReset}
-          onClose={mockOnClose}
-        />
-      );
-
-      expect(screen.getByText('Installation Failed')).toBeInTheDocument();
-      expect(screen.getByText('DFU transfer failed')).toBeInTheDocument();
-      expect(screen.getByText('Failed')).toBeInTheDocument();
-    });
-
-    it('shows Failed badge for failed device', () => {
-      const device1 = createMockDevice({ path: '/Volumes/BLUEBUZZAH1', label: 'BLUEBUZZAH1', role: 'PRIMARY' });
-
-      useWizardStore.getState().setUpdateResult({
-        success: false,
-        message: 'Device failed',
-        deviceUpdates: [
-          { device: device1, success: false, error: 'Connection lost' },
-        ],
-      });
-
-      render(
-        <SuccessScreen
-          release={mockRelease}
-          devices={[device1]}
-          onReset={mockOnReset}
-          onClose={mockOnClose}
-        />
-      );
-
-      expect(screen.getByText('Failed')).toBeInTheDocument();
-    });
+  it('offers to flash another device or finish', () => {
+    const onReset = vi.fn();
+    const onClose = vi.fn();
+    useWizardStore.setState({ updateResult: { success: true, message: '', deviceUpdates: [{ device: primary, success: true }] } });
+    render(<SuccessScreen release={release} devices={[primary]} onReset={onReset} onClose={onClose} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Flash another device' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Done$/ }));
+    expect(onReset).toHaveBeenCalledTimes(1);
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

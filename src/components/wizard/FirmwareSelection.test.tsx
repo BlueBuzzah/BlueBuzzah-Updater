@@ -48,7 +48,7 @@ describe('FirmwareSelection', () => {
     render(<Harness />);
     const group = await screen.findByRole('radiogroup', { name: 'Choose a version' });
     expect(group).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: /2\.0\.4/ })).toHaveAttribute('aria-checked', 'true');
+    await waitFor(() => expect(screen.getByRole('radio', { name: /2\.0\.4/ })).toHaveAttribute('aria-checked', 'true'));
     expect(screen.queryByRole('radio', { name: /2\.1\.0-beta/ })).toBeNull();
     expect(screen.getByRole('radio', { name: /2\.0\.4/ })).toHaveTextContent('Latest');
   });
@@ -56,7 +56,7 @@ describe('FirmwareSelection', () => {
   it('keeps the stable choice and the Latest badge when experimental versions are shown', async () => {
     vi.mocked(firmwareService.fetchReleases).mockResolvedValue([beta, stable, older]);
     render(<Harness />);
-    await screen.findByRole('radiogroup');
+    await waitFor(() => expect(screen.getByRole('radio', { name: /2\.0\.4/ })).toHaveAttribute('aria-checked', 'true'));
     fireEvent.click(screen.getByRole('switch', { name: 'Show experimental versions' }));
     const betaRadio = screen.getByRole('radio', { name: /2\.1\.0-beta/ });
     expect(betaRadio).toHaveTextContent('Experimental');
