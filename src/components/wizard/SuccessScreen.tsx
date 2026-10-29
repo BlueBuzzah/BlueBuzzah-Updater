@@ -7,12 +7,11 @@ import { FlashOutcome } from './FlashOutcome';
 interface SuccessScreenProps {
   release: FirmwareRelease;
   devices: Device[];
-  onReset: () => void;
   onClose: () => void;
 }
 
 /** The finished flash (updater.md step 4). */
-export function SuccessScreen({ release, devices, onReset, onClose }: SuccessScreenProps) {
+export function SuccessScreen({ release, devices, onClose }: SuccessScreenProps) {
   const { logs, updateResult } = useWizardStore();
   const results = updateResult?.deviceUpdates ?? devices.map((device) => ({ device, success: true }));
   return (
@@ -23,16 +22,8 @@ export function SuccessScreen({ release, devices, onReset, onClose }: SuccessScr
         results={results}
         error={updateResult?.success === false ? updateResult.message : null}
         logText={logs.join('\n')}
-        actions={
-          <>
-            <Button variant="secondary" onClick={onReset}>
-              Flash Another Device
-            </Button>
-            <Button onClick={onClose}>Done</Button>
-          </>
-        }
       />
-      <LogPane lines={logs} />
+      <LogPane lines={logs} actions={<Button onClick={onClose}>Done</Button>} />
     </div>
   );
 }

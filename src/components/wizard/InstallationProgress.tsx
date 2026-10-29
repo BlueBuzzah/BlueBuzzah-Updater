@@ -347,14 +347,16 @@ export function InstallationProgress({ release, devices, onComplete, onProgressU
           );
         })}
       </ul>
-      {stage !== 'complete' && (
-        <div>
-          <Button variant="quiet" icon={Square} guardRepeat disabled={isCancelling} onClick={() => setShowStopConfirm(true)}>
-            Stop
-          </Button>
-        </div>
-      )}
-      <LogPane lines={logs} />
+      <LogPane
+        lines={logs}
+        actions={
+          stage !== 'complete' && (
+            <Button variant="danger" icon={Square} guardRepeat disabled={isCancelling} onClick={() => setShowStopConfirm(true)}>
+              Stop
+            </Button>
+          )
+        }
+      />
       <ConfirmDialog
         open={showStopConfirm}
         onOpenChange={setShowStopConfirm}

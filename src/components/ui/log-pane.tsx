@@ -8,10 +8,12 @@ import { TextField } from './text-field';
 interface LogPaneProps {
   lines: string[];
   fileName?: string;
+  /** Shown at the end of the Show Log row */
+  actions?: React.ReactNode;
 }
 
 /** updater.md Logs: code-s on surface-sunken, line numbers, Copy, Save and a filter. */
-export function LogPane({ lines, fileName = 'bluebuzzah-updater-log.txt' }: LogPaneProps) {
+export function LogPane({ lines, fileName = 'bluebuzzah-updater-log.txt', actions }: LogPaneProps) {
   const [open, setOpen] = React.useState(false);
   const [filter, setFilter] = React.useState('');
   const [status, setStatus] = React.useState('');
@@ -41,10 +43,11 @@ export function LogPane({ lines, fileName = 'bluebuzzah-updater-log.txt' }: LogP
 
   return (
     <div className="grid gap-4">
-      <div>
+      <div className="flex flex-wrap items-center justify-between gap-target-gap">
         <Button variant="quiet" icon={open ? ChevronUp : ChevronDown} aria-expanded={open} aria-controls={paneId} onClick={() => setOpen(!open)}>
           {open ? 'Hide Log' : 'Show Log'}
         </Button>
+        {actions}
       </div>
       {open && (
         <div id={paneId} className="grid gap-4">

@@ -34,9 +34,9 @@ vi.mock('./components/wizard/InstallationProgress', () => ({
 }));
 
 vi.mock('./components/wizard/SuccessScreen', () => ({
-  SuccessScreen: ({ onReset }: { onReset: () => void }) => (
+  SuccessScreen: ({ onClose }: { onClose: () => void }) => (
     <div data-testid="success-screen">
-      <button onClick={onReset}>Reset</button>
+      <button onClick={onClose}>Reset</button>
     </div>
   ),
 }));

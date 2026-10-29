@@ -121,7 +121,12 @@ describe('InstallationProgress', () => {
   it('confirms before stopping, without double-tap recovery advice', async () => {
     vi.mocked(deviceService.validateDevices).mockImplementation(() => new Promise(() => {}));
     renderIt();
-    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    const stop = screen.getByRole('button', { name: 'Stop' });
+    expect(stop).toHaveClass('bb-btn--danger');
+    // Same row as Show Log, at the end.
+    expect(stop.parentElement).toBe(screen.getByRole('button', { name: 'Show Log' }).parentElement);
+    expect(stop.parentElement!.lastElementChild).toBe(stop);
+    fireEvent.click(stop);
     const dialog = screen.getByRole('alertdialog', { name: 'Stop the Flash?' });
     expect(dialog).not.toHaveTextContent(/twice/i);
     fireEvent.click(screen.getByRole('button', { name: 'Stop Flash' }));

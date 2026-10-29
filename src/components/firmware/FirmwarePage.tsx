@@ -62,5 +62,5 @@ export function FirmwarePage() {
       <InstallationProgress release={selectedRelease} devices={selectedDevices} onComplete={handleComplete} onProgressUpdate={setUpdateProgress} />
     );
   }
-  return <SuccessScreen release={selectedRelease} devices={selectedDevices} onReset={reset} onClose={reset} />;
+  return <SuccessScreen release={selectedRelease} devices={selectedDevices} onClose={reset} />;
 }
