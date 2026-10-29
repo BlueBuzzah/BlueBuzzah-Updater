@@ -1,5 +1,5 @@
 import { useId, useRef, useState } from 'react';
-import { RefreshCw, TriangleAlert } from 'lucide-react';
+import { Radar, TriangleAlert } from 'lucide-react';
 import { Banner } from '@/components/ui/banner';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -107,7 +107,7 @@ export function DeviceSelection({ mode = 'flash', selectedDevices, onDevicesChan
     <Card
       title="Choose Devices"
       actions={
-        <Button variant="quiet" icon={RefreshCw} onClick={rescan} disabled={loading}>
+        <Button variant="quiet" icon={Radar} onClick={rescan} disabled={loading}>
           Rescan
         </Button>
       }

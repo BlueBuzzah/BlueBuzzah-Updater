@@ -124,6 +124,7 @@ describe('DeviceSelection', () => {
     vi.mocked(deviceService.detectDevices).mockResolvedValue([v2a]);
     render(<Harness />);
     await screen.findByRole('button', { name: /BlueBuzzah v2/ });
+    expect(screen.getByRole('button', { name: 'Rescan' }).querySelector('svg')).toHaveClass('lucide-radar');
     fireEvent.click(screen.getByRole('button', { name: 'Rescan' }));
     await waitFor(() => expect(deviceService.detectDevices).toHaveBeenCalledTimes(2));
     act(() => {
