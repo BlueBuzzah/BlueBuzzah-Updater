@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { Clock, type LucideIcon } from 'lucide-react';
 import { Banner } from '@/components/ui/banner';
 import { DeviceCard } from '@/components/ui/device-card';
 import { LogPane } from '@/components/ui/log-pane';
@@ -206,7 +207,7 @@ export function TherapyProgress({
               <DeviceCard
                 name={BOARD_NAME[device.board]}
                 port={device.path}
-                status={<StatusBadge tone={state.tone}>{state.word}</StatusBadge>}
+                status={<StatusBadge tone={state.tone} icon={state.icon}>{state.word}</StatusBadge>}
                 statusLabel={state.word}
               />
               <ProgressBar
@@ -247,7 +248,7 @@ function stageLabel(stage?: TherapyConfigProgress['stage']): string {
   }
 }
 
-function configState(progress?: TherapyConfigProgress): { tone: Tone; word: string } {
+function configState(progress?: TherapyConfigProgress): { tone: Tone; word: string; icon?: LucideIcon } {
   switch (progress?.stage) {
     case undefined:
       return { tone: 'neutral', word: 'Waiting' };
@@ -258,6 +259,6 @@ function configState(progress?: TherapyConfigProgress): { tone: Tone; word: stri
     case 'error':
       return { tone: 'danger', word: 'Failed' };
     default:
-      return { tone: 'brand', word: 'Setting up' };
+      return { tone: 'brand', word: 'Setting up', icon: Clock };
   }
 }

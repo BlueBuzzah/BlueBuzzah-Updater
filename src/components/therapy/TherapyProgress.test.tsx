@@ -274,7 +274,7 @@ describe('TherapyProgress outcome reporting', () => {
     );
     expect(screen.getByRole('status')).toHaveTextContent('Keep the devices plugged in until this finishes.');
     expect(await screen.findByText('64%')).toBeInTheDocument();
-    expect(screen.getByText('Setting up')).toBeInTheDocument();
+    expect(screen.getByText('Setting up').closest('.bb-badge')!.querySelector('svg')).toHaveClass('lucide-clock');
     expect(screen.getByText('Setting up 0 of 2 devices')).toBeInTheDocument();
   });
 
