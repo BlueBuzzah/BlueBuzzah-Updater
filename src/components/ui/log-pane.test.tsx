@@ -17,14 +17,15 @@ it('is collapsed until opened', () => {
   expect(screen.getByRole('button', { name: 'Hide Log' })).toHaveAttribute('aria-expanded', 'true');
 });
 
-it('filters case-insensitively and keeps original line numbers', () => {
+it('shows every numbered line with Copy and Save, and no filter', () => {
   render(<LogPane lines={lines} />);
   fireEvent.click(screen.getByRole('button', { name: 'Show Log' }));
-  fireEvent.change(screen.getByRole('textbox', { name: 'Filter log' }), { target: { value: 'error' } });
+  expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
   const items = screen.getAllByRole('listitem');
-  expect(items).toHaveLength(1);
-  expect(within(items[0]).getByText('2')).toBeInTheDocument();
-  expect(within(items[0]).getByText('ERROR  b', { normalizer: (t) => t })).toBeInTheDocument();
+  expect(items).toHaveLength(3);
+  expect(within(items[1]).getByText('2')).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Copy Log' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Save Log' })).toBeInTheDocument();
 });
 
 it('saves the whole log to the chosen file', async () => {
