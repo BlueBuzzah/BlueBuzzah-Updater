@@ -56,7 +56,7 @@ describe('InstallationProgress', () => {
     });
     renderIt();
     expect(await screen.findByRole('group', { name: /Primary device.*Flashing/ })).toBeInTheDocument();
-    expect(screen.getByText('Flashing')).toBeInTheDocument();
+    expect(screen.getByText('Flashing').closest('.bb-badge')!.querySelector('svg')).toHaveClass('lucide-clock');
     expect(screen.getByRole('progressbar', { name: 'Primary device' })).toHaveAttribute('aria-valuenow', '64');
   });
 

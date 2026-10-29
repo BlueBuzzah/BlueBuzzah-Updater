@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { RotateCcw, Square } from 'lucide-react';
+import { Clock, RotateCcw, Square, type LucideIcon } from 'lucide-react';
 import { ActionBar } from '@/components/shell/ActionBar';
 import { ConfirmDialog } from '@/components/ui/alert-dialog';
 import { Banner } from '@/components/ui/banner';
@@ -42,7 +42,7 @@ export function stageLabel(stage: UpdateStage | RunStage): string {
   }
 }
 
-function deviceState(progress?: UpdateProgress): { tone: Tone; word: string } {
+function deviceState(progress?: UpdateProgress): { tone: Tone; word: string; icon?: LucideIcon } {
   switch (progress?.stage) {
     case undefined:
       return { tone: 'neutral', word: 'Waiting' };
@@ -53,7 +53,7 @@ function deviceState(progress?: UpdateProgress): { tone: Tone; word: string } {
     case 'cancelled':
       return { tone: 'warning', word: 'Stopped' };
     default:
-      return { tone: 'brand', word: 'Flashing' };
+      return { tone: 'brand', word: 'Flashing', icon: Clock };
   }
 }
 
@@ -340,7 +340,7 @@ export function InstallationProgress({ release, devices, onComplete, onProgressU
                 name={BOARD_NAME[device.board]}
                 role={device.role}
                 port={device.path}
-                status={<StatusBadge tone={state.tone}>{state.word}</StatusBadge>}
+                status={<StatusBadge tone={state.tone} icon={state.icon}>{state.word}</StatusBadge>}
                 statusLabel={state.word}
               />
               <ProgressBar label={name} value={progress?.progress ?? 0} detail={progress?.message} tone={state.tone === 'danger' ? 'danger' : undefined} />
