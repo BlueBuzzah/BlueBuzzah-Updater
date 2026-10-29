@@ -33,7 +33,10 @@ export function ConfigurePage() {
           <DeviceSelection mode="configure" selectedDevices={selectedDevices} onDevicesChange={setDevices} />
           <Banner tone="info">
             <p>{MEDICAL_DISCLAIMER}</p>
-            <p>{IMPLANT_NOTICE}</p>
+            <p>
+              <strong>Important:</strong>
+              {IMPLANT_NOTICE.slice('Important:'.length)}
+            </p>
           </Banner>
         </div>
         <ActionBar hint={blocked} hintId="apply-blocked">

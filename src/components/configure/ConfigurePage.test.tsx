@@ -29,7 +29,9 @@ describe('ConfigurePage choose phase', () => {
   it('shows both legal notices verbatim', () => {
     render(<ConfigurePage />);
     expect(screen.getByText(DISCLAIMER)).toBeInTheDocument();
-    expect(screen.getByText(IMPLANT)).toBeInTheDocument();
+    const important = screen.getByText('Important:');
+    expect(important.tagName).toBe('STRONG');
+    expect(important.parentElement!.textContent).toBe(IMPLANT);
   });
 
   it('puts the legal notices last, just above the action bar', () => {
