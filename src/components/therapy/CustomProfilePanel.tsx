@@ -123,35 +123,6 @@ export function CustomProfilePanel(): JSX.Element {
         <p className="body">Set your own timing, strength and session length.</p>
         {prefillMessage && <p className="body-s text-ink-muted" aria-live="polite">{prefillMessage}</p>}
 
-        {(deviating || beforeReset) && (
-          <div className="flex flex-wrap items-center justify-between gap-target-gap" aria-live="polite">
-            <p className="body-s flex items-center gap-2">
-              {beforeReset ? (
-                'Settings reset.'
-              ) : (
-                <>
-                  <TriangleAlert size={ICON.s} className="shrink-0 text-warning" />
-                  You changed these from the defaults.
-                </>
-              )}
-            </p>
-            {beforeReset ? (
-              <Button variant="quiet" onClick={() => replaceAll(beforeReset)}>Undo</Button>
-            ) : (
-              <Button
-                variant="quiet"
-                onClick={() => {
-                  const previous = values;
-                  replaceAll({ ...CUSTOM_DEFAULTS });
-                  setBeforeReset(previous);
-                }}
-              >
-                Reset to Defaults
-              </Button>
-            )}
-          </div>
-        )}
-
         <div className="grid gap-6 sm:grid-cols-2">
           {NUMERIC_FIELDS.map((field) => (
             <TextField
@@ -180,6 +151,35 @@ export function CustomProfilePanel(): JSX.Element {
           <p data-testid="jitter-advisory" className="body-s tabular-nums text-ink-muted">
             With this pause, timing can vary by at most {jitterCap.toFixed(1)}%.
           </p>
+        )}
+
+        {(deviating || beforeReset) && (
+          <div className="flex flex-wrap items-center justify-between gap-target-gap" aria-live="polite">
+            <p className="body-s flex items-center gap-2">
+              {beforeReset ? (
+                'Settings reset.'
+              ) : (
+                <>
+                  <TriangleAlert size={ICON.s} className="shrink-0 text-warning" />
+                  You have changed these values from the defaults.
+                </>
+              )}
+            </p>
+            {beforeReset ? (
+              <Button variant="quiet" onClick={() => replaceAll(beforeReset)}>Undo</Button>
+            ) : (
+              <Button
+                variant="quiet"
+                onClick={() => {
+                  const previous = values;
+                  replaceAll({ ...CUSTOM_DEFAULTS });
+                  setBeforeReset(previous);
+                }}
+              >
+                Reset to Defaults
+              </Button>
+            )}
+          </div>
         )}
 
         <div className="flex flex-wrap items-start justify-between gap-target-gap">

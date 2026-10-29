@@ -96,7 +96,11 @@ describe('CustomProfilePanel', () => {
     await waitFor(() => expect(mockRead).toHaveBeenCalled());
     fireEvent.change(field('Buzz length'), { target: { value: '120' } });
     fireEvent.blur(field('Buzz length'));
-    expect(screen.getByText('You changed these from the defaults.')).toBeInTheDocument();
+    const changed = screen.getByText('You have changed these values from the defaults.');
+    const follows = (a: Element, b: Element) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    // Just above Show Timing Details and Load from Device, after the settings.
+    expect(follows(screen.getByRole('switch', { name: 'Same order on both devices' }), changed)).toBe(true);
+    expect(follows(changed, screen.getByRole('button', { name: 'Show Timing Details' }))).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: 'Reset to Defaults' }));
     expect(field('Buzz length')).toHaveValue(String(CUSTOM_DEFAULTS.on));
     expect(screen.getByText('Settings reset.')).toBeInTheDocument();
