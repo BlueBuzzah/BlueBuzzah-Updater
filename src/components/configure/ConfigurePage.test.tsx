@@ -47,6 +47,7 @@ describe('ConfigurePage choose phase', () => {
     const apply = screen.getByRole('button', { name: 'Apply to Devices' });
     expect(apply).toBeDisabled();
     expect(apply).toHaveClass('bb-btn--lg');
+    expect(apply.querySelector('svg')).toHaveClass('lucide-hard-drive-download');
     const bar = screen.getByTestId('action-bar');
     expect(bar).toContainElement(apply);
     expect(bar).toContainElement(screen.getByText('Choose a pattern and at least one device first.'));
