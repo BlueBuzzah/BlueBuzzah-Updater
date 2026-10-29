@@ -32,6 +32,14 @@ describe('ConfigurePage choose phase', () => {
     expect(screen.getByText(IMPLANT)).toBeInTheDocument();
   });
 
+  it('puts the legal notices last, just above the action bar', () => {
+    render(<ConfigurePage />);
+    const notices = screen.getByText(DISCLAIMER);
+    const follows = (a: Element, b: Element) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(follows(screen.getByTestId('device-selection'), notices)).toBe(true);
+    expect(follows(notices, screen.getByTestId('action-bar'))).toBe(true);
+  });
+
   it('explains why Apply is unavailable', () => {
     render(<ConfigurePage />);
     const apply = screen.getByRole('button', { name: 'Apply to Devices' });

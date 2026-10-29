@@ -29,12 +29,12 @@ export function ConfigurePage() {
     return (
       <>
         <div className="grid max-w-content gap-10">
+          <ProfileSelection />
+          <DeviceSelection mode="configure" selectedDevices={selectedDevices} onDevicesChange={setDevices} />
           <Banner tone="info">
             <p>{MEDICAL_DISCLAIMER}</p>
             <p>{IMPLANT_NOTICE}</p>
           </Banner>
-          <ProfileSelection />
-          <DeviceSelection mode="configure" selectedDevices={selectedDevices} onDevicesChange={setDevices} />
         </div>
         <ActionBar hint={blocked} hintId="apply-blocked">
           <Button size="lg" guardRepeat disabled={!!blocked} aria-describedby={blocked ? 'apply-blocked' : undefined} onClick={() => setStep(2)}>
