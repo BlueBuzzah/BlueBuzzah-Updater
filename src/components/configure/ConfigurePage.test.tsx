@@ -29,15 +29,27 @@ describe('ConfigurePage choose phase', () => {
   it('shows both legal notices verbatim', () => {
     render(<ConfigurePage />);
     expect(screen.getByText(DISCLAIMER)).toBeInTheDocument();
-    expect(screen.getByText(IMPLANT)).toBeInTheDocument();
+    const important = screen.getByText('Important:');
+    expect(important.tagName).toBe('STRONG');
+    expect(important.parentElement!.textContent).toBe(IMPLANT);
+  });
+
+  it('puts the legal notices last, just above the action bar', () => {
+    render(<ConfigurePage />);
+    const notices = screen.getByText(DISCLAIMER);
+    const follows = (a: Element, b: Element) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(follows(screen.getByTestId('device-selection'), notices)).toBe(true);
+    expect(follows(notices, screen.getByTestId('action-bar'))).toBe(true);
   });
 
   it('explains why Apply is unavailable', () => {
     render(<ConfigurePage />);
     const apply = screen.getByRole('button', { name: 'Apply to Devices' });
     expect(apply).toBeDisabled();
-    expect(apply.parentElement).toHaveClass('justify-items-end');
-    expect(screen.getByText('Choose a pattern and at least one device first.')).toBeInTheDocument();
+    expect(apply).toHaveClass('bb-btn--lg');
+    const bar = screen.getByTestId('action-bar');
+    expect(bar).toContainElement(apply);
+    expect(bar).toContainElement(screen.getByText('Choose a pattern and at least one device first.'));
   });
 
   it('blocks Apply while a custom setting is invalid', () => {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Copy } from 'lucide-react';
 import { Banner } from '@/components/ui/banner';
 import { Button } from '@/components/ui/button';
@@ -16,11 +16,10 @@ interface FlashOutcomeProps {
   error?: string | null;
   /** Copied by "Copy Details" */
   logText: string;
-  actions?: ReactNode;
 }
 
 /** updater.md step 4 (Verify): one Banner for the outcome, then each device with a word for its state. */
-export function FlashOutcome({ version, devices, results, error, logText, actions }: FlashOutcomeProps) {
+export function FlashOutcome({ version, devices, results, error, logText }: FlashOutcomeProps) {
   const failed = results.filter((r) => !r.success);
   const succeeded = results.length - failed.length;
   const tone = failed.length === 0 && !error ? 'success' : succeeded > 0 ? 'warning' : 'danger';
@@ -109,7 +108,6 @@ export function FlashOutcome({ version, devices, results, error, logText, action
           );
         })}
       </ul>
-      {actions && <div className="flex flex-wrap gap-target-gap">{actions}</div>}
     </div>
   );
 }

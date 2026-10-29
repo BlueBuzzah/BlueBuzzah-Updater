@@ -132,22 +132,6 @@ export function isDeviatingFromDefaults(p: CustomProfileParams): boolean {
 }
 
 /**
- * Coordinated-reset timing derived from the burst parameters.
- *
- * Mirrors therapy_engine.cpp: one fingertip slot is ON + OFF, and a full
- * coordinated-reset cycle covers every fingertip once.
- */
-export function crTiming(
-  p: CustomProfileParams,
-  fingers: number
-): { slotMs: number; periodMs: number; hz: number } {
-  const slotMs = Math.round(p.on + p.off);
-  const periodMs = Math.round(fingers * (p.on + p.off));
-  const hz = periodMs > 0 ? 1000 / periodMs : 0;
-  return { slotMs, periodMs, hz };
-}
-
-/**
  * The largest jitter percentage the current ON/OFF pair can express before
  * firmware clamps the excursion.
  *

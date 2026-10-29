@@ -83,8 +83,24 @@ describe('DeviceSelection', () => {
     expect(screen.queryByText('Choose a role for this device.')).toBeNull();
   });
 
-  it('auto-assigns roles for two devices and explains duplicates next to the role control', async () => {
+  it('selects both devices with roles when exactly 2 of one kind are found', async () => {
     vi.mocked(deviceService.detectDevices).mockResolvedValue([v2a, v2b]);
+    render(<Harness />);
+    expect(await screen.findByRole('button', { name: /Primary device.*port \/dev\/cu\.a.*selected/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: /Secondary device.*port \/dev\/cu\.b.*selected/ })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByText('We set the roles for you. You can change them.')).toBeInTheDocument();
+    expect(screen.getByText(/Found 2 devices\. 2 selected/)).toBeInTheDocument();
+  });
+
+  it('keeps an existing selection instead of selecting both', async () => {
+    vi.mocked(deviceService.detectDevices).mockResolvedValue([v2a, v2b]);
+    render(<Harness initial={[v2a]} />);
+    await screen.findByText(/Found 2 devices\. 1 selected/);
+    expect(screen.getByRole('button', { name: /port \/dev\/cu\.b/ })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('auto-assigns roles for two devices and explains duplicates next to the role control', async () => {
+    vi.mocked(deviceService.detectDevices).mockResolvedValue([v2a, v2b, v2c]);
     render(<Harness />);
     fireEvent.click(await screen.findByRole('button', { name: /port \/dev\/cu\.a/ }));
     fireEvent.click(screen.getByRole('button', { name: /port \/dev\/cu\.b/ }));
@@ -116,6 +132,7 @@ describe('DeviceSelection', () => {
     render(<Harness onChange={onChange} />);
     fireEvent.click(await screen.findByRole('button', { name: /port \/dev\/cu\.a/ }));
     fireEvent.click(screen.getByRole('button', { name: /port COM7/ }));
+    // Two found, but not one kind: nothing was auto-selected.
     expect(onChange).toHaveBeenCalledTimes(1);
     expect(screen.getByText("You can't flash a v2 and a v3 device together. Flash one kind at a time.")).toBeInTheDocument();
   });
@@ -124,6 +141,7 @@ describe('DeviceSelection', () => {
     vi.mocked(deviceService.detectDevices).mockResolvedValue([v2a]);
     render(<Harness />);
     await screen.findByRole('button', { name: /BlueBuzzah v2/ });
+    expect(screen.getByRole('button', { name: 'Rescan' }).querySelector('svg')).toHaveClass('lucide-radar');
     fireEvent.click(screen.getByRole('button', { name: 'Rescan' }));
     await waitFor(() => expect(deviceService.detectDevices).toHaveBeenCalledTimes(2));
     act(() => {
@@ -178,12 +196,11 @@ describe('DeviceSelection', () => {
       render(<Harness mode="configure" />);
       expect(screen.getByRole('region', { name: 'Choose Devices' })).toBeInTheDocument();
       expect(screen.getByText('Plug in up to 2 devices with a USB data cable.')).toBeInTheDocument();
-      fireEvent.click(await screen.findByRole('button', { name: /port \/dev\/cu\.a/ }));
-      fireEvent.click(screen.getByRole('button', { name: /port \/dev\/cu\.b/ }));
+      // Exactly 2 found: both are selected without a click.
+      expect(await screen.findByText(/Found 2 devices\. 2 selected/)).toBeInTheDocument();
       expect(screen.queryByRole('radiogroup', { name: 'Role' })).toBeNull();
       expect(screen.queryByText('We set the roles for you. You can change them.')).toBeNull();
       expect(screen.queryByText('Primary device')).toBeNull();
-      expect(screen.getByText(/Found 2 devices\. 2 selected/)).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Rescan' })).toBeInTheDocument();
     });
 
@@ -203,7 +220,14 @@ describe('DeviceSelection', () => {
       render(<Harness mode="configure" />);
       await screen.findByRole('button', { name: /port \/dev\/cu\.a/ });
       expect(screen.queryByRole('button', { name: /cu\.boot/ })).toBeNull();
-      expect(screen.getByText('Found 1 device.')).toBeInTheDocument();
+      expect(screen.getByText('Found 1 device.')).toBeInTheDocument(); // and not auto-selected
+    });
+
+    it('selects a v2 and a v3 together when they are the only 2 found', async () => {
+      vi.mocked(deviceService.detectDevices).mockResolvedValue([v2a, v3]);
+      const onChange = vi.fn();
+      render(<Harness mode="configure" onChange={onChange} />);
+      await waitFor(() => expect(onChange).toHaveBeenCalledWith([v2a, v3]));
     });
 
     it('allows a v2 and a v3 together, and says when the limit is reached', async () => {

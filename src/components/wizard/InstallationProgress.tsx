@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { RotateCcw, Square } from 'lucide-react';
+import { Clock, RotateCcw, Square, type LucideIcon } from 'lucide-react';
+import { ActionBar } from '@/components/shell/ActionBar';
 import { ConfirmDialog } from '@/components/ui/alert-dialog';
 import { Banner } from '@/components/ui/banner';
 import { Button } from '@/components/ui/button';
@@ -41,7 +42,7 @@ export function stageLabel(stage: UpdateStage | RunStage): string {
   }
 }
 
-function deviceState(progress?: UpdateProgress): { tone: Tone; word: string } {
+function deviceState(progress?: UpdateProgress): { tone: Tone; word: string; icon?: LucideIcon } {
   switch (progress?.stage) {
     case undefined:
       return { tone: 'neutral', word: 'Waiting' };
@@ -52,7 +53,7 @@ function deviceState(progress?: UpdateProgress): { tone: Tone; word: string } {
     case 'cancelled':
       return { tone: 'warning', word: 'Stopped' };
     default:
-      return { tone: 'brand', word: 'Flashing' };
+      return { tone: 'brand', word: 'Flashing', icon: Clock };
   }
 }
 
@@ -294,27 +295,27 @@ export function InstallationProgress({ release, devices, onComplete, onProgressU
 
   if (error) {
     return (
-      <div className="grid max-w-content gap-10">
-        <FlashOutcome
-          version={release.version}
-          devices={updatedDevices}
-          results={results}
-          error={results.some((r) => r.success) ? null : error}
-          logText={logs.join('\n')}
-          actions={
-            <>
-              <Button icon={RotateCcw} guardRepeat onClick={handleRetry}>
-                Try Again
-              </Button>
-              <Button variant="quiet" onClick={reset}>
-                Start Over
-              </Button>
-            </>
-          }
-        />
-        {/* Every failure keeps the full log one click away for troubleshooting. */}
-        <LogPane lines={logs} />
-      </div>
+      <>
+        <div className="grid max-w-content gap-10">
+          <FlashOutcome
+            version={release.version}
+            devices={updatedDevices}
+            results={results}
+            error={results.some((r) => r.success) ? null : error}
+            logText={logs.join('\n')}
+          />
+          {/* Every failure keeps the full log one click away for troubleshooting. */}
+          <LogPane lines={logs} />
+        </div>
+        <ActionBar>
+          <Button variant="quiet" size="lg" onClick={reset}>
+            Start Over
+          </Button>
+          <Button size="lg" icon={RotateCcw} guardRepeat onClick={handleRetry}>
+            Try Again
+          </Button>
+        </ActionBar>
+      </>
     );
   }
 
@@ -339,7 +340,7 @@ export function InstallationProgress({ release, devices, onComplete, onProgressU
                 name={BOARD_NAME[device.board]}
                 role={device.role}
                 port={device.path}
-                status={<StatusBadge tone={state.tone}>{state.word}</StatusBadge>}
+                status={<StatusBadge tone={state.tone} icon={state.icon}>{state.word}</StatusBadge>}
                 statusLabel={state.word}
               />
               <ProgressBar label={name} value={progress?.progress ?? 0} detail={progress?.message} tone={state.tone === 'danger' ? 'danger' : undefined} />
@@ -347,14 +348,16 @@ export function InstallationProgress({ release, devices, onComplete, onProgressU
           );
         })}
       </ul>
-      {stage !== 'complete' && (
-        <div>
-          <Button variant="quiet" icon={Square} guardRepeat disabled={isCancelling} onClick={() => setShowStopConfirm(true)}>
-            Stop
-          </Button>
-        </div>
-      )}
-      <LogPane lines={logs} />
+      <LogPane
+        lines={logs}
+        actions={
+          stage !== 'complete' && (
+            <Button variant="danger" icon={Square} guardRepeat disabled={isCancelling} onClick={() => setShowStopConfirm(true)}>
+              Stop
+            </Button>
+          )
+        }
+      />
       <ConfirmDialog
         open={showStopConfirm}
         onOpenChange={setShowStopConfirm}

@@ -13,7 +13,7 @@ describe('SuccessScreen', () => {
 
   it('confirms the new version in code inside a success banner', () => {
     useWizardStore.setState({ updateResult: { success: true, message: '', deviceUpdates: [{ device: primary, success: true }] } });
-    render(<SuccessScreen release={release} devices={[primary]} onReset={vi.fn()} onClose={vi.fn()} />);
+    render(<SuccessScreen release={release} devices={[primary]} onClose={vi.fn()} />);
     const banner = screen.getByRole('status');
     expect(banner).toHaveTextContent('Firmware 2.0.4 is on your device');
     expect(screen.getByText('2.0.4')).toHaveClass('code');
@@ -25,20 +25,20 @@ describe('SuccessScreen', () => {
     useWizardStore.setState({
       updateResult: { success: true, message: '', deviceUpdates: [{ device: primary, success: true }, { device: secondary, success: true }] },
     });
-    render(<SuccessScreen release={release} devices={[primary, secondary]} onReset={vi.fn()} onClose={vi.fn()} />);
+    render(<SuccessScreen release={release} devices={[primary, secondary]} onClose={vi.fn()} />);
     expect(screen.getByRole('status')).toHaveTextContent('Firmware 2.0.4 is on both devices');
     expect(screen.getByText(/Turn them on and they find each other on their own\./)).toBeInTheDocument();
     expect(screen.getAllByText('Done', { selector: '.bb-badge span' })).toHaveLength(2);
   });
 
-  it('offers to flash another device or finish', () => {
-    const onReset = vi.fn();
+  it('offers only Done, in the action bar', () => {
     const onClose = vi.fn();
     useWizardStore.setState({ updateResult: { success: true, message: '', deviceUpdates: [{ device: primary, success: true }] } });
-    render(<SuccessScreen release={release} devices={[primary]} onReset={onReset} onClose={onClose} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Flash Another Device' }));
-    fireEvent.click(screen.getByRole('button', { name: /^Done$/ }));
-    expect(onReset).toHaveBeenCalledTimes(1);
+    render(<SuccessScreen release={release} devices={[primary]} onClose={onClose} />);
+    expect(screen.queryByRole('button', { name: 'Flash Another Device' })).not.toBeInTheDocument();
+    const done = screen.getByRole('button', { name: /^Done$/ });
+    expect(screen.getByTestId('action-bar')).toContainElement(done);
+    fireEvent.click(done);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,4 +1,5 @@
 import { ProfileSelection, TherapyProgress, TherapySuccess } from '@/components/therapy';
+import { ActionBar } from '@/components/shell/ActionBar';
 import { Banner } from '@/components/ui/banner';
 import { Button } from '@/components/ui/button';
 import { DeviceSelection } from '@/components/wizard/DeviceSelection';
@@ -26,25 +27,29 @@ export function ConfigurePage() {
 
   if (step < 2) {
     return (
-      <div className="grid max-w-content gap-10">
-        <Banner tone="info">
-          <p>{MEDICAL_DISCLAIMER}</p>
-          <p>{IMPLANT_NOTICE}</p>
-        </Banner>
-        <ProfileSelection />
-        <DeviceSelection mode="configure" selectedDevices={selectedDevices} onDevicesChange={setDevices} />
-        <div className="grid justify-items-end gap-3">
-          <Button size="xl" disabled={!!blocked} aria-describedby={blocked ? 'apply-blocked' : undefined} onClick={() => setStep(2)}>
+      <>
+        <div className="grid max-w-content gap-10">
+          <ProfileSelection />
+          <DeviceSelection mode="configure" selectedDevices={selectedDevices} onDevicesChange={setDevices} />
+          <Banner tone="info">
+            <p>{MEDICAL_DISCLAIMER}</p>
+            <p>
+              <strong>Important:</strong>
+              {IMPLANT_NOTICE.slice('Important:'.length)}
+            </p>
+          </Banner>
+        </div>
+        <ActionBar hint={blocked} hintId="apply-blocked">
+          <Button size="lg" guardRepeat disabled={!!blocked} aria-describedby={blocked ? 'apply-blocked' : undefined} onClick={() => setStep(2)}>
             {selectedDevices.length === 1 ? 'Apply to Device' : 'Apply to Devices'}
           </Button>
-          {blocked && <p id="apply-blocked" className="body-s text-right text-ink-muted">{blocked}</p>}
-        </div>
-      </div>
+        </ActionBar>
+      </>
     );
   }
   if (!selectedProfile) return null;
   return result ? (
-    <TherapySuccess profile={selectedProfile} devices={selectedDevices} result={result} onReset={startOver} onClose={startOver} />
+    <TherapySuccess profile={selectedProfile} devices={selectedDevices} result={result} onClose={startOver} />
   ) : (
     <TherapyProgress profile={selectedProfile} devices={selectedDevices} onComplete={setResult} onProgressUpdate={setProgress} />
   );

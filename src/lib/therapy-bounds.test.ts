@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   CUSTOM_BOUNDS,
   CUSTOM_DEFAULTS,
-  crTiming,
   effectiveJitterCapPct,
   isDeviatingFromDefaults,
   validateCustomParams,
@@ -136,22 +135,6 @@ describe('isDeviatingFromDefaults', () => {
     ['mirror', true],
   ] as const)('is true when %s changes to %s', (field, value) => {
     expect(isDeviatingFromDefaults(withField(field, value))).toBe(true);
-  });
-});
-
-describe('crTiming', () => {
-  it('returns 668 ms / 1.50 Hz for the defaults on 4 motors', () => {
-    const t = crTiming(CUSTOM_DEFAULTS, 4);
-    expect(t.slotMs).toBe(167);
-    expect(t.periodMs).toBe(668);
-    expect(t.hz).toBeCloseTo(1.5, 2);
-  });
-
-  it('returns 835 ms / 1.20 Hz for the defaults on 5 motors', () => {
-    const t = crTiming(CUSTOM_DEFAULTS, 5);
-    expect(t.slotMs).toBe(167);
-    expect(t.periodMs).toBe(835);
-    expect(t.hz).toBeCloseTo(1.2, 2);
   });
 });
 

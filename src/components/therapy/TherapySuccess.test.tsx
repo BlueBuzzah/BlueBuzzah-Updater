@@ -29,7 +29,6 @@ function renderWith(configs: DeviceConfigResult[], overallSuccess: boolean, prof
         message: 'result message',
         deviceConfigs: configs,
       }}
-      onReset={vi.fn()}
       onClose={vi.fn()}
     />
   );
@@ -65,21 +64,20 @@ describe('TherapySuccess', () => {
     expect(screen.getByText('Failed', { selector: '.bb-badge span' })).toBeInTheDocument();
   });
 
-  it('offers to set up another device or finish', () => {
-    const onReset = vi.fn();
+  it('offers only Done, in the action bar', () => {
     const onClose = vi.fn();
     render(
       <TherapySuccess
         profile="REGULAR"
         devices={[createMockDevice()]}
         result={{ success: true, message: '', deviceConfigs: [config('a', true, 'success')] }}
-        onReset={onReset}
         onClose={onClose}
       />
     );
-    fireEvent.click(screen.getByRole('button', { name: 'Set Up Another Device' }));
-    fireEvent.click(screen.getByRole('button', { name: /^Done$/ }));
-    expect(onReset).toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Set Up Another Device' })).not.toBeInTheDocument();
+    const done = screen.getByRole('button', { name: /^Done$/ });
+    expect(screen.getByTestId('action-bar')).toContainElement(done);
+    fireEvent.click(done);
     expect(onClose).toHaveBeenCalled();
   });
 });

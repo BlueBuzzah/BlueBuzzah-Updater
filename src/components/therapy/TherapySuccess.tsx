@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Copy } from 'lucide-react';
+import { ActionBar } from '@/components/shell/ActionBar';
 import { Banner } from '@/components/ui/banner';
 import { Button } from '@/components/ui/button';
 import { DeviceCard } from '@/components/ui/device-card';
@@ -15,7 +16,6 @@ interface TherapySuccessProps {
   profile: TherapyProfile;
   devices: Device[];
   result: TherapyConfigResult;
-  onReset: () => void;
   onClose: () => void;
 }
 
@@ -26,7 +26,7 @@ function deviceWord(c?: DeviceConfigResult): { tone: Tone; word: string } {
 }
 
 /** The finished setup: one Banner that says what really happened, then each device. */
-export function TherapySuccess({ profile, devices, result, onReset, onClose }: TherapySuccessProps) {
+export function TherapySuccess({ profile, devices, result, onClose }: TherapySuccessProps) {
   const { logs } = useTherapyStore();
   const [copied, setCopied] = useState('');
   const bannerRef = useRef<HTMLDivElement>(null);
@@ -96,35 +96,36 @@ export function TherapySuccess({ profile, devices, result, onReset, onClose }: T
   })();
 
   return (
-    <div className="grid max-w-content gap-10">
-      <div ref={bannerRef} tabIndex={-1}>
-        {banner}
+    <>
+      <div className="grid max-w-content gap-10">
+        <div ref={bannerRef} tabIndex={-1}>
+          {banner}
+        </div>
+        <p className="body-s" aria-live="polite">{copied}</p>
+        <ul className="grid gap-6 sm:grid-cols-2">
+          {devices.map((device) => {
+            const config = configs.find((c) => c.device.path === device.path);
+            const state = deviceWord(config);
+            return (
+              <li key={device.path} className="grid content-start gap-2">
+                <DeviceCard
+                  name={BOARD_NAME[device.board]}
+                  port={device.path}
+                  status={<StatusBadge tone={state.tone}>{state.word}</StatusBadge>}
+                  statusLabel={state.word}
+                />
+                {config?.error && <p className="code-s text-ink-muted">{config.error}</p>}
+              </li>
+            );
+          })}
+        </ul>
+        <LogPane lines={logs} fileName="bluebuzzah-updater-setup-log.txt" />
       </div>
-      <p className="body-s" aria-live="polite">{copied}</p>
-      <ul className="grid gap-6 sm:grid-cols-2">
-        {devices.map((device) => {
-          const config = configs.find((c) => c.device.path === device.path);
-          const state = deviceWord(config);
-          return (
-            <li key={device.path} className="grid content-start gap-2">
-              <DeviceCard
-                name={BOARD_NAME[device.board]}
-                port={device.path}
-                status={<StatusBadge tone={state.tone}>{state.word}</StatusBadge>}
-                statusLabel={state.word}
-              />
-              {config?.error && <p className="code-s text-ink-muted">{config.error}</p>}
-            </li>
-          );
-        })}
-      </ul>
-      <div className="flex flex-wrap gap-target-gap">
-        <Button variant="secondary" onClick={onReset}>
-          Set Up Another Device
+      <ActionBar>
+        <Button size="lg" guardRepeat onClick={onClose}>
+          Done
         </Button>
-        <Button onClick={onClose}>Done</Button>
-      </div>
-      <LogPane lines={logs} fileName="bluebuzzah-updater-setup-log.txt" />
-    </div>
+      </ActionBar>
+    </>
   );
 }

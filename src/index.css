@@ -14,6 +14,11 @@
 
 code, .code, .code-s { overflow-wrap: anywhere; }
 
+/* WCAG 2.4.11: below md the page itself scrolls under the pinned header band (AppShell
+   pads its own column from md up). ponytail: assumes the band's 64px; a title that
+   wraps makes it taller. */
+html { scroll-padding-top: var(--space-16); }
+
 /* Compact button for dense Updater lists (owner request): the target-min
    floor tokens.json allows for dense Updater lists, never smaller. */
 .bb-btn.bb-btn--compact { min-height: var(--target-min); padding: 0 var(--space-3); }
