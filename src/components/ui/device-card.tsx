@@ -34,12 +34,16 @@ export function DeviceCard({ name, role, board, port, serial, firmware, status, 
   const body = (
     <>
       <div className="bb-glove__top">
-        <span className="bb-glove__hand"><Hand size={ICON.l} /></span>
-        {selected && <span className="bb-glove__check"><Check size={ICON.s} /></span>}
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="bb-glove__hand shrink-0"><Hand size={ICON.l} /></span>
+          <div className="min-w-0">
+            <p className="bb-glove__name mt-0">{display}</p>
+            {secondary && <p className="body-s">{secondary}</p>}
+            {boardLine && <p className="body-s">{boardLine}</p>}
+          </div>
+        </div>
+        {selected && <span className="bb-glove__check shrink-0"><Check size={ICON.s} /></span>}
       </div>
-      <p className="bb-glove__name">{display}</p>
-      {secondary && <p className="body-s">{secondary}</p>}
-      {boardLine && <p className="body-s">{boardLine}</p>}
       {status}
       <p className="code-s text-ink-muted">Port {port}</p>
       {serial && <p className="code-s text-ink-muted">Serial number {serial}</p>}

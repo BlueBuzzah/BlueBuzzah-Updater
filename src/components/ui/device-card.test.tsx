@@ -18,3 +18,11 @@ it('is a pressable button when selectable', () => {
   rerender(<DeviceCard name="BlueBuzzah v3" port="COM3" onSelect={onSelect} selected />);
   expect(screen.getByRole('button', { name: /selected/ })).toHaveAttribute('aria-pressed', 'true');
 });
+
+it('puts the names beside the hand icon, vertically centered', () => {
+  render(<DeviceCard name="BlueBuzzah v2" role="PRIMARY" port="COM3" />);
+  const row = document.querySelector('.bb-glove__hand')!.parentElement!;
+  expect(row).toHaveClass('items-center');
+  expect(row).toContainElement(screen.getByText('Primary device'));
+  expect(row).toContainElement(screen.getByText('BlueBuzzah v2'));
+});
