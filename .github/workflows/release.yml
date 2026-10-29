@@ -289,12 +289,14 @@ jobs:
           Write-Host "Signing key available ($($env:TAURI_SIGNING_PRIVATE_KEY.Length) characters)"
         shell: pwsh
 
-      - name: Build Tauri app
-        run: npm run tauri:build:ci
+      # Compile first, then log in to Azure right before signing: a cold Rust
+      # build can outlast the short-lived OIDC login.
+      - name: Build Tauri app (no bundle)
+        run: npm run tauri:build:ci -- --no-bundle
 
       # Azure OIDC login — mints a federated token from GitHub's OIDC provider and
-      # exports the Azure SDK env vars so DefaultAzureCredential (used by the
-      # Trusted Signing action) can authenticate without a client secret.
+      # exports the Azure SDK env vars so DefaultAzureCredential (used by
+      # Invoke-TrustedSigning) can authenticate without a client secret.
       - name: Azure OIDC login
         uses: azure/login@v2
         with:
@@ -302,51 +304,54 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           allow-no-subscriptions: true
 
-      # The Trusted Signing action installs its module from PSGallery, which is
-      # not registered on recent windows-latest images. Register it first.
-      - name: Ensure PSGallery is registered
+      # The TrustedSigning module comes from PSGallery, which is not registered
+      # on recent windows-latest images. Register it first.
+      - name: Install Trusted Signing module
         shell: pwsh
         run: |
           if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) {
             Register-PSRepository -Default
           }
           Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module -Name TrustedSigning -RequiredVersion 0.5.3 -Force -Repository PSGallery
 
-      # Authenticode-sign the NSIS installer .exe with Azure Trusted Signing.
-      # Must happen before the updater archive is rebuilt so the .exe inside
-      # the .nsis.zip (delivered to existing users via the updater) is also signed.
-      - name: Sign NSIS installer (Azure Trusted Signing)
-        uses: azure/trusted-signing-action@v0.5.1
-        with:
-          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          endpoint: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
-          trusted-signing-account-name: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
-          certificate-profile-name: ${{ secrets.AZURE_TRUSTED_SIGNING_PROFILE }}
-          files-folder: ${{ github.workspace }}\src-tauri\target\release\bundle\nsis
-          files-folder-filter: exe
-          files-folder-recurse: false
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
+      # Tauri signs every binary it ships through signCommand: the app exe,
+      # NSIS plugins, uninstaller and installer. The updater .nsis.zip is then
+      # built from the signed installer. signCommand stays out of tauri.conf.json
+      # so local Windows builds don't need Azure.
+      - name: Bundle and sign (Azure Trusted Signing)
+        shell: pwsh
+        env:
+          AZURE_TRUSTED_SIGNING_ENDPOINT: ${{ secrets.AZURE_TRUSTED_SIGNING_ENDPOINT }}
+          AZURE_TRUSTED_SIGNING_ACCOUNT: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT }}
+          AZURE_TRUSTED_SIGNING_PROFILE: ${{ secrets.AZURE_TRUSTED_SIGNING_PROFILE }}
+        run: |
+          $signScript = Join-Path $env:GITHUB_WORKSPACE '.github/scripts/sign-windows.ps1'
+          $config = @{ bundle = @{ windows = @{ signCommand = @{
+            cmd = 'pwsh'
+            args = @('-NoProfile', '-NonInteractive', '-File', $signScript, '%1')
+          } } } } | ConvertTo-Json -Depth 5
+          $configPath = Join-Path $env:RUNNER_TEMP 'tauri-sign.json'
+          Set-Content -Path $configPath -Value $config
+          npx tauri bundle --config $configPath
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      # Tauri built the .nsis.zip from the unsigned .exe. Replace it with one
-      # built from the now-signed .exe, and drop the stale Tauri updater
-      # signature so the next step regenerates it from the new archive.
-      - name: Rebuild updater archive with signed installer
+      - name: Verify Authenticode signatures
         shell: pwsh
         run: |
-          $bundleDir = "src-tauri/target/release/bundle/nsis"
-          $exe = Get-ChildItem -Path $bundleDir -Filter "*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $exe) {
-            Write-Host "ERROR: No installer .exe found in $bundleDir"
+          $files = @(Get-ChildItem src-tauri/target/release -Filter *.exe) +
+                   @(Get-ChildItem src-tauri/target/release/bundle/nsis -Filter *.exe)
+          if ($files.Count -lt 2) {
+            Write-Host "ERROR: expected the app exe and the installer, found $($files.Count) file(s)"
             exit 1
           }
-          $zipPath = Join-Path $bundleDir "$($exe.BaseName).nsis.zip"
-          Get-ChildItem -Path $bundleDir -Filter "*.nsis.zip" -ErrorAction SilentlyContinue | Remove-Item -Force
-          Get-ChildItem -Path $bundleDir -Filter "*.nsis.zip.sig" -ErrorAction SilentlyContinue | Remove-Item -Force
-          Compress-Archive -Path $exe.FullName -DestinationPath $zipPath -Force
-          Write-Host "Rebuilt updater archive: $zipPath"
+          $unsigned = 0
+          foreach ($f in $files) {
+            $sig = Get-AuthenticodeSignature $f.FullName
+            Write-Host "$($sig.Status)  $($f.FullName)  $($sig.SignerCertificate.Subject)"
+            if ($sig.Status -ne 'Valid') { $unsigned++ }
+          }
+          if ($unsigned) { exit 1 }
 
       - name: Rename artifacts for cleaner download names
         run: |
