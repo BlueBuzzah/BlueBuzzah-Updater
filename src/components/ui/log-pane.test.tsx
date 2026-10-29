@@ -26,6 +26,8 @@ it('shows every numbered line with Copy and Save, and no filter', () => {
   expect(within(items[1]).getByText('2')).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Copy Log' })).toBeInTheDocument();
   expect(screen.getByRole('button', { name: 'Save Log' })).toBeInTheDocument();
+  // Left-aligned
+  expect(screen.getByRole('button', { name: 'Copy Log' }).parentElement).not.toHaveClass('justify-end');
 });
 
 it('saves the whole log to the chosen file', async () => {

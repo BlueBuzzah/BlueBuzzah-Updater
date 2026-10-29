@@ -47,7 +47,7 @@ export function LogPane({ lines, fileName = 'bluebuzzah-updater-log.txt', action
       </div>
       {open && (
         <div id={paneId} className="grid gap-4">
-          <div className="flex flex-wrap justify-end gap-target-gap">
+          <div className="flex flex-wrap gap-target-gap">
             <Button variant="secondary" icon={Copy} onClick={copy}>Copy Log</Button>
             <Button variant="secondary" icon={Save} onClick={saveLog}>Save Log</Button>
           </div>
