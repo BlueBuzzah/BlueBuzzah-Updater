@@ -294,23 +294,27 @@ export function InstallationProgress({ release, devices, onComplete, onProgressU
 
   if (error) {
     return (
-      <FlashOutcome
-        version={release.version}
-        devices={updatedDevices}
-        results={results}
-        error={results.some((r) => r.success) ? null : error}
-        logText={logs.join('\n')}
-        actions={
-          <>
-            <Button icon={RotateCcw} guardRepeat onClick={handleRetry}>
-              Try Again
-            </Button>
-            <Button variant="quiet" onClick={reset}>
-              Start Over
-            </Button>
-          </>
-        }
-      />
+      <div className="grid max-w-content gap-10">
+        <FlashOutcome
+          version={release.version}
+          devices={updatedDevices}
+          results={results}
+          error={results.some((r) => r.success) ? null : error}
+          logText={logs.join('\n')}
+          actions={
+            <>
+              <Button icon={RotateCcw} guardRepeat onClick={handleRetry}>
+                Try Again
+              </Button>
+              <Button variant="quiet" onClick={reset}>
+                Start Over
+              </Button>
+            </>
+          }
+        />
+        {/* Every failure keeps the full log one click away for troubleshooting. */}
+        <LogPane lines={logs} />
+      </div>
     );
   }
 

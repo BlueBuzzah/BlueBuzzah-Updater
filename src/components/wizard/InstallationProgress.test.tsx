@@ -89,6 +89,21 @@ describe('InstallationProgress', () => {
     expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({ success: false }));
   });
 
+  it('keeps the full log viewable, copyable and savable when a device fails', async () => {
+    store.logs = ['[12:00:00] ERROR Error updating Secondary: Failed to configure device role'];
+    vi.mocked(deviceService.validateDevices).mockResolvedValue(valid([primary.path, secondary.path]));
+    vi.mocked(firmwareService.downloadFirmware).mockResolvedValue(createMockBundle());
+    vi.mocked(deviceService.deployFirmware)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('Failed to configure device role: timeout'));
+    renderIt([primary, secondary]);
+    await screen.findByText("1 of 2 devices didn't update");
+    fireEvent.click(screen.getByRole('button', { name: 'Show Log' }));
+    expect(screen.getByText(store.logs[0])).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy Log' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Save Log' })).toBeInTheDocument();
+  });
+
   it('a tremor double click on Try Again starts one retry', async () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(1000);
