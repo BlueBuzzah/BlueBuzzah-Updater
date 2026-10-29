@@ -77,6 +77,9 @@ describe('TherapySuccess', () => {
         onClose={onClose}
       />
     );
+    const bar = screen.getByTestId('action-bar');
+    expect(bar).toContainElement(screen.getByRole('button', { name: 'Set Up Another Device' }));
+    expect(bar).toContainElement(screen.getByRole('button', { name: /^Done$/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Set Up Another Device' }));
     fireEvent.click(screen.getByRole('button', { name: /^Done$/ }));
     expect(onReset).toHaveBeenCalled();

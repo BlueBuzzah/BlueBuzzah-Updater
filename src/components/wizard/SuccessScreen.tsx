@@ -1,3 +1,4 @@
+import { ActionBar } from '@/components/shell/ActionBar';
 import { Button } from '@/components/ui/button';
 import { LogPane } from '@/components/ui/log-pane';
 import { useWizardStore } from '@/stores/wizardStore';
@@ -15,15 +16,22 @@ export function SuccessScreen({ release, devices, onClose }: SuccessScreenProps)
   const { logs, updateResult } = useWizardStore();
   const results = updateResult?.deviceUpdates ?? devices.map((device) => ({ device, success: true }));
   return (
-    <div className="grid max-w-content gap-10">
-      <FlashOutcome
-        version={release.version}
-        devices={devices}
-        results={results}
-        error={updateResult?.success === false ? updateResult.message : null}
-        logText={logs.join('\n')}
-      />
-      <LogPane lines={logs} actions={<Button onClick={onClose}>Done</Button>} />
-    </div>
+    <>
+      <div className="grid max-w-content gap-10">
+        <FlashOutcome
+          version={release.version}
+          devices={devices}
+          results={results}
+          error={updateResult?.success === false ? updateResult.message : null}
+          logText={logs.join('\n')}
+        />
+        <LogPane lines={logs} />
+      </div>
+      <ActionBar>
+        <Button size="lg" guardRepeat onClick={onClose}>
+          Done
+        </Button>
+      </ActionBar>
+    </>
   );
 }

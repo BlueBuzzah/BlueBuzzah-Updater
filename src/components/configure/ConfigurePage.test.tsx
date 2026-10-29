@@ -36,8 +36,10 @@ describe('ConfigurePage choose phase', () => {
     render(<ConfigurePage />);
     const apply = screen.getByRole('button', { name: 'Apply to Devices' });
     expect(apply).toBeDisabled();
-    expect(apply.parentElement).toHaveClass('justify-items-end');
-    expect(screen.getByText('Choose a pattern and at least one device first.')).toBeInTheDocument();
+    expect(apply).toHaveClass('bb-btn--lg');
+    const bar = screen.getByTestId('action-bar');
+    expect(bar).toContainElement(apply);
+    expect(bar).toContainElement(screen.getByText('Choose a pattern and at least one device first.'));
   });
 
   it('blocks Apply while a custom setting is invalid', () => {

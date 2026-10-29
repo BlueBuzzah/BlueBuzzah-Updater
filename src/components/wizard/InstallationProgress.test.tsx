@@ -111,6 +111,8 @@ describe('InstallationProgress', () => {
     vi.mocked(firmwareService.downloadFirmware).mockRejectedValueOnce(new Error('boom')).mockImplementation(() => new Promise(() => {}));
     renderIt();
     const retry = await screen.findByRole('button', { name: 'Try Again' });
+    expect(screen.getByTestId('action-bar')).toContainElement(retry);
+    expect(screen.getByTestId('action-bar')).toContainElement(screen.getByRole('button', { name: 'Start Over' }));
     fireEvent.click(retry);
     vi.setSystemTime(1100);
     fireEvent.click(retry);
@@ -126,6 +128,7 @@ describe('InstallationProgress', () => {
     // Same row as Show Log, at the end.
     expect(stop.parentElement).toBe(screen.getByRole('button', { name: 'Show Log' }).parentElement);
     expect(stop.parentElement!.lastElementChild).toBe(stop);
+    expect(screen.queryByTestId('action-bar')).not.toBeInTheDocument();
     fireEvent.click(stop);
     const dialog = screen.getByRole('alertdialog', { name: 'Stop the Flash?' });
     expect(dialog).not.toHaveTextContent(/twice/i);

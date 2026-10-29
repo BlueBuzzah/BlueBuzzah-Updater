@@ -1,4 +1,5 @@
 import { Banner } from '@/components/ui/banner';
+import { ActionBar } from '@/components/shell/ActionBar';
 import { Button } from '@/components/ui/button';
 import { DeviceSelection } from '@/components/wizard/DeviceSelection';
 import { FirmwareSelection } from '@/components/wizard/FirmwareSelection';
@@ -39,21 +40,22 @@ export function FirmwarePage() {
 
   if (currentStep < 2) {
     return (
-      <div className="grid max-w-content gap-10">
-        <DeviceSelection selectedDevices={selectedDevices} onDevicesChange={setDevices} onRoleChange={updateDeviceRole} />
-        <FirmwareSelection value={selectedRelease} onChange={selectRelease} board={selectedDevices[0]?.board} />
-        {selectedRelease?.isPrerelease && (
-          <Banner tone="warning" title="This is an experimental version">
-            It&apos;s for testing and may have bugs. Use the latest release for everyday use.
-          </Banner>
-        )}
-        <div className="grid justify-items-end gap-3">
-          <Button size="xl" disabled={!!blocked} aria-describedby={blocked ? 'flash-blocked' : undefined} onClick={() => setStep(2)}>
+      <>
+        <div className="grid max-w-content gap-10">
+          <DeviceSelection selectedDevices={selectedDevices} onDevicesChange={setDevices} onRoleChange={updateDeviceRole} />
+          <FirmwareSelection value={selectedRelease} onChange={selectRelease} board={selectedDevices[0]?.board} />
+          {selectedRelease?.isPrerelease && (
+            <Banner tone="warning" title="This is an experimental version">
+              It&apos;s for testing and may have bugs. Use the latest release for everyday use.
+            </Banner>
+          )}
+        </div>
+        <ActionBar hint={blocked} hintId="flash-blocked">
+          <Button size="lg" guardRepeat disabled={!!blocked} aria-describedby={blocked ? 'flash-blocked' : undefined} onClick={() => setStep(2)}>
             Update Firmware
           </Button>
-          {blocked && <p id="flash-blocked" className="body-s text-right text-ink-muted">{blocked}</p>}
-        </div>
-      </div>
+        </ActionBar>
+      </>
     );
   }
   if (!selectedRelease) return null;

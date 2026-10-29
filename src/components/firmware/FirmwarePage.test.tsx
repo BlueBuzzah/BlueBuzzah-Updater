@@ -17,12 +17,14 @@ describe('FirmwarePage choose phase', () => {
     expect(screen.getByTestId('firmware-selection')).toBeInTheDocument();
   });
 
-  it('explains why Update Firmware is unavailable, aligned right', () => {
+  it('explains why Update Firmware is unavailable, beside it in the action bar', () => {
     render(<FirmwarePage />);
     const btn = screen.getByRole('button', { name: 'Update Firmware' });
     expect(btn).toBeDisabled();
-    expect(btn.parentElement).toHaveClass('justify-items-end');
-    expect(screen.getByText('Choose a device and a version first.')).toBeInTheDocument();
+    expect(btn).toHaveClass('bb-btn--lg');
+    const bar = screen.getByTestId('action-bar');
+    expect(bar).toContainElement(btn);
+    expect(bar).toContainElement(screen.getByText('Choose a device and a version first.'));
   });
 
   it('asks for roles before flashing', () => {

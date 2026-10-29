@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { RotateCcw, Square } from 'lucide-react';
+import { ActionBar } from '@/components/shell/ActionBar';
 import { ConfirmDialog } from '@/components/ui/alert-dialog';
 import { Banner } from '@/components/ui/banner';
 import { Button } from '@/components/ui/button';
@@ -294,27 +295,27 @@ export function InstallationProgress({ release, devices, onComplete, onProgressU
 
   if (error) {
     return (
-      <div className="grid max-w-content gap-10">
-        <FlashOutcome
-          version={release.version}
-          devices={updatedDevices}
-          results={results}
-          error={results.some((r) => r.success) ? null : error}
-          logText={logs.join('\n')}
-          actions={
-            <>
-              <Button icon={RotateCcw} guardRepeat onClick={handleRetry}>
-                Try Again
-              </Button>
-              <Button variant="quiet" onClick={reset}>
-                Start Over
-              </Button>
-            </>
-          }
-        />
-        {/* Every failure keeps the full log one click away for troubleshooting. */}
-        <LogPane lines={logs} />
-      </div>
+      <>
+        <div className="grid max-w-content gap-10">
+          <FlashOutcome
+            version={release.version}
+            devices={updatedDevices}
+            results={results}
+            error={results.some((r) => r.success) ? null : error}
+            logText={logs.join('\n')}
+          />
+          {/* Every failure keeps the full log one click away for troubleshooting. */}
+          <LogPane lines={logs} />
+        </div>
+        <ActionBar>
+          <Button variant="quiet" size="lg" onClick={reset}>
+            Start Over
+          </Button>
+          <Button size="lg" icon={RotateCcw} guardRepeat onClick={handleRetry}>
+            Try Again
+          </Button>
+        </ActionBar>
+      </>
     );
   }
 

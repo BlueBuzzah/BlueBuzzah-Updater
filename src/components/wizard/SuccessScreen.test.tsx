@@ -31,13 +31,13 @@ describe('SuccessScreen', () => {
     expect(screen.getAllByText('Done', { selector: '.bb-badge span' })).toHaveLength(2);
   });
 
-  it('offers only Done, on the Show Log row', () => {
+  it('offers only Done, in the action bar', () => {
     const onClose = vi.fn();
     useWizardStore.setState({ updateResult: { success: true, message: '', deviceUpdates: [{ device: primary, success: true }] } });
     render(<SuccessScreen release={release} devices={[primary]} onClose={onClose} />);
     expect(screen.queryByRole('button', { name: 'Flash Another Device' })).not.toBeInTheDocument();
     const done = screen.getByRole('button', { name: /^Done$/ });
-    expect(done.parentElement).toBe(screen.getByRole('button', { name: 'Show Log' }).parentElement);
+    expect(screen.getByTestId('action-bar')).toContainElement(done);
     fireEvent.click(done);
     expect(onClose).toHaveBeenCalledTimes(1);
   });
