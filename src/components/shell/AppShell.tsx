@@ -16,7 +16,7 @@ export function AppShell({ section, onSectionChange, title, busy, children }: Ap
   return (
     <div className="flex min-h-screen flex-col bg-surface text-ink md:h-screen md:flex-row md:overflow-hidden">
       <Sidebar section={section} onSectionChange={onSectionChange} busy={busy} />
-      <div className="flex min-w-0 flex-1 flex-col md:overflow-y-auto">
+      <div className="flex min-w-0 flex-1 flex-col md:scroll-pt-16 md:overflow-y-auto">
         <header data-tauri-drag-region className="sticky top-0 z-10 bg-abyss px-4 py-4 text-on-abyss md:px-10">
           <h1 className="title-l">{title}</h1>
         </header>
