@@ -485,3 +485,22 @@ jobs:
           files: latest.json
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Releases are published as pre-releases so /releases/latest (the updater's
+  # latest.json endpoint and download links) keeps pointing at the previous
+  # release until every artifact is uploaded. Promote it now. Tags with a
+  # suffix (v2.0.1-rc.1) are real pre-releases and stay that way.
+  promote-release:
+    needs: generate-update-manifest
+    if: ${{ !contains(github.event.release.tag_name, '-') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Mark release as latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+          REPO: ${{ github.repository }}
+        run: gh release edit "$TAG" --repo "$REPO" --prerelease=false --latest
