@@ -61,6 +61,9 @@ export function DeviceSelection({ mode = 'flash', selectedDevices, onDevicesChan
   const selectedRef = useRef(selectedDevices);
   selectedRef.current = selectedDevices;
   const errId = useId();
+  const usable = (devices: Device[]) => (flash ? devices : devices.filter((d) => !d.inBootloader));
+  const withRoles = (devices: Device[]) =>
+    devices.map((d, i) => ({ ...d, role: (i === 0 ? 'PRIMARY' : 'SECONDARY') as DeviceRole }));
 
   // A replug can reuse a port for different hardware (Windows COM reuse),
   // and a stale board would drive the wrong flasher: drop it.
@@ -69,12 +72,20 @@ export function DeviceSelection({ mode = 'flash', selectedDevices, onDevicesChan
     const stillValid = current.filter((sel) =>
       devices.some((d) => d.path === sel.path && d.board === sel.board && d.serialNumber === sel.serialNumber)
     );
+    // Exactly 2 found with nothing selected: select both (one kind only when flashing).
+    const pair = usable(devices);
+    if (stillValid.length === 0 && pair.length === 2 && (!flash || pair[0].board === pair[1].board)) {
+      onDevicesChange(flash ? withRoles(pair) : pair);
+      setAutoAssigned(flash);
+      setNotice(null);
+      return;
+    }
     if (stillValid.length !== current.length) {
       onDevicesChange(stillValid);
       setNotice(MSG.pruned);
     }
   });
-  const available = flash ? found : found.filter((d) => !d.inBootloader);
+  const available = usable(found);
 
   const toggle = (device: Device) => {
     setNotice(null);
@@ -88,7 +99,7 @@ export function DeviceSelection({ mode = 'flash', selectedDevices, onDevicesChan
     if (flash && selectedDevices.length > 0 && selectedDevices[0].board !== device.board) return setNotice(MSG.mixed);
     const next = [...selectedDevices, device];
     if (flash && next.length === 2) {
-      onDevicesChange(next.map((d, i) => ({ ...d, role: (i === 0 ? 'PRIMARY' : 'SECONDARY') as DeviceRole })));
+      onDevicesChange(withRoles(next));
       setAutoAssigned(true);
     } else {
       onDevicesChange(next);
