@@ -16,7 +16,6 @@ interface TherapySuccessProps {
   profile: TherapyProfile;
   devices: Device[];
   result: TherapyConfigResult;
-  onReset: () => void;
   onClose: () => void;
 }
 
@@ -27,7 +26,7 @@ function deviceWord(c?: DeviceConfigResult): { tone: Tone; word: string } {
 }
 
 /** The finished setup: one Banner that says what really happened, then each device. */
-export function TherapySuccess({ profile, devices, result, onReset, onClose }: TherapySuccessProps) {
+export function TherapySuccess({ profile, devices, result, onClose }: TherapySuccessProps) {
   const { logs } = useTherapyStore();
   const [copied, setCopied] = useState('');
   const bannerRef = useRef<HTMLDivElement>(null);
@@ -123,9 +122,6 @@ export function TherapySuccess({ profile, devices, result, onReset, onClose }: T
         <LogPane lines={logs} fileName="bluebuzzah-updater-setup-log.txt" />
       </div>
       <ActionBar>
-        <Button variant="secondary" size="lg" onClick={onReset}>
-          Set Up Another Device
-        </Button>
         <Button size="lg" guardRepeat onClick={onClose}>
           Done
         </Button>

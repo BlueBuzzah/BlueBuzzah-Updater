@@ -46,7 +46,7 @@ export function ConfigurePage() {
   }
   if (!selectedProfile) return null;
   return result ? (
-    <TherapySuccess profile={selectedProfile} devices={selectedDevices} result={result} onReset={startOver} onClose={startOver} />
+    <TherapySuccess profile={selectedProfile} devices={selectedDevices} result={result} onClose={startOver} />
   ) : (
     <TherapyProgress profile={selectedProfile} devices={selectedDevices} onComplete={setResult} onProgressUpdate={setProgress} />
   );
