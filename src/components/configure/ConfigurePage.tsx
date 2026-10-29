@@ -1,3 +1,4 @@
+import { HardDriveDownload } from 'lucide-react';
 import { ProfileSelection, TherapyProgress, TherapySuccess } from '@/components/therapy';
 import { ActionBar } from '@/components/shell/ActionBar';
 import { Banner } from '@/components/ui/banner';
@@ -40,7 +41,7 @@ export function ConfigurePage() {
           </Banner>
         </div>
         <ActionBar hint={blocked} hintId="apply-blocked">
-          <Button size="lg" guardRepeat disabled={!!blocked} aria-describedby={blocked ? 'apply-blocked' : undefined} onClick={() => setStep(2)}>
+          <Button size="lg" icon={HardDriveDownload} guardRepeat disabled={!!blocked} aria-describedby={blocked ? 'apply-blocked' : undefined} onClick={() => setStep(2)}>
             {selectedDevices.length === 1 ? 'Apply to Device' : 'Apply to Devices'}
           </Button>
         </ActionBar>
