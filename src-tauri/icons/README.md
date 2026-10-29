@@ -17,7 +17,6 @@ The following icon files are required for Tauri to build properly:
 You can use the Tauri icon generator to create all necessary icon formats from a single high-resolution PNG image (at least 1024x1024 pixels):
 
 ```bash
-npm install --save-dev @tauri-apps/cli
 npx tauri icon path/to/your-icon.png
 ```
 
