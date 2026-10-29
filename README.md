@@ -23,13 +23,6 @@ Download the appropriate package for your operating system and install:
 
 [![Download for Windows][1]][2] [![Download for macOS][3]][4]
 
-> [!NOTE]  
-> Windows releases are not currently code-signed. You may see security warnings on first run:
->
-> - **Windows**: Click "More info" → "Run anyway"
->
-> Windows code signing to be added in future releases.
-
 ### For Developers
 
 ```bash
@@ -41,7 +34,7 @@ npm install
 # Run development server
 npm run tauri:dev
 
-# Build for production
+# Build for production (needs updater signing keys in .env, see .env.example)
 npm run tauri:build
 ```
 
@@ -54,14 +47,14 @@ npm run tauri:build
 - **GitHub Integration**: Automatically fetches latest firmware releases, with the right package per hardware revision
 - **Multi-Hardware Support**: Flashes both v2 (nRF52840) and v3 (ESP32-S3) devices with the matching protocol
 - **Auto-Detection**: Automatically detects connected devices over serial and identifies their hardware revision
-- **Dual-Device Support**: Update up to 2 devices of the same hardware revision simultaneously with Primary/Secondary roles
+- **Dual-Device Support**: Update up to 2 devices of the same hardware revision in one run with Primary/Secondary roles
 - **Firmware Cache**: Downloaded firmware is cached per version and board with SHA256 verification
 - **Real-time Progress**: Live progress tracking with detailed logging
 - **Cross-Platform**: Native support for macOS and Windows
 
 ## Architecture
 
-**Frontend:** React 18 + TypeScript + Zustand + shadcn/ui + Tailwind CSS
+**Frontend:** React 18 + TypeScript + Zustand + BlueBuzzah design system (`bb-` components) + Tailwind CSS
 **Backend:** Tauri 2.0 + Rust for device detection, firmware flashing (Nordic Secure DFU and espflash), and post-flash role configuration over serial
 
 ### Project Structure
@@ -79,7 +72,7 @@ mindmap
   root((BlueBuzzah Updater))
     src/
       components/
-        UI, wizard steps, layout
+        Pages, shell, UI
       services/
         Business logic
       stores/
@@ -134,7 +127,7 @@ All UI/UX follows the BlueBuzzah design system, which lives in the [BlueBuzzah-W
 
 ```bash
 npm run tauri:dev      # Development mode with hot reload
-npm run tauri:build    # Production build (DMG for macOS, MSI for Windows)
+npm run tauri:build    # Production build (DMG for macOS, NSIS .exe installer for Windows)
 npm run dev            # Frontend only (no Tauri)
 npm test               # Frontend tests (Vitest)
 npm run tauri:test     # Rust tests
@@ -144,8 +137,8 @@ npm run tauri:test     # Rust tests
 
 After flashing, the updater configures each device's role over serial (`SET_ROLE:PRIMARY` / `SET_ROLE:SECONDARY`):
 
-- **PRIMARY**: Coordinator device, broadcasts to secondary
-- **SECONDARY**: Listener device, receives from primary
+- **PRIMARY**: Coordinator device; the BuzzahBuddy app connects to it, and it drives the secondary
+- **SECONDARY**: Follower device; connects to the primary and is reached only through it
 
 ## Contributing
 

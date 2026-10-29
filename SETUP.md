@@ -14,10 +14,10 @@ Install the following software:
 # Install Xcode Command Line Tools (if not already installed)
 xcode-select --install
 
-# Install Rust
+# Install Rust (1.88 or newer)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
-# Install Node.js (v18+)
+# Install Node.js (v20+)
 # Download from https://nodejs.org/ or use Homebrew:
 brew install node
 ```
@@ -26,8 +26,8 @@ brew install node
 
 1. Install [Microsoft Visual Studio C++ Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
    - Select "Desktop development with C++" workload
-2. Install [Rust](https://www.rust-lang.org/tools/install)
-3. Install [Node.js](https://nodejs.org/) (v18 or higher)
+2. Install [Rust](https://www.rust-lang.org/tools/install) (1.88 or newer)
+3. Install [Node.js](https://nodejs.org/) (v20 or higher)
 4. WebView2 should be pre-installed on Windows 10/11
 
 ### 2. Install Dependencies
@@ -53,6 +53,8 @@ The first run may take a few minutes as Rust compiles dependencies.
 
 ### 4. Build for Distribution
 
+`npm run tauri:build` signs the app-update artifacts, so it needs the updater signing keys. Copy `.env.example` to `.env` and fill in the values (it explains how to generate keys). `npm run tauri:build:ci` runs the same build without loading `.env`, for CI, where the keys come from the environment.
+
 ```bash
 npm run tauri:build
 ```
@@ -60,7 +62,7 @@ npm run tauri:build
 Build outputs:
 
 - **macOS**: `src-tauri/target/release/bundle/dmg/`
-- **Windows**: `src-tauri/target/release/bundle/msi/`
+- **Windows**: `src-tauri/target/release/bundle/nsis/`
 
 ## Development Workflow
 
@@ -70,18 +72,31 @@ Build outputs:
 BlueBuzzah-Updater/
 ├── src/                    # React frontend
 │   ├── components/
-│   │   ├── ui/             # shadcn/ui components
-│   │   ├── wizard/         # Wizard step components
-│   │   └── layout/         # Layout components
+│   │   ├── ui/             # Design-system (bb-) components
+│   │   ├── shell/          # Sidebar, page shell, action bar
+│   │   ├── firmware/       # Firmware page
+│   │   ├── configure/      # Configure page
+│   │   ├── settings/       # Settings page
+│   │   ├── wizard/         # Firmware page cards and progress
+│   │   ├── therapy/        # Configure page cards and progress
+│   │   └── updater/        # App update dialog
+│   ├── hooks/              # React hooks
 │   ├── services/           # Business logic
 │   │   ├── FirmwareService.ts
-│   │   └── DeviceService.ts
+│   │   ├── DeviceService.ts
+│   │   ├── TherapyService.ts
+│   │   └── UpdaterService.ts
 │   ├── stores/             # Zustand state management
 │   ├── types/              # TypeScript definitions
 │   └── lib/                # Utilities
 ├── src-tauri/              # Rust backend
 │   ├── src/
 │   │   ├── commands/       # Tauri commands
+│   │   ├── dfu/            # Nordic DFU flashing and serial config (v2)
+│   │   ├── esp/            # espflash flashing (v3)
+│   │   ├── cache.rs        # Firmware cache
+│   │   ├── settings.rs     # Saved settings
+│   │   ├── lib.rs
 │   │   └── main.rs
 │   ├── Cargo.toml
 │   └── tauri.conf.json
@@ -92,7 +107,7 @@ BlueBuzzah-Updater/
 
 1. **Frontend Changes**: Edit files in `src/` - Vite will hot-reload automatically
 2. **Backend Changes**: Edit Rust files in `src-tauri/src/` - Tauri will recompile automatically
-3. **Styling**: Modify Tailwind classes or `src/index.css`
+3. **Styling**: Follow the BlueBuzzah design system; Tailwind classes are for layout, and type and color come from `src/styles/tokens.css`
 4. **Configuration**: Update `src-tauri/tauri.conf.json` for app settings
 
 ### Common Development Commands
@@ -126,7 +141,7 @@ npm run tauri:build
 
 **Output:**
 - Application: `src-tauri/target/release/bundle/macos/BlueBuzzah Updater.app`
-- DMG Installer: `src-tauri/target/release/bundle/dmg/BlueBuzzah Updater_1.0.0_x64.dmg`
+- DMG Installer: `src-tauri/target/release/bundle/dmg/BlueBuzzah Updater_<version>_<arch>.dmg`
 
 #### Windows
 
@@ -135,43 +150,39 @@ npm run tauri:build
 ```
 
 **Output:**
-- MSI Installer: `src-tauri/target/release/bundle/msi/BlueBuzzah Updater_1.0.0_x64_en-US.msi`
+- NSIS Installer: `src-tauri/target/release/bundle/nsis/BlueBuzzah Updater_<version>_x64-setup.exe`
 
 ### Code Style Guidelines
 
 - **TypeScript**: Use strict mode, avoid `any` types
 - **React**: Functional components with hooks
 - **State Management**: Zustand for global state
-- **Styling**: Tailwind utility classes, avoid inline styles
+- **Styling**: Design-system tokens and `bb-` components; Tailwind for layout only; avoid inline styles
 - **Rust**: Follow Rust conventions, use `cargo fmt`
 
 ## Troubleshooting
 
 ### No Devices Detected
 
-**Symptoms:** Application shows "No CircuitPython Devices Found"
+**Symptoms:** Application shows "No devices found"
 
 **Solutions:**
-1. Ensure device is connected via USB
-2. Verify device is mounted as `CIRCUITPY` (check in Finder/Explorer)
-3. Check that `boot_out.txt` exists on the device root
-4. Try a different USB port or cable
-5. Restart the device (unplug and replug)
-6. On Windows, check Device Manager for COM ports
-7. On macOS, run `ls /Volumes` to see mounted drives
+1. Ensure device is connected via USB with a data cable (some cables only charge)
+2. Check that the device is turned on
+3. Try a different USB port or cable
+4. Restart the device (unplug and replug), then select **Rescan**
+5. On Windows, check Device Manager for COM ports
+6. On macOS, run `ls /dev/cu.usbmodem*` to see serial ports
+7. The app only lists Adafruit Feather nRF52840 serial devices (VID `0x239A`) and ESP32-S3 USB-JTAG/Serial devices (VID `0x303A`, PID `0x1001`)
 
-### macOS Permission Issues
+### Serial Port Permission Issues
 
 **Symptoms:** "Permission denied" errors when accessing devices
 
 **Solutions:**
-1. Go to **System Settings → Privacy & Security**
-2. Grant **Full Disk Access** to:
-   - Terminal (if running from terminal)
-   - Your IDE (VS Code, etc.)
-   - The BlueBuzzah Updater app itself
+1. Close any other app that uses the device, such as a serial monitor (PlatformIO, Arduino IDE)
+2. Unplug the device, then plug it back in
 3. Restart the application
-4. If issues persist, try: `sudo npm run tauri:dev`
 
 ### Windows WebView2 Issues
 
@@ -201,7 +212,6 @@ npm run tauri:build
 **For TypeScript errors:**
 ```bash
 rm -rf node_modules/.cache
-rm tsconfig.tsbuildinfo
 npm install
 npm run build
 ```
@@ -217,11 +227,18 @@ npm install
 **Symptoms:** "Port 5173 already in use" error
 
 **Solution:**
-Edit `vite.config.ts`:
+Stop whatever is using port 5173, or change the port in both places (Vite uses `strictPort`, so it won't pick another port on its own):
+
+`vite.config.ts`:
 ```typescript
 server: {
   port: 5174, // Change to any available port
 }
+```
+
+`src-tauri/tauri.conf.json`:
+```json
+"devUrl": "http://localhost:5174"
 ```
 
 ### Slow First Build
@@ -236,33 +253,15 @@ server: {
 **Symptoms:** "Failed to fetch releases" or 403 errors
 
 **Solutions:**
-1. Wait 1 hour (GitHub limits unauthenticated requests to 60/hour)
-2. Set up GitHub token for higher limits (5000/hour)
-3. Check your IP isn't making excessive requests
-
-### Testing Device Detection
-
-To test without physical devices:
-
-**macOS:**
-```bash
-mkdir -p /Volumes/CIRCUITPY
-echo "Adafruit CircuitPython 8.0.0" > /Volumes/CIRCUITPY/boot_out.txt
-```
-
-**Windows:**
-```powershell
-# Create a folder and map it as a drive
-subst X: C:\MockCircuitPy
-echo "Adafruit CircuitPython 8.0.0" > X:\boot_out.txt
-```
+1. Wait for the limit to reset (GitHub limits unauthenticated requests to 60/hour; the error says how many minutes are left)
+2. Check your IP isn't making excessive requests
 
 ### Getting Help
 
 If you encounter issues not covered here:
 
 1. Check existing [GitHub Issues](../../issues)
-2. Enable debug logging: Set `RUST_LOG=debug` before running
+2. Copy the app's log (**Show Log** → **Copy Log** or **Save Log**); when running `npm run tauri:dev`, the terminal also shows backend output
 3. Open a new issue with:
    - Operating system and version
    - Node.js version (`node --version`)
@@ -274,6 +273,5 @@ If you encounter issues not covered here:
 
 - [Tauri Documentation](https://tauri.app/)
 - [React Documentation](https://react.dev/)
-- [shadcn/ui Components](https://ui.shadcn.com/)
 - [Tailwind CSS](https://tailwindcss.com/)
 - [Zustand State Management](https://zustand-demo.pmnd.rs/)
