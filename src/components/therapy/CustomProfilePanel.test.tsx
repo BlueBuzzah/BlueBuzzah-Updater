@@ -98,9 +98,9 @@ describe('CustomProfilePanel', () => {
     fireEvent.blur(field('Buzz length'));
     const changed = screen.getByText('You have changed these values from the defaults.');
     const follows = (a: Element, b: Element) => !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
-    // Just above Show Timing Details and Load from Device, after the settings.
+    // Just above Load from Device, after the settings.
     expect(follows(screen.getByRole('switch', { name: 'Same order on both devices' }), changed)).toBe(true);
-    expect(follows(changed, screen.getByRole('button', { name: 'Show Timing Details' }))).toBe(true);
+    expect(follows(changed, screen.getByRole('button', { name: 'Load from Device' }))).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: 'Reset to Defaults' }));
     expect(field('Buzz length')).toHaveValue(String(CUSTOM_DEFAULTS.on));
     expect(screen.getByText('Settings reset.')).toBeInTheDocument();
@@ -114,11 +114,10 @@ describe('CustomProfilePanel', () => {
     expect(await screen.findByText(/With this pause, timing can vary by at most \d+(\.\d)?%\./)).toBeInTheDocument();
   });
 
-  it('keeps timing details one click away', async () => {
+  it('has no timing details', async () => {
     render(<CustomProfilePanel />);
     await waitFor(() => expect(mockRead).toHaveBeenCalled());
-    fireEvent.click(screen.getByRole('button', { name: 'Show Timing Details' }));
-    expect(screen.getByText(/Finger slot \d+ ms · Cycle \d+ ms \([\d.]+ Hz\) on v2/)).toHaveClass('code-s');
+    expect(screen.queryByRole('button', { name: /Timing Details/ })).not.toBeInTheDocument();
   });
 
   it('labels the mirror switch in plain words', async () => {

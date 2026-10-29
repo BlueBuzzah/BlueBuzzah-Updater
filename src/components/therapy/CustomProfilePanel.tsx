@@ -1,5 +1,5 @@
-import { useEffect, useId, useRef, useState } from 'react';
-import { ChevronDown, ChevronUp, RefreshCw, TriangleAlert } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { RefreshCw, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ICON } from '@/components/ui/icon';
@@ -8,7 +8,6 @@ import { TextField } from '@/components/ui/text-field';
 import {
   CUSTOM_BOUNDS,
   CUSTOM_DEFAULTS,
-  crTiming,
   effectiveJitterCapPct,
   isDeviatingFromDefaults,
   rangeHint,
@@ -45,9 +44,7 @@ export function CustomProfilePanel(): JSX.Element {
   const [beforeReset, setBeforeReset] = useState<CustomProfileParams | null>(null);
   const [read, setRead] = useState<CustomProfileRead | null>(null);
   const [isReading, setIsReading] = useState(false);
-  const [timingOpen, setTimingOpen] = useState(false);
   const hasReadRef = useRef(false);
-  const timingId = useId();
 
   // Replace everything shown, e.g. after a device read, a reset or an undo.
   const replaceAll = (next: CustomProfileParams) => {
@@ -182,45 +179,12 @@ export function CustomProfilePanel(): JSX.Element {
           </div>
         )}
 
-        <div className="flex flex-wrap items-start justify-between gap-target-gap">
-          <Button
-            variant="quiet"
-            icon={timingOpen ? ChevronUp : ChevronDown}
-            aria-expanded={timingOpen}
-            aria-controls={timingId}
-            onClick={() => setTimingOpen(!timingOpen)}
-          >
-            {timingOpen ? 'Hide Timing Details' : 'Show Timing Details'}
-          </Button>
+        <div className="flex justify-end">
           <Button variant="quiet" icon={RefreshCw} onClick={doRead} disabled={isReading}>
             Load from Device
           </Button>
         </div>
-        {timingOpen && (
-          <div id={timingId}>
-            <DerivedTiming values={values} motors={read?.motors ?? null} />
-          </div>
-        )}
       </div>
     </Card>
-  );
-}
-
-/** The coordinated-reset timing in technical terms, one click away (README Principle 4). */
-function DerivedTiming({ values, motors }: { values: CustomProfileParams; motors: number | null }) {
-  if (motors !== null) {
-    const { slotMs, periodMs, hz } = crTiming(values, motors);
-    return (
-      <p data-testid="derived-timing" className="code-s tabular-nums">
-        Finger slot {slotMs} ms · Cycle {periodMs} ms ({hz.toFixed(2)} Hz)
-      </p>
-    );
-  }
-  const v2 = crTiming(values, 4);
-  const v3 = crTiming(values, 5);
-  return (
-    <p data-testid="derived-timing" className="code-s tabular-nums">
-      Finger slot {v2.slotMs} ms · Cycle {v2.periodMs} ms ({v2.hz.toFixed(2)} Hz) on v2 · {v3.periodMs} ms ({v3.hz.toFixed(2)} Hz) on v3
-    </p>
   );
 }
