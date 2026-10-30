@@ -158,7 +158,7 @@ summary.bb-btn::-webkit-details-marker { display: none; }
 .bb-seg__label { font-size: 1.0625rem; line-height: 1.25rem; font-weight: 700; }
 .bb-seg__track { display: flex; gap: var(--space-1); padding: var(--space-1); border-radius: calc(var(--radius-md) + 4px); background: var(--surface-sunken); border: var(--border-hairline) solid var(--line-strong); }
 .bb-seg__opt {
-  -webkit-appearance: none; appearance: none; flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  -webkit-appearance: none; appearance: none; flex: 1; display: inline-flex; align-items: center; justify-content: center;
   min-height: var(--target); padding: 0 var(--space-3); border: 0; border-radius: var(--radius-md); background: transparent; color: var(--ink);
   font-family: var(--font-sans); font-size: 1.0625rem; line-height: 1.25rem; font-weight: 400; cursor: pointer;
   transition: background-color var(--duration-base) var(--ease-standard); -webkit-tap-highlight-color: transparent; touch-action: manipulation;
