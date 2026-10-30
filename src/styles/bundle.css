@@ -60,13 +60,15 @@ summary.bb-btn::-webkit-details-marker { display: none; }
   display: flex; gap: var(--space-3); align-items: flex-start; padding: var(--space-4); border-radius: var(--radius-md);
   background: var(--brand-soft); color: var(--ink); border: var(--border-hairline) solid transparent;
 }
-.bb-banner__icon { color: var(--brand); margin-top: -1px; }
+.bb-banner__icon { flex-shrink: 0; color: var(--brand); margin-top: calc((1.625rem - 28px) / 2); } /* centered on the title line */
+.bb-banner--untitled .bb-banner__icon { margin-top: calc((1.375rem - 28px) / 2); } /* centered on the first message line */
 .bb-banner--success { background: var(--success-soft); } .bb-banner--success .bb-banner__icon { color: var(--success); }
 .bb-banner--warning { background: var(--warning-soft); } .bb-banner--warning .bb-banner__icon { color: var(--warning); }
 .bb-banner--danger { background: var(--danger-soft); } .bb-banner--danger .bb-banner__icon { color: var(--danger); }
 .bb-banner__body { flex: 1; min-width: 0; }
 .bb-banner__title { margin: 0; font-size: 1.0625rem; line-height: 1.625rem; font-weight: 700; } /* body-strong */
-.bb-banner__text { margin: 2px 0 0; font-size: 0.9375rem; line-height: 1.375rem; } /* body-s */
+.bb-banner__text { margin: 0; font-size: 0.9375rem; line-height: 1.375rem; } /* body-s */
+.bb-banner__title + .bb-banner__text { margin-top: 2px; }
 .bb-banner__text p { margin: 0; }
 .bb-banner__action { margin-top: var(--space-3); display: flex; gap: var(--space-3); flex-wrap: wrap; }
 [data-theme$="-hc"] .bb-banner { border-color: var(--line); border-width: var(--border-control); }
