@@ -22,6 +22,7 @@ it('arrow keys move selection and focus with a roving tabindex', () => {
   expect(secondary).toHaveAttribute('aria-checked', 'true');
   expect(secondary).toHaveFocus();
   expect(secondary).toHaveAttribute('tabindex', '0');
+  expect(secondary.querySelector('svg')).toBeNull(); // selection is fill + bold, no check
   fireEvent.keyDown(secondary, { key: 'ArrowRight' });
   expect(primary).toHaveAttribute('aria-checked', 'true');
 });

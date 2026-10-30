@@ -1,7 +1,5 @@
 import * as React from 'react';
-import { Check } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { ICON } from './icon';
 import { arrowTarget } from './roving';
 
 export interface SegmentedControlProps<T extends string> {
@@ -56,7 +54,6 @@ export function SegmentedControl<T extends string>({ label, options, value, defa
               onClick={() => pick(i)}
               onKeyDown={(e) => onKey(e, i)}
             >
-              {sel && <Check size={ICON.s} />}
               <span>{o.label}</span>
             </button>
           );
