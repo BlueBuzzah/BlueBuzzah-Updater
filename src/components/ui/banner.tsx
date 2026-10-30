@@ -20,7 +20,7 @@ export function Banner({ tone = 'info', title, children, action, icon, announce,
   const Icon = icon ?? TONE_ICON[tone];
   const role = announce ? (tone === 'danger' ? 'alert' : 'status') : undefined;
   return (
-    <div className={cn('bb-banner', `bb-banner--${tone}`, className)} role={role}>
+    <div className={cn('bb-banner', `bb-banner--${tone}`, !title && 'bb-banner--untitled', className)} role={role}>
       <Icon size={ICON.banner} className="bb-banner__icon" />
       <div className="bb-banner__body">
         {title && <p className="bb-banner__title">{title}</p>}
