@@ -1,5 +1,6 @@
 # Claude Code Local Settings
 .claude/settings.local.json
+.claude/worktrees/
 
 # Misc temp directory
 temp/
