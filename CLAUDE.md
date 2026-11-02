@@ -120,6 +120,7 @@ grep -rnE "text-(xs|sm|base|lg|[0-9]?xl)\b|text-\[|#[0-9a-fA-F]{3,8}\b|rgba?\(|h
 - Strict TypeScript (no `any`)
 - UI components live in `src/components/ui/` and render the design system's `bb-` markup (`bundle.css`). Radix only where behavior needs it (dialog focus trap). Tailwind for layout only; its theme is the token CSS variables. Type comes from `tokens.css` classes. No inline styles except computed widths (progress fill).
 - Loading states for all async ops; `src/lib/error-messages.ts` maps DFU errors to user guidance
+- **Worktrees go only in `.claude/worktrees/<name>`** inside this repo (gitignored), never beside it in the workspace's `projects/` or anywhere else.
 
 ## Docs
 
