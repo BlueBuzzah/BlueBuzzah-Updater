@@ -39,3 +39,11 @@ it('saves the whole log to the chosen file', async () => {
   expect(save).toHaveBeenCalledWith({ defaultPath: 'bluebuzzah-updater-log.txt' });
   expect(await screen.findByText('Log saved.')).toBeInTheDocument();
 });
+
+it('keeps line numbers in one fixed column so they never wrap', () => {
+  render(<LogPane lines={Array.from({ length: 12 }, (_, i) => `INFO  ${i}`)} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Show Log' }));
+  const number = within(screen.getAllByRole('listitem')[9]).getByText('10');
+  expect(number).toHaveClass('shrink-0', 'text-right', 'tabular-nums');
+  expect(number).toHaveStyle({ minWidth: '2ch' });
+});
