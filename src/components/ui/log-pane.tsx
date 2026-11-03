@@ -17,6 +17,8 @@ export function LogPane({ lines, fileName = 'bluebuzzah-updater-log.txt', action
   const [status, setStatus] = React.useState('');
   const paneId = React.useId();
   const text = lines.join('\n');
+  // code-s is monospace, so 1ch is one digit: the column fits the largest line number.
+  const numberWidth = `${String(lines.length).length}ch`;
 
   const copy = async () => {
     try {
@@ -54,7 +56,7 @@ export function LogPane({ lines, fileName = 'bluebuzzah-updater-log.txt', action
           <ol className="code-s m-0 grid list-none gap-1 rounded-md bg-surface-sunken p-4">
             {lines.map((line, i) => (
               <li key={i} className="flex gap-3">
-                <span className="text-ink-muted">{i + 1}</span>
+                <span className="shrink-0 text-right tabular-nums text-ink-muted" style={{ minWidth: numberWidth }}>{i + 1}</span>
                 <span className="min-w-0 whitespace-pre-wrap">{line}</span>
               </li>
             ))}
