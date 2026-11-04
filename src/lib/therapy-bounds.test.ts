@@ -139,14 +139,19 @@ describe('isDeviatingFromDefaults', () => {
 });
 
 describe('effectiveJitterCapPct', () => {
-  it('reports no cap when the gap absorbs the excursion', () => {
-    // slot 167, jitter 23.5% -> excursion 19.6ms; off 67 leaves 62ms of headroom
-    expect(effectiveJitterCapPct(CUSTOM_DEFAULTS)).toBeGreaterThanOrEqual(50);
+  it('leaves the researched default within the cap', () => {
+    // slot 167, off 67 -> limit (67 - 6) / 2 = 30.5ms -> cap 2*100*30.5/167 = 36.53%
+    const cap = effectiveJitterCapPct(CUSTOM_DEFAULTS);
+    expect(cap).toBeCloseTo(36.53, 1);
+    expect(cap).toBeGreaterThan(CUSTOM_DEFAULTS.jitter);
   });
 
   it('caps jitter when off is near the minimum inter-burst gap', () => {
-    // off = 30 -> maxExcursion = 25ms; slot = 130 -> cap = 2*100*25/130 = 38.46%
-    const cap = effectiveJitterCapPct({ ...CUSTOM_DEFAULTS, on: 100, off: 30 });
-    expect(cap).toBeCloseTo(38.46, 1);
+    // off 30 -> limit 12ms; slot 130 -> cap 2*100*12/130 = 18.46%
+    expect(effectiveJitterCapPct({ ...CUSTOM_DEFAULTS, on: 100, off: 30 })).toBeCloseTo(18.46, 1);
+  });
+
+  it('is zero when off leaves no room', () => {
+    expect(effectiveJitterCapPct({ ...CUSTOM_DEFAULTS, on: 100, off: 6 })).toBe(0);
   });
 });
