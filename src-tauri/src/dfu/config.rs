@@ -28,7 +28,7 @@ pub const FEATHER_BOOTLOADER_PIDS: &[u16] = &[
 /// Espressif USB Vendor ID.
 pub const ESPRESSIF_VID: u16 = 0x303A;
 
-/// ESP32-S3 built-in USB-JTAG/Serial PID (XIAO ESP32-S3 / PentaBuzzer).
+/// ESP32-S3 built-in USB-JTAG/Serial PID (v3).
 /// Same VID/PID in application and ROM download mode.
 pub const ESP32S3_JTAG_SERIAL_PID: u16 = 0x1001;
 

@@ -1,4 +1,4 @@
-//! v3 (ESP32-S3 / PentaBuzzer) firmware package handling and flashing.
+//! v3 (ESP32-S3) firmware package handling and flashing.
 //!
 //! Kept fully separate from the Nordic DFU path in `crate::dfu`.
 
