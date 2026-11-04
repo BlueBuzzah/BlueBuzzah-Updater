@@ -4,8 +4,9 @@
  * Every number here is copied from the firmware, which is the sole validator:
  * - bounds: BlueBuzzah-Firmware include/config.h:197-206, MAX_AMPLITUDE (config.h:185)
  * - defaults: the built-in custom_vcr profile, src/profile_manager.cpp:138-155
- * - CR period: therapy_engine.cpp generateRandomPermutation - fingers * (ON + OFF)
- * - jitter clamp: therapy_engine.cpp clampedJitterAmount + MIN_INTER_BURST_GAP_MS
+ * - CR period: therapy_engine.cpp - fingers * (ON + OFF); the macrocycle grid period is 5 times that
+ * - onset jitter limit: therapy_engine.cpp onsetJitterLimitMs, with MIN_INTER_BURST_GAP_MS
+ *   and ONSET_ROUNDING_RESERVE_MS from include/config.h
  *
  * The Updater duplicates the bounds only so inputs can constrain and the panel
  * can warn early. Firmware still rejects anything out of range; this module can
@@ -65,8 +66,11 @@ export const CUSTOM_BOUNDS: Record<CustomNumericField, FieldBounds> = {
   session: { min: 1, max: 240, step: 1, unit: 'minutes', label: 'Session length' },
 };
 
-/** Smallest inter-burst gap the jitter excursion may leave (config.h:211). */
+/** Smallest inter-burst gap the onset jitter limit leaves, ms (firmware MIN_INTER_BURST_GAP_MS). */
 const MIN_INTER_BURST_GAP_MS = 5;
+
+/** Millisecond rounding margin kept out of the onset jitter limit (firmware ONSET_ROUNDING_RESERVE_MS). */
+const ONSET_ROUNDING_RESERVE_MS = 1;
 
 const NUMERIC_FIELDS: CustomNumericField[] = [
   'on',
@@ -133,16 +137,18 @@ export function isDeviatingFromDefaults(p: CustomProfileParams): boolean {
 
 /**
  * The largest jitter percentage the current ON/OFF pair can express before
- * firmware clamps the excursion.
+ * firmware limits the onset shift.
  *
- * Firmware clamps rather than rejects (clampedJitterAmount), so a value above
- * this is guidance, not a validation error. Clamped to the field maximum
- * because a cap above 50 % is not reachable and reads as noise.
+ * Firmware limits rather than rejects (onsetJitterLimitMs), so a value above
+ * this is guidance, not a validation error. The onset shift is capped at
+ * (OFF - MIN_INTER_BURST_GAP_MS - ONSET_ROUNDING_RESERVE_MS) / 2 ms, which is
+ * 100 * max(0, OFF - 6) / (ON + OFF) percent of the grid slot. Clamped to the
+ * field maximum because a cap above 50 % is not reachable and reads as noise.
  */
 export function effectiveJitterCapPct(p: CustomProfileParams): number {
   const slotMs = p.on + p.off;
   if (slotMs <= 0) return 0;
-  const maxExcursion = Math.max(0, p.off - MIN_INTER_BURST_GAP_MS);
-  const cap = (2 * 100 * maxExcursion) / slotMs;
+  const maxOnsetShiftMs = Math.max(0, (p.off - MIN_INTER_BURST_GAP_MS - ONSET_ROUNDING_RESERVE_MS) / 2);
+  const cap = (2 * 100 * maxOnsetShiftMs) / slotMs;
   return Math.min(cap, CUSTOM_BOUNDS.jitter.max);
 }
