@@ -1,4 +1,4 @@
-//! ESP32-S3 (PentaBuzzer / v3) flashing via `espflash`.
+//! ESP32-S3 (v3) flashing via `espflash`.
 //!
 //! Mirrors the stage/progress/cancellation idioms of `crate::dfu::protocol::upload_firmware`
 //! so the existing frontend progress pipeline (built around `DfuStage`) works unchanged.
@@ -62,7 +62,7 @@ impl ProgressCallbacks for StageProgress<'_> {
     }
 }
 
-/// Flash a v3 (ESP32-S3 / PentaBuzzer) firmware package to a device.
+/// Flash a v3 (ESP32-S3) firmware package to a device.
 ///
 /// # Arguments
 /// * `port_name` - Serial port of the device (must currently enumerate as `esp32s3`)
@@ -246,7 +246,7 @@ pub fn flash_v3<F: Fn(DfuStage), C: Fn() -> bool>(
 /// triggers the real post-flash reset explicitly via `Connection::reset()`.
 ///
 /// `ResetBeforeOperation::default()` (`DefaultReset`) is used for entering the
-/// bootloader, but PentaBuzzer's USB-Serial/JTAG peripheral (PID 0x1001) is
+/// bootloader, but v3's USB-Serial/JTAG peripheral (PID 0x1001) is
 /// auto-detected by `espflash` and always uses its dedicated JTAG-serial reset
 /// sequence regardless of this setting (see `construct_reset_strategy_sequence`
 /// in `espflash::connection::reset`).

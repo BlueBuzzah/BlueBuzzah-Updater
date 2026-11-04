@@ -11,7 +11,7 @@ import { invoke } from '@tauri-apps/api/core';
 
 /** v2 (nRF52840) Nordic DFU package. */
 export const NRF_ASSET_PATTERN = /^BlueBuzzah-Firmware-(?!v3-)/;
-/** v3 (ESP32-S3 / PentaBuzzer) esptool image package. */
+/** v3 (ESP32-S3) esptool image package. */
 export const V3_ASSET_PATTERN = /^BlueBuzzah-Firmware-v3-/;
 
 export function getAssetForBoard(
@@ -183,13 +183,13 @@ export class FirmwareService implements IFirmwareRepository {
         if (cachedOnly) {
           throw new Error(
             `This version is only available from the local cache, which has no ${
-              board === 'esp32s3' ? 'v3 (PentaBuzzer)' : 'v2 (nRF52840)'
+              board === 'esp32s3' ? 'v3' : 'v2 (nRF52840)'
             } firmware for it. The release could not be found on GitHub.`
           );
         }
         throw new Error(
           board === 'esp32s3'
-            ? 'This release has no v3 (PentaBuzzer) firmware asset. It may predate v3 support.'
+            ? 'This release has no v3 firmware asset. It may predate v3 support.'
             : 'No v2 (nRF52840) firmware asset found in this release.'
         );
       }
