@@ -4,7 +4,7 @@
  * Every number here is copied from the firmware, which is the sole validator:
  * - bounds: BlueBuzzah-Firmware include/config.h:197-206, MAX_AMPLITUDE (config.h:185)
  * - defaults: the built-in custom_vcr profile, src/profile_manager.cpp:138-155
- * - grid period: therapy_engine.cpp - fingers * (ON + OFF)
+ * - CR period: therapy_engine.cpp - fingers * (ON + OFF); the macrocycle grid period is 5 times that
  * - onset jitter limit: therapy_engine.cpp onsetJitterLimitMs, with MIN_INTER_BURST_GAP_MS
  *   and ONSET_ROUNDING_RESERVE_MS from include/config.h
  *
