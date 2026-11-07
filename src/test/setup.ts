@@ -41,6 +41,11 @@ vi.mock('@tauri-apps/api/window', () => ({
   }),
 }));
 
+// Mock the browser-opening shell plugin
+vi.mock('@tauri-apps/plugin-shell', () => ({
+  open: vi.fn(),
+}));
+
 // Mock fetch for GitHub API calls
 global.fetch = vi.fn();
 
