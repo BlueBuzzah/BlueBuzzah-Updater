@@ -1,6 +1,7 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ConfigurePage } from './components/configure/ConfigurePage';
 import { FirmwarePage } from './components/firmware/FirmwarePage';
+import { TermsDialog } from './components/legal/TermsDialog';
 import { SettingsPage } from './components/settings/SettingsPage';
 import { AppShell } from './components/shell/AppShell';
 import { UpdateDialog } from './components/updater/UpdateDialog';
@@ -9,7 +10,9 @@ import { useAppUpdater } from './hooks/useAppUpdater';
 import { useBusyCloseGuard } from './hooks/useBusyCloseGuard';
 import { useShortcuts, type Section } from './hooks/useShortcuts';
 import { useTheme } from './hooks/useTheme';
+import { needsTermsAcceptance } from './lib/legal';
 import { useIsBusy } from './stores/busy';
+import { useSettingsStore } from './stores/settingsStore';
 
 const TITLES: Record<Section, string> = {
   firmware: 'Update Firmware',
@@ -24,8 +27,17 @@ function App() {
   useAppUpdater();
   const closeGuard = useBusyCloseGuard();
 
+  // Settings gate the shell: nothing is usable until the current Terms are accepted
+  const settingsLoaded = useSettingsStore((s) => s.isLoaded);
+  const loadSettings = useSettingsStore((s) => s.loadFromBackend);
+  const termsAcceptedDate = useSettingsStore((s) => s.settings.termsAcceptedDate);
+  useEffect(() => {
+    if (!settingsLoaded) loadSettings();
+  }, [settingsLoaded, loadSettings]);
+  const termsOpen = settingsLoaded && needsTermsAcceptance(termsAcceptedDate);
+
   const rescan = useCallback(() => window.dispatchEvent(new Event('bb:rescan')), []);
-  useShortcuts({ onSection: setSection, onRescan: rescan, enabled: !busy });
+  useShortcuts({ onSection: setSection, onRescan: rescan, enabled: !busy && !termsOpen });
 
   const title = kind === 'flash' ? 'Updating Firmware' : kind === 'configure' ? 'Setting Up Devices' : TITLES[section];
 
@@ -48,7 +60,8 @@ function App() {
           ? 'Closing now can leave the device half set up. Wait for it to finish.'
           : 'Closing now can leave the device unable to start. Wait for it to finish.'}
       </ConfirmDialog>
-      <UpdateDialog />
+      {!termsOpen && <UpdateDialog />}
+      <TermsDialog open={termsOpen} />
     </>
   );
 }

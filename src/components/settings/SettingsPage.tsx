@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getVersion } from '@tauri-apps/api/app';
+import { LegalLinks } from '@/components/legal/TermsDialog';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { SegmentedControl } from '@/components/ui/segmented-control';
@@ -83,6 +84,7 @@ export function SettingsPage() {
             </Button>
           </div>
           <p className="body-s" aria-live="polite">{status}</p>
+          <LegalLinks />
         </div>
       </Card>
     </div>

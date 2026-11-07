@@ -123,6 +123,8 @@ export interface AdvancedSettings {
    * the source of truth for what is actually on the hardware.
    */
   customProfile?: CustomProfileParams;
+  /** Effective date of the Terms the person agreed to; null until they do */
+  termsAcceptedDate?: string | null;
 }
 
 export interface WizardState {
