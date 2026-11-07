@@ -2,6 +2,8 @@ import { createMockDevice, createMockRelease } from '@/test/factories';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
+import { TERMS_EFFECTIVE_DATE } from './lib/legal';
+import { useSettingsStore } from './stores/settingsStore';
 import { useTherapyStore } from './stores/therapyStore';
 import { useWizardStore } from './stores/wizardStore';
 
@@ -62,6 +64,11 @@ describe('App', () => {
   beforeEach(() => {
     useWizardStore.getState().reset();
     useTherapyStore.getState().reset();
+    // Terms already accepted: the gate is covered in TermsDialog.test.tsx
+    useSettingsStore.setState({
+      settings: { disableLedDuringTherapy: false, debugMode: false, selectedProfile: null, termsAcceptedDate: TERMS_EFFECTIVE_DATE },
+      isLoaded: true,
+    });
     setPlatform('Win32');
   });
 
@@ -96,6 +103,17 @@ describe('App', () => {
       fireEvent.keyDown(window, { key: '2', ctrlKey: true });
       expect(screen.getByRole('heading', { level: 1, name: 'Updating Firmware' })).toBeInTheDocument();
       expect(screen.getByText('Available when the flash finishes')).toBeInTheDocument();
+    });
+
+    it('holds the shell behind the Terms dialog until accepted', () => {
+      useSettingsStore.setState({ settings: { disableLedDuringTherapy: false, debugMode: false, selectedProfile: null, termsAcceptedDate: null } });
+      render(<App />);
+      expect(screen.getByRole('alertdialog', { name: 'Before You Start' })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Configure' })).toBeNull();
+      fireEvent.keyDown(window, { key: '2', ctrlKey: true });
+      fireEvent.click(screen.getByRole('button', { name: 'I Agree' }));
+      expect(screen.queryByRole('alertdialog')).toBeNull();
+      expect(screen.getByRole('heading', { level: 1, name: 'Update Firmware' })).toBeInTheDocument();
     });
 
     it('Ctrl+R asks the device list to rescan', () => {

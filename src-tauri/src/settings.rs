@@ -71,6 +71,11 @@ pub struct AdvancedSettings {
     #[serde(default)]
     pub custom_profile: Option<CustomProfileParams>,
 
+    /// Effective date of the Terms the person agreed to ("2026-11-07").
+    /// None until they agree; the frontend re-prompts when it differs from its constant.
+    #[serde(default)]
+    pub terms_accepted_date: Option<String>,
+
     // =========================================================================
     // EXTENSIBILITY: Add new settings below
     // =========================================================================
@@ -245,6 +250,7 @@ mod tests {
             disable_led_during_therapy: true,
             debug_mode: false,
             selected_profile: None,
+            terms_accepted_date: None,
             custom_profile: None,
         };
         let commands = settings.to_pre_profile_commands();
@@ -260,6 +266,7 @@ mod tests {
             disable_led_during_therapy: false,
             debug_mode: true,
             selected_profile: None,
+            terms_accepted_date: None,
             custom_profile: None,
         };
         let commands = settings.to_pre_profile_commands();
@@ -275,6 +282,7 @@ mod tests {
             disable_led_during_therapy: true,
             debug_mode: true,
             selected_profile: None,
+            terms_accepted_date: None,
             custom_profile: None,
         };
         let commands = settings.to_pre_profile_commands();
@@ -298,6 +306,7 @@ mod tests {
             disable_led_during_therapy: true,
             debug_mode: true,
             selected_profile: Some("REGULAR".to_string()),
+            terms_accepted_date: None,
             custom_profile: None,
         };
         manager.save(&settings).unwrap();
@@ -316,6 +325,7 @@ mod tests {
             disable_led_during_therapy: true,
             debug_mode: false,
             selected_profile: None,
+            terms_accepted_date: None,
             custom_profile: None,
         };
         assert!(custom_led.has_non_default_settings());
@@ -324,6 +334,7 @@ mod tests {
             disable_led_during_therapy: false,
             debug_mode: true,
             selected_profile: None,
+            terms_accepted_date: None,
             custom_profile: None,
         };
         assert!(custom_debug.has_non_default_settings());
@@ -332,6 +343,7 @@ mod tests {
             disable_led_during_therapy: false,
             debug_mode: false,
             selected_profile: Some("NOISY".to_string()),
+            terms_accepted_date: None,
             custom_profile: None,
         };
         assert!(custom_profile.has_non_default_settings());
@@ -362,6 +374,7 @@ mod tests {
             disable_led_during_therapy: true,
             debug_mode: false,
             selected_profile: Some("REGULAR".to_string()),
+            terms_accepted_date: None,
             custom_profile: None,
         };
         manager.save(&settings).unwrap();
@@ -378,6 +391,7 @@ mod tests {
             disable_led_during_therapy: true,
             debug_mode: true,
             selected_profile: Some("REGULAR".to_string()),
+            terms_accepted_date: None,
             custom_profile: None,
         };
         let json = serde_json::to_string(&settings).unwrap();
@@ -401,6 +415,7 @@ mod tests {
     #[test]
     fn custom_profile_round_trips_through_camel_case_json() {
         let settings = AdvancedSettings {
+            terms_accepted_date: None,
             custom_profile: Some(CustomProfileParams {
                 on: 120.0,
                 off: 67.0,
@@ -423,6 +438,7 @@ mod tests {
     #[test]
     fn custom_profile_does_not_generate_pre_profile_commands() {
         let settings = AdvancedSettings {
+            terms_accepted_date: None,
             custom_profile: Some(CustomProfileParams {
                 on: 120.0,
                 off: 67.0,

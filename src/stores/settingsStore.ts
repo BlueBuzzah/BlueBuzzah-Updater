@@ -11,6 +11,7 @@ const defaultSettings: AdvancedSettings = {
   disableLedDuringTherapy: false,
   debugMode: false,
   selectedProfile: null,
+  termsAcceptedDate: null,
 };
 
 interface SettingsStore {
