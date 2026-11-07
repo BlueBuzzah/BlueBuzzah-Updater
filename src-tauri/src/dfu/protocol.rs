@@ -1231,7 +1231,7 @@ fn send_setting_command<L: Fn(&str)>(
     let (setting_name, setting_value) = trimmed.split_once(':').unwrap_or((trimmed, "unknown"));
 
     let friendly_name = match setting_name {
-        "THERAPY_LED_OFF" => "Disable LED During Therapy",
+        "THERAPY_LED_OFF" => "Disable LED During Sessions",
         "DEBUG" => "Debug Mode",
         _ => setting_name,
     };

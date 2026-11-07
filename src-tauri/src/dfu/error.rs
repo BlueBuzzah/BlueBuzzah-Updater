@@ -97,7 +97,7 @@ pub enum DfuError {
     RoleConfigFailed { reason: String },
 
     /// Profile configuration failed.
-    #[error("Failed to configure therapy profile: {reason}")]
+    #[error("Failed to configure the profile: {reason}")]
     ProfileConfigFailed { reason: String },
 
     /// Advanced setting configuration failed.
