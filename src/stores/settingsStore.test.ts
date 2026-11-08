@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useSettingsStore } from './settingsStore';
 import { invoke } from '@tauri-apps/api/core';
-import { CUSTOM_DEFAULTS } from '@/lib/therapy-bounds';
+import { CUSTOM_DEFAULTS, LEGACY_CUSTOM_DEFAULTS } from '@/lib/therapy-bounds';
 
 describe('settingsStore', () => {
   beforeEach(() => {
@@ -46,6 +46,31 @@ describe('settingsStore', () => {
       expect(state.isLoaded).toBe(true);
       expect(state.loadError).toBeNull();
       expect(state.settings.disableLedDuringTherapy).toBe(true);
+    });
+
+    it('drops a saved custom profile equal to the pre-#23 defaults', async () => {
+      vi.mocked(invoke).mockResolvedValueOnce({
+        disableLedDuringTherapy: false,
+        debugMode: false,
+        customProfile: { ...LEGACY_CUSTOM_DEFAULTS },
+      });
+
+      await useSettingsStore.getState().loadFromBackend();
+
+      expect(useSettingsStore.getState().settings.customProfile).toBeUndefined();
+    });
+
+    it('keeps a saved custom profile that differs from the pre-#23 defaults', async () => {
+      const edited = { ...LEGACY_CUSTOM_DEFAULTS, session: 119 };
+      vi.mocked(invoke).mockResolvedValueOnce({
+        disableLedDuringTherapy: false,
+        debugMode: false,
+        customProfile: edited,
+      });
+
+      await useSettingsStore.getState().loadFromBackend();
+
+      expect(useSettingsStore.getState().settings.customProfile).toEqual(edited);
     });
 
     it('uses localStorage fallback when backend fails', async () => {

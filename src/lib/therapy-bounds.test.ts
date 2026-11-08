@@ -130,6 +130,7 @@ describe('isDeviatingFromDefaults', () => {
     ['off', 68],
     ['jitter', 23.5],
     ['ampMin', 70],
+    ['ampMax', 99],
     ['session', 60],
     ['mirror', true],
   ] as const)('is true when %s changes to %s', (field, value) => {

@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { invoke } from '@tauri-apps/api/core';
 import type { AdvancedSettings, TherapyProfile } from '@/types';
+import { isLegacyDefaults } from '@/lib/therapy-bounds';
 
 /**
  * Default advanced settings values.
@@ -76,6 +77,12 @@ export const useSettingsStore = create<SettingsStore>()(
         try {
           set({ loadError: null });
           const settings = await invoke<AdvancedSettings>('get_advanced_settings');
+          // Issue #23 changed the Custom defaults. A saved profile equal to the
+          // old defaults was saved by a field blur, not chosen, so drop it and
+          // let CUSTOM_DEFAULTS apply. Profiles the user edited are kept.
+          if (settings.customProfile && isLegacyDefaults(settings.customProfile)) {
+            delete settings.customProfile;
+          }
           set({ settings, isLoaded: true });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
