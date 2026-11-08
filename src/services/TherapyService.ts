@@ -8,6 +8,7 @@ import type {
   ProfileConfigOutcome,
 } from '@/types';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { CUSTOM_DEFAULTS } from '@/lib/therapy-bounds';
 
 /**
  * Progress event from the Rust backend.
@@ -77,14 +78,20 @@ export class TherapyService implements ITherapyService {
       });
     };
 
-    // Get current advanced settings from store
+    // Get current advanced settings from store. Custom with nothing saved means
+    // the panel is showing CUSTOM_DEFAULTS, so send those: the backend rejects
+    // Custom without parameters.
     const { settings } = useSettingsStore.getState();
+    const advancedSettings =
+      profile === 'CUSTOM'
+        ? { ...settings, customProfile: settings.customProfile ?? CUSTOM_DEFAULTS }
+        : settings;
 
     // Call Tauri backend command with settings
     return await invoke<ProfileConfigOutcome>('set_device_profile', {
       serialPort: device.path,
       profile: profile,
-      advancedSettings: settings,
+      advancedSettings,
       progress: progressChannel,
     });
   }

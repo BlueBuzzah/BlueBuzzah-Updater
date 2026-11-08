@@ -87,8 +87,11 @@ export const useSettingsStore = create<SettingsStore>()(
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
           console.error('[SettingsStore] Failed to load settings from backend:', error);
-          // Use localStorage fallback if backend fails
-          set({ isLoaded: true, loadError: message });
+          // Use localStorage fallback if backend fails, with the same #23 cleanup
+          const { customProfile, ...rest } = get().settings;
+          const settings =
+            customProfile && isLegacyDefaults(customProfile) ? rest : get().settings;
+          set({ settings, isLoaded: true, loadError: message });
         }
       },
 

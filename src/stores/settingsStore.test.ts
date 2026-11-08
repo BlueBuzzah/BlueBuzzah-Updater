@@ -81,6 +81,17 @@ describe('settingsStore', () => {
       // Should still mark as loaded (using localStorage fallback)
       expect(useSettingsStore.getState().isLoaded).toBe(true);
     });
+
+    it('drops the old defaults from the localStorage fallback too', async () => {
+      useSettingsStore.setState({
+        settings: { ...useSettingsStore.getState().settings, customProfile: { ...LEGACY_CUSTOM_DEFAULTS } },
+      });
+      vi.mocked(invoke).mockRejectedValueOnce(new Error('Failed'));
+
+      await useSettingsStore.getState().loadFromBackend();
+
+      expect(useSettingsStore.getState().settings.customProfile).toBeUndefined();
+    });
   });
 
   describe('reset', () => {
