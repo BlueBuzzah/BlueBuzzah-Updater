@@ -22,8 +22,8 @@ describe('CUSTOM_DEFAULTS', () => {
     expect(CUSTOM_DEFAULTS).toEqual({
       on: 100,
       off: 67,
-      jitter: 23.5,
-      ampMin: 70,
+      jitter: 0,
+      ampMin: 100,
       ampMax: 100,
       session: 120,
       mirror: false,
@@ -128,8 +128,8 @@ describe('isDeviatingFromDefaults', () => {
   it.each([
     ['on', 101],
     ['off', 68],
-    ['jitter', 0],
-    ['ampMin', 71],
+    ['jitter', 23.5],
+    ['ampMin', 70],
     ['ampMax', 99],
     ['session', 60],
     ['mirror', true],
@@ -139,11 +139,11 @@ describe('isDeviatingFromDefaults', () => {
 });
 
 describe('effectiveJitterCapPct', () => {
-  it('leaves the researched default within the cap', () => {
+  it("leaves the default timing's jitter cap above Noisy's 23.5%", () => {
     // slot 167, off 67 -> limit (67 - 6) / 2 = 30.5ms -> cap 2*100*30.5/167 = 36.53%
     const cap = effectiveJitterCapPct(CUSTOM_DEFAULTS);
     expect(cap).toBeCloseTo(36.53, 1);
-    expect(cap).toBeGreaterThan(CUSTOM_DEFAULTS.jitter);
+    expect(cap).toBeGreaterThan(23.5);
   });
 
   it('caps jitter when off is near the minimum inter-burst gap', () => {

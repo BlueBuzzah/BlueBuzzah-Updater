@@ -2,8 +2,8 @@
  * Custom therapy profile bounds, defaults, and derived timing.
  *
  * Every number here is copied from the firmware, which is the sole validator:
- * - bounds: BlueBuzzah-Firmware include/config.h:197-206, MAX_AMPLITUDE (config.h:185)
- * - defaults: the built-in custom_vcr profile, src/profile_manager.cpp:138-155
+ * - bounds: BlueBuzzah-Firmware include/config.h PARAM_*, MAX_AMPLITUDE
+ * - defaults: the built-in custom_vcr profile in src/profile_manager.cpp
  * - CR period: therapy_engine.cpp - fingers * (ON + OFF); the macrocycle grid period is 5 times that
  * - onset jitter limit: therapy_engine.cpp onsetJitterLimitMs, with MIN_INTER_BURST_GAP_MS
  *   and ONSET_ROUNDING_RESERVE_MS from include/config.h
@@ -32,11 +32,30 @@ export interface CustomProfileParams {
 }
 
 /**
- * The Pfeifer et al. 2021 research protocol values, identical to the firmware's
- * built-in custom_vcr profile. The bounds around them are a hardware-safety and
- * coherence envelope, NOT a validated efficacy range.
+ * Identical to the firmware's built-in custom_vcr profile, which equals
+ * regular_vcr: the timing of the regular vCR arm in Pfeifer et al. 2021 (no
+ * jitter, non-mirrored), which the study ran on four fingers per hand without
+ * the thumb. Amplitude is the firmware's full default, not a study value (the study
+ * reported displacement in mm). Frequency is fixed by firmware and the Updater
+ * never sends it. The bounds around these values are a hardware-safety and
+ * coherence envelope, not an efficacy range.
  */
 export const CUSTOM_DEFAULTS: CustomProfileParams = {
+  on: 100,
+  off: 67,
+  jitter: 0,
+  ampMin: 100,
+  ampMax: 100,
+  session: 120,
+  mirror: false,
+};
+
+/**
+ * The Custom defaults before issue #23 (the Hybrid pattern). Every field blur
+ * saved them to settings, so many saved profiles are this exact object without
+ * the user having changed anything.
+ */
+export const LEGACY_CUSTOM_DEFAULTS: CustomProfileParams = {
   on: 100,
   off: 67,
   jitter: 23.5,
@@ -45,6 +64,13 @@ export const CUSTOM_DEFAULTS: CustomProfileParams = {
   session: 120,
   mirror: false,
 };
+
+/** True when every field equals the pre-#23 defaults. */
+export function isLegacyDefaults(p: CustomProfileParams): boolean {
+  return (Object.keys(LEGACY_CUSTOM_DEFAULTS) as (keyof CustomProfileParams)[]).every(
+    (key) => p[key] === LEGACY_CUSTOM_DEFAULTS[key]
+  );
+}
 
 /** Numeric field keys — `mirror` is a boolean and has no bounds entry. */
 export type CustomNumericField = Exclude<keyof CustomProfileParams, 'mirror'>;

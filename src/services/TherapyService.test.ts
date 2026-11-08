@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { CUSTOM_DEFAULTS } from '@/lib/therapy-bounds';
 import { therapyService } from './TherapyService';
 import { createMockDevice } from '@/test/factories';
+import { useSettingsStore } from '@/stores/settingsStore';
 
 // Channel isn't overridden with the real implementation here: it calls into
 // window.__TAURI_INTERNALS__.transformCallback, which only exists inside an
@@ -49,5 +50,20 @@ describe('TherapyService.configureProfile', () => {
     );
 
     expect(result).toEqual(outcome);
+  });
+
+  it('sends the defaults for Custom when no Custom profile is saved', async () => {
+    mockInvoke.mockResolvedValue({ status: 'success' });
+    const { customProfile: _, ...settings } = useSettingsStore.getState().settings;
+    useSettingsStore.setState({ settings });
+
+    await therapyService.configureProfile(createMockDevice(), 'CUSTOM');
+
+    expect(mockInvoke).toHaveBeenCalledWith(
+      'set_device_profile',
+      expect.objectContaining({
+        advancedSettings: expect.objectContaining({ customProfile: CUSTOM_DEFAULTS }),
+      })
+    );
   });
 });
