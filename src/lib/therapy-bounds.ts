@@ -3,7 +3,7 @@
  *
  * Every number here is copied from the firmware, which is the sole validator:
  * - bounds: BlueBuzzah-Firmware include/config.h:197-206, MAX_AMPLITUDE (config.h:185)
- * - defaults: the built-in custom_vcr profile, src/profile_manager.cpp:138-155
+ * - defaults: the built-in custom_vcr profile in src/profile_manager.cpp
  * - CR period: therapy_engine.cpp - fingers * (ON + OFF); the macrocycle grid period is 5 times that
  * - onset jitter limit: therapy_engine.cpp onsetJitterLimitMs, with MIN_INTER_BURST_GAP_MS
  *   and ONSET_ROUNDING_RESERVE_MS from include/config.h
@@ -32,15 +32,18 @@ export interface CustomProfileParams {
 }
 
 /**
- * The Pfeifer et al. 2021 research protocol values, identical to the firmware's
- * built-in custom_vcr profile. The bounds around them are a hardware-safety and
- * coherence envelope, NOT a validated efficacy range.
+ * Identical to the firmware's built-in custom_vcr profile, which equals
+ * regular_vcr: the timing and pattern of the regular vCR arm in Pfeifer et al.
+ * 2021. Amplitude is the firmware's full default, not a study value (the study
+ * reported displacement in mm). Frequency is fixed by firmware and the Updater
+ * never sends it. The bounds around these values are a hardware-safety and
+ * coherence envelope, not an efficacy range.
  */
 export const CUSTOM_DEFAULTS: CustomProfileParams = {
   on: 100,
   off: 67,
-  jitter: 23.5,
-  ampMin: 70,
+  jitter: 0,
+  ampMin: 100,
   ampMax: 100,
   session: 120,
   mirror: false,
