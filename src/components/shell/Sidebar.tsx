@@ -1,4 +1,4 @@
-import { Cpu, Settings, SlidersHorizontal, type LucideIcon } from 'lucide-react';
+import { Cpu, ScrollText, Settings, SlidersHorizontal, type LucideIcon } from 'lucide-react';
 import mark from '@/assets/bluebuzzah-mark-512.png';
 import { ICON } from '@/components/ui/icon';
 import { isMac, type Section } from '@/hooks/useShortcuts';
@@ -8,12 +8,14 @@ import { cn } from '@/lib/utils';
 const ROWS: { id: Section; label: string; icon: LucideIcon; key: string }[] = [
   { id: 'firmware', label: 'Firmware', icon: Cpu, key: '1' },
   { id: 'configure', label: 'Configure', icon: SlidersHorizontal, key: '2' },
-  { id: 'settings', label: 'Settings', icon: Settings, key: '3' },
+  { id: 'logs', label: 'Logs', icon: ScrollText, key: '3' },
+  { id: 'settings', label: 'Settings', icon: Settings, key: '4' },
 ];
 
 const LOCKED: Record<BusyKind, string> = {
   flash: 'Available when the flash finishes',
   configure: 'Available when setup finishes',
+  monitor: 'Available when you stop viewing',
 };
 
 interface SidebarProps {
@@ -57,10 +59,10 @@ export function Sidebar({ section, onSectionChange, busy }: SidebarProps) {
         </span>
       </div>
       <nav aria-label="Sections" className="flex flex-wrap gap-3 md:flex-1 md:flex-col md:flex-nowrap">
-        {ROWS.slice(0, 2).map(row)}
+        {ROWS.slice(0, 3).map(row)}
         <div className="flex flex-wrap gap-3 md:mt-auto md:grid">
           {busy && <p className="caption text-ink-muted">{LOCKED[busy]}</p>}
-          {row(ROWS[2])}
+          {row(ROWS[3])}
         </div>
       </nav>
     </aside>

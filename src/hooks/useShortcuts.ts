@@ -1,12 +1,12 @@
 import { useEffect } from 'react';
 
-export type Section = 'firmware' | 'configure' | 'settings';
+export type Section = 'firmware' | 'configure' | 'logs' | 'settings';
 
-const SECTION_KEYS: Record<string, Section> = { '1': 'firmware', '2': 'configure', '3': 'settings' };
+const SECTION_KEYS: Record<string, Section> = { '1': 'firmware', '2': 'configure', '3': 'logs', '4': 'settings' };
 
 export const isMac = () => navigator.platform.startsWith('Mac');
 
-/** ⌘/Ctrl+1–3 switch sections, ⌘/Ctrl+R rescans devices (updater.md Keyboard). */
+/** ⌘/Ctrl+1–4 switch sections, ⌘/Ctrl+R rescans devices (updater.md Keyboard). */
 export function useShortcuts({ onSection, onRescan, enabled }: { onSection: (s: Section) => void; onRescan: () => void; enabled: boolean }): void {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

@@ -17,6 +17,7 @@ import { useSettingsStore } from './stores/settingsStore';
 const TITLES: Record<Section, string> = {
   firmware: 'Update Firmware',
   configure: 'Configure Devices',
+  logs: 'Device Logs',
   settings: 'Settings',
 };
 
