@@ -1,5 +1,5 @@
 import { createMockDevice, createMockRelease } from '@/test/factories';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import { TERMS_EFFECTIVE_DATE } from './lib/legal';
@@ -91,6 +91,24 @@ describe('App', () => {
       fireEvent.keyDown(window, { key: '2', ctrlKey: true });
       expect(screen.getByRole('heading', { level: 1, name: 'Configure Devices' })).toBeInTheDocument();
       expect(screen.getByTestId('profile-selection')).toBeInTheDocument();
+    });
+
+    it('Ctrl+3 opens Logs', () => {
+      render(<App />);
+      fireEvent.keyDown(window, { key: '3', ctrlKey: true });
+      expect(screen.getByRole('heading', { level: 1, name: 'Device Logs' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Logs' })).toHaveAttribute('aria-current', 'page');
+      expect(screen.getByRole('button', { name: 'Start Viewing' })).toBeInTheDocument();
+    });
+
+    it('nav is locked while viewing logs, and the title stays Device Logs', () => {
+      render(<App />);
+      fireEvent.keyDown(window, { key: '3', ctrlKey: true });
+      act(() => useLogsStore.setState({ viewing: true }));
+      expect(screen.getByRole('button', { name: 'Firmware' })).toBeDisabled();
+      fireEvent.keyDown(window, { key: '1', ctrlKey: true });
+      expect(screen.getByRole('heading', { level: 1, name: 'Device Logs' })).toBeInTheDocument();
+      expect(screen.getByText('Available when you stop viewing')).toBeInTheDocument();
     });
 
     it('Ctrl+4 opens Settings', () => {
