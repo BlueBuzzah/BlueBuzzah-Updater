@@ -81,6 +81,10 @@ pub(crate) use menu::{read_custom_profile_from, CustomProfileRead, ProfileConfig
 // Custom profile prefill read.
 pub(crate) use transport::{DfuTransport, SerialTransport};
 
+// Scripted transport double — shared with the serial monitor's tests.
+#[cfg(test)]
+pub(crate) use menu::ScriptedTransport;
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -632,14 +632,17 @@ pub fn write_custom_params<T: DfuTransport>(
 ///
 /// Every later Rust task tests its flow against this instead of hardware.
 /// Reads past the end of the script return 0 bytes, which is how a timeout
-/// (and therefore a SECONDARY glove's silence) is simulated.
+/// (and therefore a SECONDARY glove's silence) is simulated, unless
+/// `with_error_at_end` makes them fail like an unplugged port.
 #[cfg(test)]
 pub struct ScriptedTransport {
     replies: std::collections::VecDeque<String>,
     written: Vec<String>,
-    /// Ordered record of transport operations ("clear", "write", "read"), so a
-    /// test can prove stale input is discarded *before* a command is sent.
+    /// Ordered record of transport operations ("clear", "write", "read",
+    /// "flush"), so a test can prove stale input is discarded *before* a
+    /// command is sent.
     ops: Vec<&'static str>,
+    error_at_end: bool,
 }
 
 #[cfg(test)]
@@ -649,7 +652,15 @@ impl ScriptedTransport {
             replies: replies.into_iter().map(String::from).collect(),
             written: Vec::new(),
             ops: Vec::new(),
+            error_at_end: false,
         }
+    }
+
+    /// Once the script is exhausted, reads fail with an I/O error (as when the
+    /// device is unplugged) instead of timing out.
+    pub fn with_error_at_end(mut self) -> Self {
+        self.error_at_end = true;
+        self
     }
 
     /// Every command written so far, in order, newline included.
@@ -672,6 +683,7 @@ impl DfuTransport for ScriptedTransport {
     }
 
     fn read(&mut self, buffer: &mut [u8], _timeout_ms: u64) -> DfuResult<usize> {
+        self.ops.push("read");
         match self.replies.pop_front() {
             Some(reply) => {
                 let bytes = reply.as_bytes();
@@ -688,6 +700,9 @@ impl DfuTransport for ScriptedTransport {
                 }
                 Ok(len)
             }
+            None if self.error_at_end => Err(DfuError::Io(std::io::Error::from(
+                std::io::ErrorKind::BrokenPipe,
+            ))),
             None => {
                 // Silence. Keeps the caller's timeout loop from spinning hot.
                 std::thread::sleep(Duration::from_millis(10));
@@ -697,6 +712,7 @@ impl DfuTransport for ScriptedTransport {
     }
 
     fn flush(&mut self) -> DfuResult<()> {
+        self.ops.push("flush");
         Ok(())
     }
 
