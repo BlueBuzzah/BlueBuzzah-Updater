@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ConfigurePage } from './components/configure/ConfigurePage';
 import { FirmwarePage } from './components/firmware/FirmwarePage';
+import { LogsPage } from './components/logs/LogsPage';
 import { TermsDialog } from './components/legal/TermsDialog';
 import { SettingsPage } from './components/settings/SettingsPage';
 import { AppShell } from './components/shell/AppShell';
@@ -17,6 +18,7 @@ import { useSettingsStore } from './stores/settingsStore';
 const TITLES: Record<Section, string> = {
   firmware: 'Update Firmware',
   configure: 'Configure Devices',
+  logs: 'Device Logs',
   settings: 'Settings',
 };
 
@@ -46,6 +48,7 @@ function App() {
       <AppShell section={section} onSectionChange={setSection} title={title} busy={kind}>
         {section === 'firmware' && <FirmwarePage />}
         {section === 'configure' && <ConfigurePage />}
+        {section === 'logs' && <LogsPage />}
         {section === 'settings' && <SettingsPage />}
       </AppShell>
       <ConfirmDialog

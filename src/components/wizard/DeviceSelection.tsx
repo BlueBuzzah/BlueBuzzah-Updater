@@ -19,7 +19,11 @@ const ROLE_OPTIONS: { value: DeviceRole; label: string }[] = [
 const MSG = {
   missingRole: 'Choose a role for this device.',
   duplicateRole: 'Give each device a different role: one Primary, one Secondary.',
-  max: { flash: 'You can flash up to 2 devices at once.', configure: 'You can configure up to 2 devices at once.' },
+  max: {
+    flash: 'You can flash up to 2 devices at once.',
+    configure: 'You can configure up to 2 devices at once.',
+    monitor: 'You can view up to 2 devices at once.',
+  },
   mixed: "You can't flash a v2 and a v3 device together. Flash one kind at a time.",
   pruned: 'A selected device was unplugged or changed, so we deselected it.',
   sameSettings:
@@ -45,9 +49,10 @@ interface DeviceSelectionProps {
   /**
    * flash: roles and one board version per run. configure: no roles, any mix
    * of boards, and only devices running firmware (settings can't be written to
-   * a device in bootloader mode).
+   * a device in bootloader mode). monitor: configure's rules without the
+   * same-settings hint (bootloader devices speak DFU framing, not text).
    */
-  mode?: 'flash' | 'configure';
+  mode?: 'flash' | 'configure' | 'monitor';
   selectedDevices: Device[];
   onDevicesChange: (devices: Device[]) => void;
   onRoleChange?: (devicePath: string, role: DeviceRole) => void;
@@ -125,7 +130,7 @@ export function DeviceSelection({ mode = 'flash', selectedDevices, onDevicesChan
     >
       <div className="grid gap-6">
         <p className="body">Plug in up to 2 devices with a USB data cable.</p>
-        {!flash && <p className="body-s text-ink-muted">{MSG.sameSettings}</p>}
+        {mode === 'configure' && <p className="body-s text-ink-muted">{MSG.sameSettings}</p>}
         <p className="body-s tabular-nums text-ink-muted" aria-live="polite">{status}</p>
 
         {scanError && (

@@ -1,9 +1,10 @@
 import { createMockDevice, createMockRelease } from '@/test/factories';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App';
 import { TERMS_EFFECTIVE_DATE } from './lib/legal';
 import { useSettingsStore } from './stores/settingsStore';
+import { useLogsStore } from './stores/logsStore';
 import { useTherapyStore } from './stores/therapyStore';
 import { useWizardStore } from './stores/wizardStore';
 
@@ -64,6 +65,7 @@ describe('App', () => {
   beforeEach(() => {
     useWizardStore.getState().reset();
     useTherapyStore.getState().reset();
+    useLogsStore.getState().reset();
     // Terms already accepted: the gate is covered in TermsDialog.test.tsx
     useSettingsStore.setState({
       settings: { disableLedDuringTherapy: false, debugMode: false, selectedProfile: null, termsAcceptedDate: TERMS_EFFECTIVE_DATE },
@@ -73,12 +75,13 @@ describe('App', () => {
   });
 
   describe('Shell', () => {
-    it('shows three sections with Firmware current', () => {
+    it('shows four sections with Firmware current', () => {
       render(<App />);
       const nav = screen.getByRole('navigation', { name: 'Sections' });
       expect(nav).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Firmware' })).toHaveAttribute('aria-current', 'page');
       expect(screen.getByRole('button', { name: 'Configure' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Logs' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument();
       expect(screen.getByRole('heading', { level: 1, name: 'Update Firmware' })).toBeInTheDocument();
     });
@@ -88,6 +91,30 @@ describe('App', () => {
       fireEvent.keyDown(window, { key: '2', ctrlKey: true });
       expect(screen.getByRole('heading', { level: 1, name: 'Configure Devices' })).toBeInTheDocument();
       expect(screen.getByTestId('profile-selection')).toBeInTheDocument();
+    });
+
+    it('Ctrl+3 opens Logs', () => {
+      render(<App />);
+      fireEvent.keyDown(window, { key: '3', ctrlKey: true });
+      expect(screen.getByRole('heading', { level: 1, name: 'Device Logs' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Logs' })).toHaveAttribute('aria-current', 'page');
+      expect(screen.getByRole('button', { name: 'Start Viewing' })).toBeInTheDocument();
+    });
+
+    it('nav is locked while viewing logs, and the title stays Device Logs', () => {
+      render(<App />);
+      fireEvent.keyDown(window, { key: '3', ctrlKey: true });
+      act(() => useLogsStore.setState({ viewing: true }));
+      expect(screen.getByRole('button', { name: 'Firmware' })).toBeDisabled();
+      fireEvent.keyDown(window, { key: '1', ctrlKey: true });
+      expect(screen.getByRole('heading', { level: 1, name: 'Device Logs' })).toBeInTheDocument();
+      expect(screen.getByText('Available when you stop viewing')).toBeInTheDocument();
+    });
+
+    it('Ctrl+4 opens Settings', () => {
+      render(<App />);
+      fireEvent.keyDown(window, { key: '4', ctrlKey: true });
+      expect(screen.getByRole('heading', { level: 1, name: 'Settings' })).toBeInTheDocument();
     });
 
     it('clicking Settings opens Settings', () => {
