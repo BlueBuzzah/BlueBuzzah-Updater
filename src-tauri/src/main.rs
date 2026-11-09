@@ -27,6 +27,7 @@ use commands::firmware::{
     verify_and_clean_cache,
     verify_cached_firmware,
 };
+use commands::monitor::{start_serial_monitor, stop_serial_monitor};
 use commands::settings::{get_advanced_settings, get_platform, save_advanced_settings};
 
 fn main() {
@@ -45,6 +46,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             // DFU commands
             detect_dfu_devices,
+            start_serial_monitor,
+            stop_serial_monitor,
             flash_dfu_firmware,
             flash_v3_firmware,
             cancel_dfu_flash,
