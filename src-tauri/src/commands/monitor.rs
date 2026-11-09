@@ -5,13 +5,26 @@
 //! toggles DTR, so viewing a glove's log can't change what the glove is doing.
 
 use serde::Serialize;
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::{Arc, LazyLock, Mutex};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use tauri::ipc::Channel;
 
-use crate::dfu::DfuTransport;
+use crate::dfu::{DfuTransport, SerialTransport};
 
 /// How long one read waits for bytes before checking the stop flag again.
 const READ_TIMEOUT_MS: u64 = 200;
+
+/// How long `stop_serial_monitor` waits for the reader to close the port.
+/// One read timeout plus margin is enough in practice.
+const STOP_WAIT: Duration = Duration::from_secs(1);
+const STOP_POLL: Duration = Duration::from_millis(50);
+
+/// Live monitors, keyed by the port string the frontend passed, each with its
+/// stop flag. The reader thread removes its own entry after closing the port.
+static MONITORS: LazyLock<Mutex<HashMap<String, Arc<AtomicBool>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Events streamed to the frontend over the monitor's `Channel`.
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -117,6 +130,91 @@ fn run_monitor(
             }
         }
     }
+}
+
+fn monitors() -> std::sync::MutexGuard<'static, HashMap<String, Arc<AtomicBool>>> {
+    MONITORS.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Claims `port` for a new monitor. Fails if one is already running on it.
+fn try_register(port: &str) -> Result<Arc<AtomicBool>, String> {
+    let mut map = monitors();
+    if map.contains_key(port) {
+        return Err("This device is already being viewed".into());
+    }
+    let stop = Arc::new(AtomicBool::new(false));
+    map.insert(port.to_string(), stop.clone());
+    Ok(stop)
+}
+
+/// Removes the port's map entry on drop, so it's released on every exit path
+/// (open failure, disconnect, frontend gone, stop, panic).
+struct Registration {
+    port: String,
+    stop: Arc<AtomicBool>,
+}
+
+impl Drop for Registration {
+    fn drop(&mut self) {
+        let mut map = monitors();
+        if map.get(&self.port).is_some_and(|s| Arc::ptr_eq(s, &self.stop)) {
+            map.remove(&self.port);
+        }
+    }
+}
+
+/// Asks the monitor on `port` to stop, then blocks until its reader has
+/// closed the port (or `timeout` passes), so a restart can reopen it.
+fn stop_and_wait(port: &str, timeout: Duration) {
+    match monitors().get(port) {
+        Some(stop) => stop.store(true, Ordering::SeqCst),
+        None => return,
+    }
+    let deadline = Instant::now() + timeout;
+    while monitors().contains_key(port) && Instant::now() < deadline {
+        std::thread::sleep(STOP_POLL);
+    }
+}
+
+/// Starts streaming `port`'s serial output to `on_event`.
+///
+/// Opens with `open_for_query`, which doesn't pulse DTR/RTS, so starting a
+/// view doesn't reset the glove. Returns once the port is open; lines then
+/// arrive on the channel until the port fails or `stop_serial_monitor` runs.
+#[tauri::command]
+pub async fn start_serial_monitor(
+    port: String,
+    on_event: Channel<MonitorEvent>,
+) -> Result<(), String> {
+    let stop = try_register(&port)?;
+    let registration = Registration {
+        port: port.clone(),
+        stop: stop.clone(),
+    };
+
+    let transport = tokio::task::spawn_blocking(move || SerialTransport::open_for_query(&port))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| e.to_string())?;
+
+    std::thread::spawn(move || {
+        let _registration = registration;
+        // Declared after `_registration`, so it drops first: the port is
+        // closed before the entry is removed and a restart can reopen it.
+        let mut transport = transport;
+        run_monitor(&mut transport, &stop, &mut |ev| on_event.send(ev).is_ok());
+    });
+
+    Ok(())
+}
+
+/// Stops the monitor on `port` and waits for its port to close. A port that
+/// isn't being monitored is not an error.
+#[tauri::command]
+pub async fn stop_serial_monitor(port: String) -> Result<(), String> {
+    tokio::task::spawn_blocking(move || stop_and_wait(&port, STOP_WAIT))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -240,5 +338,62 @@ mod tests {
             serde_json::to_value(&disconnected).unwrap(),
             serde_json::json!({ "event": "disconnected", "data": { "reason": "unplugged" } })
         );
+    }
+
+    #[test]
+    fn second_start_on_same_port_errors() {
+        let port = "test-second-start";
+        let _first = Registration {
+            port: port.into(),
+            stop: try_register(port).unwrap(),
+        };
+
+        assert_eq!(
+            try_register(port).unwrap_err(),
+            "This device is already being viewed"
+        );
+    }
+
+    #[test]
+    fn registration_releases_the_port_on_drop() {
+        let port = "test-release-on-drop";
+        drop(Registration {
+            port: port.into(),
+            stop: try_register(port).unwrap(),
+        });
+
+        assert!(try_register(port).is_ok());
+        monitors().remove(port);
+    }
+
+    #[test]
+    fn stop_waits_for_reader_exit() {
+        let port = "test-stop-waits";
+        let stop = try_register(port).unwrap();
+        let reader = std::thread::spawn({
+            let stop = stop.clone();
+            move || {
+                while !stop.load(Ordering::SeqCst) {
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                std::thread::sleep(Duration::from_millis(100));
+                monitors().remove(port);
+            }
+        });
+
+        let started = Instant::now();
+        stop_and_wait(port, Duration::from_secs(5));
+
+        assert!(stop.load(Ordering::SeqCst));
+        assert!(!monitors().contains_key(port), "returned before the reader exited");
+        assert!(started.elapsed() >= Duration::from_millis(100));
+        reader.join().unwrap();
+    }
+
+    #[test]
+    fn stop_on_an_unmonitored_port_returns_at_once() {
+        let started = Instant::now();
+        stop_and_wait("test-not-monitored", Duration::from_secs(5));
+        assert!(started.elapsed() < Duration::from_millis(500));
     }
 }
