@@ -48,7 +48,8 @@ export function LogPane({
   // code-s is monospace, so 1ch is one digit: the column fits the largest line number.
   const numberWidth = `${String(firstLineNumber + Math.max(lines.length - 1, 0)).length}ch`;
 
-  React.useEffect(() => {
+  // Before paint, so a followed log never shows the old position for a frame.
+  React.useLayoutEffect(() => {
     if (follow && listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
   }, [lines, follow, open]);
 
