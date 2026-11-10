@@ -49,7 +49,9 @@ function DevicePane({ id, streaming, canReconnect, titleRef, onReconnect }: Devi
       titleRef={titleRef}
       title={
         <>
-          {BOARD_NAME[pane.device.board]} <span className="code-s text-ink-muted">{pane.port}</span>
+          {BOARD_NAME[pane.device.board]}{' '}
+          {/* Its own line, so the badge can sit beside the board name in a narrow pane. */}
+          <span className="code-s block text-ink-muted">{pane.port}</span>
         </>
       }
       actions={
@@ -273,12 +275,12 @@ export function LogsPage() {
   return (
     <>
       {/* Height 0 and a 0px basis (flex-1's 0% acts as auto here) let the panes fill main without growing it, so each log scrolls on its own. */}
-      <div className={cn('grid w-full max-w-content gap-6 md:h-0 md:grow md:basis-0 md:grid-rows-1', keys.length > 1 && 'md:grid-cols-2')}>
+      <div className={cn('grid w-full gap-6 md:h-0 md:grow md:basis-0 md:grid-rows-1', keys.length > 1 && 'md:grid-cols-2')}>
         {keys.map((key, i) => (
           <DevicePane key={key} id={key} streaming={streaming} canReconnect={!stopping} titleRef={i === 0 ? firstTitle : undefined} onReconnect={reconnect} />
         ))}
       </div>
-      <ActionBar hint={streaming ? null : LEAVE_HINT} hintId="logs-leave">
+      <ActionBar wide hint={streaming ? null : LEAVE_HINT} hintId="logs-leave">
         {/* One Button in one place: React keeps the instance, so its repeat guard stops a double press on Stop Viewing from also pressing Done. */}
         {streaming ? (
           <Button size="lg" guardRepeat onClick={stop}>

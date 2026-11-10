@@ -51,12 +51,15 @@ interface Anchor {
 }
 
 // Memoized and keyed by line number: a new batch renders only its own rows, and each time is formatted once.
-const LogRow = React.memo(function LogRow({ n, t, text, numberWidth }: { n: number; t?: number; text: string; numberWidth: string }) {
+// oneRow: the line never wraps (the list scrolls sideways) and its number and time stay pinned at the left.
+const LogRow = React.memo(function LogRow({ n, t, text, numberWidth, oneRow }: { n: number; t?: number; text: string; numberWidth: string; oneRow: boolean }) {
   return (
-    <li data-line={n} className="flex gap-3">
-      <span className="shrink-0 text-right tabular-nums text-ink-muted" style={{ minWidth: numberWidth }}>{n}</span>
-      {t !== undefined && <span className="shrink-0 tabular-nums text-ink-muted">{formatLogTime(t)}</span>}
-      <span className="min-w-0 whitespace-pre-wrap">{text}</span>
+    <li data-line={n} className={oneRow ? 'flex w-max min-w-full pr-4' : 'flex gap-3'}>
+      <span className={cn('flex shrink-0 gap-3 text-ink-muted', oneRow && 'sticky left-0 bg-surface-sunken pl-4 pr-3')}>
+        <span className="shrink-0 text-right tabular-nums" style={{ minWidth: numberWidth }}>{n}</span>
+        {t !== undefined && <span className="bb-log__time tabular-nums">{formatLogTime(t)}</span>}
+      </span>
+      <span className={oneRow ? 'whitespace-pre' : 'min-w-0 whitespace-pre-wrap'}>{text}</span>
     </li>
   );
 });
@@ -163,10 +166,13 @@ export function LogPane({
             onScroll={recordAnchor}
             tabIndex={collapsible ? undefined : 0}
             aria-label={collapsible ? undefined : label}
-            className={cn('code-s relative m-0 grid list-none content-start gap-1 rounded-md bg-surface-sunken p-4', !collapsible && 'min-h-0 flex-1 overflow-y-auto')}
+            className={cn(
+              'code-s relative m-0 grid list-none content-start gap-1 rounded-md bg-surface-sunken',
+              collapsible ? 'p-4' : 'bb-log min-h-0 flex-1 overflow-auto py-4'
+            )}
           >
             {lines.map((line, i) => (
-              <LogRow key={firstLineNumber + i} n={firstLineNumber + i} t={timestamps?.[i]} text={line} numberWidth={numberWidth} />
+              <LogRow key={firstLineNumber + i} n={firstLineNumber + i} t={timestamps?.[i]} text={line} numberWidth={numberWidth} oneRow={!collapsible} />
             ))}
           </ol>
         </div>

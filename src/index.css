@@ -31,3 +31,10 @@ html { scroll-padding-top: var(--space-16); }
 .release-notes a { color: var(--link); text-decoration: underline; }
 .release-notes code { font-family: var(--font-mono); font-size: 0.9375rem; background: var(--surface-sunken); border-radius: var(--radius-xs); padding: 0 var(--space-1); }
 .release-notes pre { background: var(--surface-sunken); border-radius: var(--radius-md); padding: var(--space-3); white-space: pre-wrap; }
+
+/* Logs pane (log-pane.tsx, collapsible={false}): one row per line. Below 36rem the time column gives
+   way to the text (about 35 code-s characters are left beside the number and time otherwise); Copy and
+   Save keep it. rem, not ch: container queries resolve ch against the initial font in some engines, and
+   var() can't be used in a query, so no token fits. Tune the width here. */
+.bb-log { container-type: inline-size; }
+@container (max-width: 36rem) { .bb-log__time { display: none; } }

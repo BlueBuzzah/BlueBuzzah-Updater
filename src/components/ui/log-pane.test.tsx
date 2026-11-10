@@ -53,8 +53,24 @@ it('collapsible={false} is always open, with no Show/Hide Log', () => {
   expect(screen.queryByRole('button', { name: 'Show Log' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: 'Hide Log' })).not.toBeInTheDocument();
   expect(screen.getAllByRole('listitem')).toHaveLength(3);
-  expect(screen.getByRole('list')).toHaveClass('min-h-0', 'flex-1', 'overflow-y-auto');
+  expect(screen.getByRole('list')).toHaveClass('bb-log', 'min-h-0', 'flex-1', 'overflow-auto');
   expect(screen.getByRole('button', { name: 'Copy Log' })).toBeInTheDocument();
+});
+
+it('collapsible={false} keeps each line on one row with its number and time pinned at the left', () => {
+  render(<LogPane lines={['a long line']} timestamps={[new Date(2026, 0, 1, 9, 5, 7, 42).getTime()]} collapsible={false} />);
+  const row = screen.getByRole('listitem');
+  expect(within(row).getByText('a long line')).toHaveClass('whitespace-pre');
+  // The time column is the one the .bb-log container query hides in a narrow pane.
+  const time = within(row).getByText('09:05:07.042');
+  expect(time).toHaveClass('bb-log__time');
+  expect(time.parentElement).toHaveClass('sticky', 'left-0', 'bg-surface-sunken');
+});
+
+it('a collapsible log still wraps long lines', () => {
+  render(<LogPane lines={['a long line']} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Show Log' }));
+  expect(within(screen.getByRole('listitem')).getByText('a long line')).toHaveClass('whitespace-pre-wrap');
 });
 
 it('shows local HH:MM:SS.mmm timestamps and copies them with each line', async () => {
