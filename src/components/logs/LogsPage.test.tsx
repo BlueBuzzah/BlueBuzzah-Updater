@@ -247,6 +247,15 @@ describe('LogsPage', () => {
     expect(screen.queryByText('gone')).toBeNull();
   });
 
+  it('a second press right after Stop Viewing does not press Done', async () => {
+    await startViewing();
+    emit('/dev/cu.a', lines('kept'));
+    await press('Stop Viewing');
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Done' }))); // no clock step
+    expect(useLogsStore.getState().phase).toBe('stopped');
+    expect(useLogsStore.getState().panes.A1.lines).toEqual(['kept']);
+  });
+
   it('hides Reconnect while Stop Viewing is closing the ports', async () => {
     await startViewing();
     emit('/dev/cu.a', { event: 'disconnected', data: { reason: 'gone' } });
