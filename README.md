@@ -15,6 +15,14 @@ Device firmware updater for BlueBuzzah devices. Supports both hardware revisions
 
 The correct firmware package and flash protocol are selected automatically based on the detected hardware.
 
+## Important notices
+
+BlueBuzzah devices are not FDA cleared or approved medical devices and not intended to diagnose, treat, cure, mitigate, or prevent any disease. The information provided through BlueBuzzah is for general wellness purposes only and not a substitute for professional medical advice, diagnosis, or treatment.
+
+**Important:** People with implanted electrodes from deep brain stimulation (DBS), heart pacemakers, or other internal electronic devices should take special precautions around all electronic devices, including BlueBuzzah. Consult your physician before use.
+
+Read the [terms and safety](https://bluebuzzah.com/terms) page before you build or wear a pair.
+
 ## Quick Start
 
 ### For Users
@@ -154,6 +162,10 @@ Contributions are welcome! Please:
 MIT License - see [LICENSE](LICENSE) file for details.
 
 Copyright (c) 2025 BlueBuzzah Partners
+
+Fonts in `src/styles/fonts/` are under the SIL Open Font License (OFL files alongside).
+
+The BlueBuzzah and BuzzahBuddy names and logos are not covered by these licenses. See [Licenses and the BlueBuzzah name](https://bluebuzzah.com/terms#licenses).
 
 [1]: assets/download-windows.png
 [2]: https://github.com/BlueBuzzah/BlueBuzzah-Updater/releases/latest/download/BlueBuzzah_Updater_x64_en-US.exe "Download for Windows"
