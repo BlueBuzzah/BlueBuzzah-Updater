@@ -274,6 +274,8 @@ export interface MonitorPane {
   status: MonitorStatus;
   follow: boolean;
   note: string;
+  /** Number of the last line copied or saved; 0 if neither */
+  exportedThrough: number;
 }
 
 // ============================================================================

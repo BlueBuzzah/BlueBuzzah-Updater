@@ -239,12 +239,48 @@ describe('LogsPage', () => {
     emit('/dev/cu.a', lines('gone'));
     await press('Stop Viewing');
     await press('Done');
+    // Nothing was copied or saved, so Done asks first.
+    expect(screen.getByRole('alertdialog', { name: 'Clear These Logs?' })).toBeInTheDocument();
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Clear Logs' })));
     expect(screen.getByTestId('device-selection')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Choose Devices' })).toHaveFocus();
     expect(useLogsStore.getState().phase).toBe('choose');
     expect(useLogsStore.getState().panes).toEqual({});
     expect(useLogsStore.getState().selectedDevices).toEqual([a, b]);
     expect(screen.queryByText('gone')).toBeNull();
+  });
+
+  it('Keep Logs closes the Clear prompt and keeps the stopped logs', async () => {
+    await startViewing();
+    emit('/dev/cu.a', lines('kept'));
+    await press('Stop Viewing');
+    await press('Done');
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Keep Logs' })));
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(useLogsStore.getState().phase).toBe('stopped');
+    expect(useLogsStore.getState().panes.A1.lines).toEqual(['kept']);
+  });
+
+  it('Done clears at once when every log with lines was copied or saved', async () => {
+    Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
+    await startViewing();
+    emit('/dev/cu.a', lines('copied'));
+    await press('Stop Viewing');
+    await act(async () => fireEvent.click(within(pane(/BlueBuzzah v2/)).getByRole('button', { name: 'Copy Log' })));
+    await press('Done');
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(useLogsStore.getState().phase).toBe('choose');
+  });
+
+  it('asks again when lines arrived after the last copy', async () => {
+    Object.assign(navigator, { clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } });
+    await startViewing();
+    emit('/dev/cu.a', lines('one'));
+    await act(async () => fireEvent.click(within(pane(/BlueBuzzah v2/)).getByRole('button', { name: 'Copy Log' })));
+    emit('/dev/cu.a', lines('two'));
+    await press('Stop Viewing');
+    await press('Done');
+    expect(screen.getByRole('alertdialog', { name: 'Clear These Logs?' })).toBeInTheDocument();
   });
 
   it('a second press right after Stop Viewing does not press Done', async () => {

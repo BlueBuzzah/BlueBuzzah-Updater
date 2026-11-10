@@ -20,6 +20,8 @@ interface LogPaneProps {
   follow?: boolean;
   /** Number of the first line shown, for logs that drop their oldest lines */
   firstLineNumber?: number;
+  /** Called after a successful Copy or Save */
+  onExport?: () => void;
 }
 
 const pad = (n: number, width = 2) => String(n).padStart(width, '0');
@@ -69,6 +71,7 @@ export function LogPane({
   timestamps,
   follow = false,
   firstLineNumber = 1,
+  onExport,
 }: LogPaneProps) {
   const [expanded, setExpanded] = React.useState(false);
   const open = !collapsible || expanded;
@@ -107,6 +110,7 @@ export function LogPane({
     try {
       await navigator.clipboard.writeText(text());
       setStatus('Log copied.');
+      onExport?.();
     } catch {
       setStatus("Couldn't copy the log.");
     }
@@ -117,6 +121,7 @@ export function LogPane({
       if (!path) return;
       await writeTextFile(path, text());
       setStatus('Log saved.');
+      onExport?.();
     } catch {
       setStatus("Couldn't save the log.");
     }

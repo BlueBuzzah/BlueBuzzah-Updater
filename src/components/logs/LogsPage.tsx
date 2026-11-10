@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type Ref } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { ActionBar } from '@/components/shell/ActionBar';
+import { ConfirmDialog } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { LogPane } from '@/components/ui/log-pane';
@@ -37,6 +38,7 @@ interface DevicePaneProps {
 function DevicePane({ id, streaming, canReconnect, titleRef, onReconnect }: DevicePaneProps) {
   const pane = useLogsStore((s) => s.panes[id]);
   const setFollow = useLogsStore((s) => s.setFollow);
+  const markExported = useLogsStore((s) => s.markExported);
   if (!pane) return null;
   const name = `${BOARD_NAME[pane.device.board]} ${pane.port}`;
   // Two panes announce the same words; this says which device they're about.
@@ -79,6 +81,7 @@ function DevicePane({ id, streaming, canReconnect, titleRef, onReconnect }: Devi
         collapsible={false}
         label={`${name} log`}
         fileName={logFileName(pane)}
+        onExport={() => markExported(id)}
         actions={
           streaming && (
             <div className="flex flex-wrap gap-target-gap">
@@ -105,6 +108,7 @@ export function LogsPage() {
   const setDevices = useLogsStore((s) => s.setDevices);
   const keys = useLogsStore(useShallow((s) => Object.keys(s.panes)));
   const [stopping, setStopping] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
   // Bumped on every start, stop and leave, so a late event or start from an earlier run is ignored.
   const run = useRef(0);
   const reconnecting = useRef(new Set<string>());
@@ -181,6 +185,7 @@ export function LogsPage() {
   };
 
   const done = () => {
+    setConfirmClear(false);
     run.current++;
     focusNext.current = 'choose';
     useLogsStore.getState().leave();
@@ -255,6 +260,8 @@ export function LogsPage() {
   }
 
   const streaming = phase === 'streaming';
+  const hasUnexported = () =>
+    Object.values(useLogsStore.getState().panes).some((p) => p.lines.length > 0 && p.firstLine + p.lines.length - 1 > p.exportedThrough);
   return (
     <>
       {/* Height 0 and a 0px basis (flex-1's 0% acts as auto here) let the panes fill main without growing it, so each log scrolls on its own. */}
@@ -270,11 +277,23 @@ export function LogsPage() {
             Stop Viewing
           </Button>
         ) : (
-          <Button size="lg" guardRepeat aria-describedby="logs-leave" onClick={done}>
+          <Button size="lg" guardRepeat aria-describedby="logs-leave" onClick={() => (hasUnexported() ? setConfirmClear(true) : done())}>
             Done
           </Button>
         )}
       </ActionBar>
+      {/* Done sits where Stop Viewing was pressed, so clearing unsaved logs asks first, with its buttons elsewhere (accessibility.md). */}
+      <ConfirmDialog
+        open={confirmClear}
+        onOpenChange={setConfirmClear}
+        title="Clear These Logs?"
+        cancelLabel="Keep Logs"
+        confirmLabel="Clear Logs"
+        confirmGuard
+        onConfirm={done}
+      >
+        You haven't copied or saved them. Once cleared, they can't be recovered.
+      </ConfirmDialog>
     </>
   );
 }
