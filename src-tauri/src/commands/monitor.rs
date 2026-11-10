@@ -1,8 +1,11 @@
 //! Read-only serial monitor: streams a device's serial output to the frontend
 //! line by line.
 //!
-//! The session only ever reads. It never writes, flushes, clears input or
-//! toggles DTR, so viewing a glove's log can't change what the glove is doing.
+//! The read loop only ever reads: it never writes, flushes, clears input or
+//! toggles DTR/RTS, so viewing a glove's log can't change what the glove is
+//! doing. Opening the port is the one exception: it uses
+//! `SerialTransport::open_for_monitor`, which sets RTS low, then sets DTR for
+//! the board (high on v2, low on v3), and discards input once.
 
 use serde::Serialize;
 use std::collections::HashMap;
@@ -11,10 +14,21 @@ use std::sync::{Arc, LazyLock, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tauri::ipc::Channel;
 
-use crate::dfu::{DfuTransport, SerialTransport};
+use crate::dfu::{find_supported_devices, DfuTransport, SerialTransport};
 
 /// How long one read waits for bytes before checking the stop flag again.
 const READ_TIMEOUT_MS: u64 = 200;
+
+/// A read that returns no bytes faster than this didn't wait for its timeout,
+/// which is what a hung-up port does (POSIX EOF, or a 0-byte Windows read).
+const FAST_EOF: Duration = Duration::from_millis(20);
+
+/// Consecutive fast empty reads before the port is treated as gone.
+const FAST_EOF_LIMIT: u32 = 20;
+
+/// Longest unterminated line kept in memory. Longer runs are emitted as a
+/// line of their own so a device that never sends `\n` can't grow the buffer.
+const MAX_LINE_BYTES: usize = 4096;
 
 /// How long `stop_serial_monitor` waits for the reader to close the port.
 /// One read timeout plus margin is enough in practice.
@@ -48,7 +62,8 @@ pub struct MonitorLine {
 ///
 /// Bytes are buffered until a newline, then decoded, so a multibyte UTF-8
 /// character split across two reads still decodes. Invalid UTF-8 becomes
-/// U+FFFD rather than dropping the line.
+/// U+FFFD rather than dropping the line. An unterminated run longer than
+/// `MAX_LINE_BYTES` is emitted as a line and the buffer cleared.
 #[derive(Default)]
 struct LineSplitter {
     buf: Vec<u8>,
@@ -58,11 +73,20 @@ impl LineSplitter {
     /// Adds bytes and returns every line they complete, without the `\n` or a
     /// trailing `\r`.
     fn push(&mut self, bytes: &[u8]) -> Vec<String> {
+        // Earlier bytes hold no '\n', so only the new ones need scanning.
+        let scan_from = self.buf.len();
         self.buf.extend_from_slice(bytes);
         let mut lines = Vec::new();
-        while let Some(pos) = self.buf.iter().position(|&b| b == b'\n') {
-            let line: Vec<u8> = self.buf.drain(..=pos).collect();
-            lines.push(decode_line(&line[..pos]));
+        let mut start = 0;
+        for i in scan_from..self.buf.len() {
+            if self.buf[i] == b'\n' {
+                lines.push(decode_line(&self.buf[start..i]));
+                start = i + 1;
+            }
+        }
+        self.buf.drain(..start);
+        if self.buf.len() > MAX_LINE_BYTES {
+            lines.push(decode_line(&std::mem::take(&mut self.buf)));
         }
         lines
     }
@@ -96,9 +120,44 @@ fn lines_event(texts: Vec<String>) -> MonitorEvent {
     }
 }
 
+/// Counts consecutive empty reads that returned well before their timeout.
+#[derive(Default)]
+struct FastEofDetector {
+    run: u32,
+}
+
+impl FastEofDetector {
+    /// Records one read of `n` bytes that took `elapsed`. Returns true once
+    /// `FAST_EOF_LIMIT` fast empty reads have happened in a row. Data or an
+    /// empty read that waited out its timeout resets the count.
+    fn observe(&mut self, n: usize, elapsed: Duration) -> bool {
+        if n == 0 && elapsed < FAST_EOF {
+            self.run += 1;
+        } else {
+            self.run = 0;
+        }
+        self.run >= FAST_EOF_LIMIT
+    }
+}
+
+/// Emits the unterminated partial line, if any, then `Disconnected`.
+fn disconnect(
+    splitter: &mut LineSplitter,
+    reason: String,
+    emit: &mut dyn FnMut(MonitorEvent) -> bool,
+) {
+    if let Some(partial) = splitter.finish() {
+        if !emit(lines_event(vec![partial])) {
+            return;
+        }
+    }
+    emit(MonitorEvent::Disconnected { reason });
+}
+
 /// Reads until `stop` is set, `emit` returns false (frontend gone), or the
 /// port fails. Emits one `Lines` event per read that completes any lines.
-/// On a port error the unterminated partial line is emitted first, then
+/// On a port error, or a port that keeps returning nothing without waiting
+/// (hung up), the unterminated partial line is emitted first, then
 /// `Disconnected`.
 fn run_monitor(
     transport: &mut dyn DfuTransport,
@@ -106,30 +165,35 @@ fn run_monitor(
     emit: &mut dyn FnMut(MonitorEvent) -> bool,
 ) {
     let mut splitter = LineSplitter::default();
+    let mut fast_eof = FastEofDetector::default();
     let mut buf = [0u8; 1024];
 
     while !stop.load(Ordering::SeqCst) {
+        let started = Instant::now();
         match transport.read(&mut buf, READ_TIMEOUT_MS) {
-            Ok(0) => {}
             Ok(n) => {
+                if fast_eof.observe(n, started.elapsed()) {
+                    disconnect(&mut splitter, "The port stopped responding".into(), emit);
+                    return;
+                }
                 let lines = splitter.push(&buf[..n]);
                 if !lines.is_empty() && !emit(lines_event(lines)) {
                     return;
                 }
             }
             Err(e) => {
-                if let Some(partial) = splitter.finish() {
-                    if !emit(lines_event(vec![partial])) {
-                        return;
-                    }
-                }
-                emit(MonitorEvent::Disconnected {
-                    reason: e.to_string(),
-                });
+                disconnect(&mut splitter, e.to_string(), emit);
                 return;
             }
         }
     }
+}
+
+/// Whether to raise DTR when opening a monitor. v2 (TinyUSB CDC) only sends
+/// while DTR is set; v3 doesn't need it, and an unknown device gets the
+/// lines-low posture.
+fn monitor_dtr(board: Option<&str>) -> bool {
+    board == Some("nrf52")
 }
 
 fn monitors() -> std::sync::MutexGuard<'static, HashMap<String, Arc<AtomicBool>>> {
@@ -178,9 +242,10 @@ fn stop_and_wait(port: &str, timeout: Duration) {
 
 /// Starts streaming `port`'s serial output to `on_event`.
 ///
-/// Opens with `open_for_query`, which doesn't pulse DTR/RTS, so starting a
-/// view doesn't reset the glove. Returns once the port is open; lines then
-/// arrive on the channel until the port fails or `stop_serial_monitor` runs.
+/// Opens with `open_for_monitor`, which doesn't pulse DTR/RTS, so starting a
+/// view doesn't reset the glove. DTR is raised only for a v2 device, which
+/// otherwise prints nothing. Returns once the port is open; lines then arrive
+/// on the channel until the port fails or `stop_serial_monitor` runs.
 #[tauri::command]
 pub async fn start_serial_monitor(
     port: String,
@@ -192,8 +257,14 @@ pub async fn start_serial_monitor(
         stop: stop.clone(),
     };
 
-    let transport = tokio::task::spawn_blocking(move || SerialTransport::open_for_query(&port))
-        .await
+    let transport = tokio::task::spawn_blocking(move || {
+        let board = find_supported_devices()
+            .into_iter()
+            .find(|d| d.port == port)
+            .map(|d| d.board);
+        SerialTransport::open_for_monitor(&port, monitor_dtr(board.as_deref()))
+    })
+    .await
         .map_err(|e| e.to_string())?
         .map_err(|e| e.to_string())?;
 
@@ -270,7 +341,94 @@ mod tests {
         assert_eq!(events.len(), 3, "{events:?}");
         assert_eq!(texts(&events[0]), vec!["x"]);
         assert_eq!(texts(&events[1]), vec!["part"]);
-        assert!(matches!(events[2], MonitorEvent::Disconnected { .. }));
+        match &events[0] {
+            MonitorEvent::Lines { lines } => assert!(lines[0].t > 0),
+            other => panic!("expected Lines, got {other:?}"),
+        }
+        match &events[2] {
+            MonitorEvent::Disconnected { reason } => assert!(!reason.is_empty()),
+            other => panic!("expected Disconnected, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn hung_up_port_disconnects_instead_of_spinning() {
+        let mut transport = ScriptedTransport::new(vec!["part"]).with_instant_eof();
+        let stop = AtomicBool::new(false);
+        let mut events = Vec::new();
+
+        run_monitor(&mut transport, &stop, &mut |ev| {
+            events.push(ev);
+            true
+        });
+
+        assert_eq!(events.len(), 2, "{events:?}");
+        assert_eq!(texts(&events[0]), vec!["part"]);
+        assert_eq!(
+            events[1],
+            MonitorEvent::Disconnected {
+                reason: "The port stopped responding".into()
+            }
+        );
+    }
+
+    #[test]
+    fn fast_eof_needs_an_unbroken_run_of_fast_empty_reads() {
+        let fast = Duration::ZERO;
+        let slow = Duration::from_millis(READ_TIMEOUT_MS);
+
+        let mut detector = FastEofDetector::default();
+        for _ in 0..1000 {
+            assert!(!detector.observe(0, slow), "a timed-out read is just silence");
+        }
+
+        let mut detector = FastEofDetector::default();
+        for _ in 0..FAST_EOF_LIMIT - 1 {
+            assert!(!detector.observe(0, fast));
+        }
+        assert!(!detector.observe(5, fast), "data resets the run");
+        for _ in 0..FAST_EOF_LIMIT - 1 {
+            assert!(!detector.observe(0, fast));
+        }
+        assert!(!detector.observe(0, slow), "a slow empty read resets the run");
+        for _ in 0..FAST_EOF_LIMIT - 1 {
+            assert!(!detector.observe(0, fast));
+        }
+        assert!(detector.observe(0, fast));
+    }
+
+    #[test]
+    fn caps_an_unterminated_line() {
+        let mut splitter = LineSplitter::default();
+        let full = vec![b'a'; MAX_LINE_BYTES];
+        assert!(splitter.push(&full).is_empty(), "at the cap it stays buffered");
+
+        let lines = splitter.push(b"b");
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].len(), MAX_LINE_BYTES + 1);
+        assert!(lines[0].ends_with('b'));
+        assert_eq!(splitter.finish(), None);
+
+        assert_eq!(splitter.push(b"c\n"), vec!["c"]);
+    }
+
+    #[test]
+    fn completed_lines_come_before_a_capped_tail() {
+        let mut splitter = LineSplitter::default();
+        let mut bytes = b"x\n".to_vec();
+        bytes.extend(vec![b'z'; MAX_LINE_BYTES + 1]);
+
+        let lines = splitter.push(&bytes);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0], "x");
+        assert_eq!(lines[1].len(), MAX_LINE_BYTES + 1);
+    }
+
+    #[test]
+    fn monitor_raises_dtr_only_for_v2() {
+        assert!(monitor_dtr(Some("nrf52")));
+        assert!(!monitor_dtr(Some("esp32s3")));
+        assert!(!monitor_dtr(None));
     }
 
     #[test]
