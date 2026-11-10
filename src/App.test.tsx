@@ -19,6 +19,7 @@ vi.mock('./components/wizard/FirmwareSelection', () => ({
 }));
 
 vi.mock('./components/wizard/DeviceSelection', () => ({
+  BOARD_NAME: { nrf52: 'BlueBuzzah v2', esp32s3: 'BlueBuzzah v3' },
   DeviceSelection: ({ onDevicesChange }: { onDevicesChange: (d: unknown[]) => void }) => (
     <div data-testid="device-selection">
       <button onClick={() => onDevicesChange([createMockDevice({ role: 'PRIMARY' })])}>
@@ -104,11 +105,26 @@ describe('App', () => {
     it('nav is locked while viewing logs, and the title stays Device Logs', () => {
       render(<App />);
       fireEvent.keyDown(window, { key: '3', ctrlKey: true });
-      act(() => useLogsStore.setState({ viewing: true }));
+      act(() => useLogsStore.setState({ phase: 'streaming' }));
       expect(screen.getByRole('button', { name: 'Firmware' })).toBeDisabled();
       fireEvent.keyDown(window, { key: '1', ctrlKey: true });
       expect(screen.getByRole('heading', { level: 1, name: 'Device Logs' })).toBeInTheDocument();
       expect(screen.getByText('Available when you stop viewing')).toBeInTheDocument();
+    });
+
+    it('stopped logs unlock nav, and going to another section drops them', () => {
+      render(<App />);
+      fireEvent.keyDown(window, { key: '3', ctrlKey: true });
+      const device = createMockDevice({ path: '/dev/cu.a', serialNumber: 'A1' });
+      act(() => {
+        useLogsStore.getState().setDevices([device]);
+        useLogsStore.getState().startViewing();
+        useLogsStore.getState().stopViewing();
+      });
+      expect(screen.getByRole('button', { name: 'Firmware' })).toBeEnabled();
+      fireEvent.click(screen.getByRole('button', { name: 'Firmware' }));
+      expect(screen.getByRole('heading', { level: 1, name: 'Update Firmware' })).toBeInTheDocument();
+      expect(useLogsStore.getState()).toMatchObject({ phase: 'choose', panes: {}, selectedDevices: [device] });
     });
 
     it('Ctrl+4 opens Settings', () => {

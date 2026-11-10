@@ -5,14 +5,17 @@ import type { Device, MonitorLine, MonitorPane, MonitorStatus } from '@/types';
 export const MAX_LINES = 5000;
 
 /** A pane's key stays the same when Reconnect finds the device on a new port. */
-export const paneKey = (device: Device) => device.serialNumber ?? device.path;
+export const paneKey = (device: Device) => device.serialNumber || device.path;
+
+/** choose devices → streaming → stopped (logs still on screen) → leave purges them */
+export type LogsPhase = 'choose' | 'streaming' | 'stopped';
 
 interface LogsStore {
   selectedDevices: Device[];
-  viewing: boolean;
+  phase: LogsPhase;
   panes: Record<string, MonitorPane>;
   setDevices: (devices: Device[]) => void;
-  /** Fresh panes for the selection; the previous logs are dropped here, not on stop. */
+  /** Fresh panes for the selection */
   startViewing: () => void;
   append: (key: string, lines: MonitorLine[]) => void;
   /** A host-side line such as "--- Disconnected ---", stamped now */
@@ -21,12 +24,17 @@ interface LogsStore {
   setPort: (key: string, port: string) => void;
   setFollow: (key: string, follow: boolean) => void;
   setNote: (key: string, note: string) => void;
-  /** Keeps the panes until the next startViewing */
+  /** Streaming has ended; the panes stay on screen to copy or save */
   stopViewing: () => void;
+  /**
+   * Back to choosing: drops every log from memory. The selection is kept, with each
+   * device's current port, so a device Reconnect found on a new port isn't pruned.
+   */
+  leave: () => void;
   reset: () => void;
 }
 
-const initialState = { selectedDevices: [] as Device[], viewing: false, panes: {} as Record<string, MonitorPane> };
+const initialState = { selectedDevices: [] as Device[], phase: 'choose' as LogsPhase, panes: {} as Record<string, MonitorPane> };
 
 export const useLogsStore = create<LogsStore>((set) => {
   const update = (key: string, change: (pane: MonitorPane) => Partial<MonitorPane>) =>
@@ -47,7 +55,7 @@ export const useLogsStore = create<LogsStore>((set) => {
     setDevices: (devices) => set({ selectedDevices: devices }),
     startViewing: () =>
       set((state) => ({
-        viewing: true,
+        phase: 'streaming',
         panes: Object.fromEntries(
           state.selectedDevices.map((device) => [
             paneKey(device),
@@ -61,7 +69,21 @@ export const useLogsStore = create<LogsStore>((set) => {
     setPort: (key, port) => update(key, () => ({ port })),
     setFollow: (key, follow) => update(key, () => ({ follow })),
     setNote: (key, note) => update(key, () => ({ note })),
-    stopViewing: () => set({ viewing: false }),
+    // Notes point at Reconnect, which the stopped screen doesn't offer.
+    stopViewing: () =>
+      set((state) => ({
+        phase: 'stopped',
+        panes: Object.fromEntries(Object.entries(state.panes).map(([key, pane]) => [key, { ...pane, note: '' }])),
+      })),
+    leave: () =>
+      set((state) => ({
+        phase: 'choose',
+        panes: {},
+        selectedDevices: state.selectedDevices.map((d) => {
+          const pane = state.panes[paneKey(d)];
+          return pane ? { ...pane.device, path: pane.port } : d;
+        }),
+      })),
     reset: () => set(initialState),
   };
 });
