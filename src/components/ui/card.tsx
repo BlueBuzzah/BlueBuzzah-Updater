@@ -9,9 +9,11 @@ interface CardProps extends Omit<React.HTMLAttributes<HTMLElement>, 'title'> {
   /** lg (default) for the Updater (Card README: desktop) */
   padding?: 'md' | 'lg';
   elevated?: boolean;
+  /** Lets the page move focus to the title (it becomes focusable by script only) */
+  titleRef?: React.Ref<HTMLHeadingElement>;
 }
 
-export function Card({ as: Tag = 'section', title, eyebrow, actions, padding = 'lg', elevated = true, className, children, ...rest }: CardProps) {
+export function Card({ as: Tag = 'section', title, eyebrow, actions, padding = 'lg', elevated = true, titleRef, className, children, ...rest }: CardProps) {
   const titleId = React.useId();
   return (
     <Tag
@@ -23,7 +25,7 @@ export function Card({ as: Tag = 'section', title, eyebrow, actions, padding = '
         <header className="bb-card__head">
           <div>
             {eyebrow && <p className="bb-card__eyebrow">{eyebrow}</p>}
-            {title && <h3 className="bb-card__title" id={titleId}>{title}</h3>}
+            {title && <h3 ref={titleRef} tabIndex={titleRef ? -1 : undefined} className="bb-card__title" id={titleId}>{title}</h3>}
           </div>
           {actions && <div className="bb-card__actions">{actions}</div>}
         </header>

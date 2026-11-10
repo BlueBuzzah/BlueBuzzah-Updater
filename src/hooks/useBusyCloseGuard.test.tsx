@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useBusyCloseGuard } from './useBusyCloseGuard';
 import { useWizardStore } from '@/stores/wizardStore';
 import { useTherapyStore } from '@/stores/therapyStore';
+import { useLogsStore } from '@/stores/logsStore';
 
 type Handler = (e: { preventDefault: () => void }) => void;
 let handler: Handler | undefined;
@@ -23,6 +24,7 @@ describe('useBusyCloseGuard', () => {
     handler = undefined;
     useWizardStore.getState().reset();
     useTherapyStore.getState().reset();
+    useLogsStore.getState().reset();
   });
 
   it('blocks closing and opens the prompt while a flash runs', () => {
@@ -40,6 +42,24 @@ describe('useBusyCloseGuard', () => {
     act(() => handler?.({ preventDefault }));
     expect(preventDefault).not.toHaveBeenCalled();
     expect(result.current.promptOpen).toBe(false);
+  });
+
+  it('lets the window close while only viewing logs', () => {
+    useLogsStore.setState({ phase: 'streaming' });
+    const { result } = renderHook(() => useBusyCloseGuard());
+    const preventDefault = vi.fn();
+    act(() => handler?.({ preventDefault }));
+    expect(preventDefault).not.toHaveBeenCalled();
+    expect(result.current.promptOpen).toBe(false);
+  });
+
+  it('still blocks closing when a flash runs while viewing', () => {
+    useLogsStore.setState({ phase: 'streaming' });
+    useWizardStore.setState({ currentStep: 2, updateResult: null });
+    renderHook(() => useBusyCloseGuard());
+    const preventDefault = vi.fn();
+    act(() => handler?.({ preventDefault }));
+    expect(preventDefault).toHaveBeenCalled();
   });
 
   it('close anyway destroys the window', async () => {

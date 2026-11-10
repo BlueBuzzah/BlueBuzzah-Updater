@@ -5,11 +5,12 @@ import { useIsBusy } from '@/stores/busy';
 /**
  * Never close during a flash; warn on window close (updater.md). Configure's
  * apply step is covered too, since it reboots devices (plan choice PC-4).
+ * Viewing logs alone doesn't prompt: closing just stops reading.
  */
 export function useBusyCloseGuard(): { promptOpen: boolean; keepOpen: () => void; closeAnyway: () => Promise<void> } {
-  const { busy } = useIsBusy();
-  const busyRef = useRef(busy);
-  busyRef.current = busy;
+  const { kind } = useIsBusy();
+  const busyRef = useRef(false);
+  busyRef.current = kind !== null && kind !== 'monitor';
   const [promptOpen, setPromptOpen] = useState(false);
 
   useEffect(() => {

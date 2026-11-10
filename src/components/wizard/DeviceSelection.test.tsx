@@ -16,7 +16,7 @@ const v2c = createMockDevice({ path: '/dev/cu.c', serialNumber: 'C3', board: 'nr
 const v3 = createMockDevice({ path: 'COM7', serialNumber: 'E1', board: 'esp32s3', vid: 0x303a, pid: 0x1001 });
 
 /** Holds selection state like the store does, so role changes re-render. */
-function Harness({ initial = [] as Device[], onChange = vi.fn(), mode = 'flash' as 'flash' | 'configure' }) {
+function Harness({ initial = [] as Device[], onChange = vi.fn(), mode = 'flash' as 'flash' | 'configure' | 'monitor' }) {
   const [selected, setSelected] = useState<Device[]>(initial);
   return (
     <DeviceSelection
@@ -239,6 +239,31 @@ describe('DeviceSelection', () => {
       expect(onChange).toHaveBeenLastCalledWith([v2a, v3]);
       fireEvent.click(screen.getByRole('button', { name: /port \/dev\/cu\.c/ }));
       expect(screen.getByText('You can configure up to 2 devices at once.')).toBeInTheDocument();
+    });
+  });
+
+  describe('monitor mode (configure rules, no same-settings hint)', () => {
+    const boot = createMockDevice({ path: '/dev/cu.boot', serialNumber: 'Z9', inBootloader: true });
+
+    it('hides bootloader devices and roles, and skips the same-settings hint', async () => {
+      vi.mocked(deviceService.detectDevices).mockResolvedValue([v2a, boot]);
+      render(<Harness mode="monitor" />);
+      await screen.findByRole('button', { name: /port \/dev\/cu\.a/ });
+      expect(screen.queryByRole('button', { name: /cu\.boot/ })).toBeNull();
+      expect(screen.queryByText(MSG_SAME_SETTINGS)).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: /port \/dev\/cu\.a/ }));
+      expect(screen.queryByRole('radiogroup', { name: 'Role' })).toBeNull();
+    });
+
+    it('allows a v2 and a v3 together, and says when the limit of 2 is reached', async () => {
+      vi.mocked(deviceService.detectDevices).mockResolvedValue([v2a, v3, v2c]);
+      const onChange = vi.fn();
+      render(<Harness mode="monitor" onChange={onChange} />);
+      fireEvent.click(await screen.findByRole('button', { name: /port \/dev\/cu\.a/ }));
+      fireEvent.click(screen.getByRole('button', { name: /port COM7/ }));
+      expect(onChange).toHaveBeenLastCalledWith([v2a, v3]);
+      fireEvent.click(screen.getByRole('button', { name: /port \/dev\/cu\.c/ }));
+      expect(screen.getByText('You can view up to 2 devices at once.')).toBeInTheDocument();
     });
   });
 });

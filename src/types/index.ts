@@ -246,6 +246,39 @@ export interface TherapyState {
 }
 
 // ============================================================================
+// Serial Monitor Types (Logs section)
+// ============================================================================
+
+/** One line read from a device; t is the host's receive time in epoch ms. */
+export interface MonitorLine {
+  t: number;
+  text: string;
+}
+
+/** start_serial_monitor channel events (commands/monitor.rs). */
+export type MonitorEvent =
+  | { event: 'lines'; data: { lines: MonitorLine[] } }
+  | { event: 'disconnected'; data: { reason: string } };
+
+export type MonitorStatus = 'connected' | 'disconnected';
+
+export interface MonitorPane {
+  device: Device;
+  /** Current port; changes when Reconnect finds the device on a new one */
+  port: string;
+  lines: string[];
+  /** Epoch ms per line, parallel to lines */
+  times: number[];
+  /** Number of lines[0]; counts on as the oldest lines are dropped */
+  firstLine: number;
+  status: MonitorStatus;
+  follow: boolean;
+  note: string;
+  /** Number of the last line copied or saved; 0 if neither */
+  exportedThrough: number;
+}
+
+// ============================================================================
 // App Updater Types
 // ============================================================================
 
