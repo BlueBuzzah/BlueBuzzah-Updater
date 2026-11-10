@@ -119,6 +119,51 @@ impl SerialTransport {
         Ok(Self { port })
     }
 
+    /// Open a serial port for the read-only log monitor, without resetting
+    /// the device, and with DTR set to `dtr`.
+    ///
+    /// Two board facts drive this, and both differ from `open_for_query`:
+    ///
+    /// - **v2 needs DTR high to talk.** Adafruit TinyUSB's CDC `write` only
+    ///   sends while the host has DTR set, so with DTR low a v2 glove prints
+    ///   nothing. Raising DTR at 115200 is safe: v2 enters DFU only when DTR
+    ///   drops while the port is at 1200 baud. Pass `dtr = true` for v2.
+    /// - **v3 must never pass through DTR low, RTS high.** POSIX open leaves
+    ///   both lines high. On the ESP32-S3 USB-Serial-JTAG, (DTR=0, RTS=1) is
+    ///   the chip-reset state, so clearing DTR first would reset the board.
+    ///   RTS is therefore cleared first, giving (1,1) → (1,0) → (dtr,0). v3
+    ///   output doesn't depend on DTR, and (0,0) is its safe idle. Pass
+    ///   `dtr = false` for v3.
+    ///
+    /// Then, like `open_for_query`, it settles briefly and discards input once.
+    pub fn open_for_monitor(port_name: &str, dtr: bool) -> DfuResult<Self> {
+        let normalized_name = normalize_port_name(port_name);
+
+        let mut port = open_port_with_retry(
+            &normalized_name,
+            DFU_BAUD_RATE,
+            Some(SERIAL_READ_TIMEOUT),
+            MAX_PORT_OPEN_RETRIES,
+            port_name,
+        )?;
+
+        // RTS first: see the v3 note above.
+        if let Err(e) = port.write_request_to_send(false) {
+            eprintln!("[DFU] Warning: clearing RTS failed during monitor open: {}", e);
+        }
+        if let Err(e) = port.write_data_terminal_ready(dtr) {
+            eprintln!(
+                "[DFU] Warning: setting DTR={} failed during monitor open: {}",
+                dtr, e
+            );
+        }
+
+        std::thread::sleep(Duration::from_millis(100));
+        port.clear(serialport::ClearBuffer::Input).ok();
+
+        Ok(Self { port })
+    }
+
     /// Open a serial port with a specific baud rate.
     ///
     /// Includes retry logic to handle transient connectivity failures during

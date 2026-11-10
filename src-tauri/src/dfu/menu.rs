@@ -633,16 +633,18 @@ pub fn write_custom_params<T: DfuTransport>(
 /// Every later Rust task tests its flow against this instead of hardware.
 /// Reads past the end of the script return 0 bytes, which is how a timeout
 /// (and therefore a SECONDARY glove's silence) is simulated, unless
-/// `with_error_at_end` makes them fail like an unplugged port.
+/// `with_error_at_end` makes them fail like an unplugged port, or
+/// `with_instant_eof` makes them return 0 at once like a hung-up port.
 #[cfg(test)]
 pub struct ScriptedTransport {
     replies: std::collections::VecDeque<String>,
     written: Vec<String>,
     /// Ordered record of transport operations ("clear", "write", "read",
-    /// "flush"), so a test can prove stale input is discarded *before* a
-    /// command is sent.
+    /// "flush", "keep_alive", "is_healthy"), so a test can prove stale input
+    /// is discarded *before* a command is sent, or that a session only reads.
     ops: Vec<&'static str>,
     error_at_end: bool,
+    instant_eof: bool,
 }
 
 #[cfg(test)]
@@ -653,6 +655,7 @@ impl ScriptedTransport {
             written: Vec::new(),
             ops: Vec::new(),
             error_at_end: false,
+            instant_eof: false,
         }
     }
 
@@ -660,6 +663,14 @@ impl ScriptedTransport {
     /// device is unplugged) instead of timing out.
     pub fn with_error_at_end(mut self) -> Self {
         self.error_at_end = true;
+        self
+    }
+
+    /// Once the script is exhausted, reads return 0 bytes immediately instead
+    /// of waiting out the timeout, as a hung-up port does (POSIX EOF, or a
+    /// 0-byte Windows `ReadFile`).
+    pub fn with_instant_eof(mut self) -> Self {
+        self.instant_eof = true;
         self
     }
 
@@ -703,6 +714,7 @@ impl DfuTransport for ScriptedTransport {
             None if self.error_at_end => Err(DfuError::Io(std::io::Error::from(
                 std::io::ErrorKind::BrokenPipe,
             ))),
+            None if self.instant_eof => Ok(0),
             None => {
                 // Silence. Keeps the caller's timeout loop from spinning hot.
                 std::thread::sleep(Duration::from_millis(10));
@@ -727,10 +739,12 @@ impl DfuTransport for ScriptedTransport {
     }
 
     fn keep_alive(&mut self) -> DfuResult<()> {
+        self.ops.push("keep_alive");
         Ok(())
     }
 
     fn is_healthy(&mut self) -> bool {
+        self.ops.push("is_healthy");
         true
     }
 }
