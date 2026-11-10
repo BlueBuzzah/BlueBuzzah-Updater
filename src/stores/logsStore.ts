@@ -24,8 +24,8 @@ interface LogsStore {
   setPort: (key: string, port: string) => void;
   setFollow: (key: string, follow: boolean) => void;
   setNote: (key: string, note: string) => void;
-  /** Records that every line now shown was copied or saved */
-  markExported: (key: string) => void;
+  /** Records that lines up to `through` were copied or saved */
+  markExported: (key: string, through: number) => void;
   /** Streaming has ended; the panes stay on screen to copy or save */
   stopViewing: () => void;
   /**
@@ -71,7 +71,7 @@ export const useLogsStore = create<LogsStore>((set) => {
     setPort: (key, port) => update(key, () => ({ port })),
     setFollow: (key, follow) => update(key, () => ({ follow })),
     setNote: (key, note) => update(key, () => ({ note })),
-    markExported: (key) => update(key, (pane) => ({ exportedThrough: pane.firstLine + pane.lines.length - 1 })),
+    markExported: (key, through) => update(key, (pane) => ({ exportedThrough: Math.max(pane.exportedThrough, through) })),
     // Notes point at Reconnect, which the stopped screen doesn't offer.
     stopViewing: () =>
       set((state) => ({

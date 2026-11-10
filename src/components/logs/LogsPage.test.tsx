@@ -1,5 +1,7 @@
-import { act, fireEvent, render, renderHook, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { invoke } from '@tauri-apps/api/core';
+import { save } from '@tauri-apps/plugin-dialog';
+import { writeTextFile } from '@tauri-apps/plugin-fs';
 import type { Ref } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { deviceService } from '@/services/DeviceService';
@@ -257,6 +259,7 @@ describe('LogsPage', () => {
     await press('Done');
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Keep Logs' })));
     expect(screen.queryByRole('alertdialog')).toBeNull();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Done' })).toHaveFocus());
     expect(useLogsStore.getState().phase).toBe('stopped');
     expect(useLogsStore.getState().panes.A1.lines).toEqual(['kept']);
   });
@@ -270,6 +273,23 @@ describe('LogsPage', () => {
     await press('Done');
     expect(screen.queryByRole('alertdialog')).toBeNull();
     expect(useLogsStore.getState().phase).toBe('choose');
+  });
+
+  it('asks again when lines arrived while the save dialog was open', async () => {
+    const chosen = deferred();
+    vi.mocked(save).mockImplementation(async () => {
+      await chosen.promise;
+      return '/tmp/a.txt';
+    });
+    await startViewing();
+    emit('/dev/cu.a', lines('saved'));
+    await act(async () => fireEvent.click(within(pane(/BlueBuzzah v2/)).getByRole('button', { name: 'Save Log' })));
+    emit('/dev/cu.a', lines('after'));
+    await act(async () => chosen.resolve());
+    expect(writeTextFile).toHaveBeenCalledWith('/tmp/a.txt', expect.not.stringContaining('after'));
+    await press('Stop Viewing');
+    await press('Done');
+    expect(screen.getByRole('alertdialog', { name: 'Clear These Logs?' })).toBeInTheDocument();
   });
 
   it('asks again when lines arrived after the last copy', async () => {
@@ -310,9 +330,12 @@ describe('LogsPage', () => {
     await startViewing();
     await press('Stop Viewing');
     expect(stopCalls('/dev/cu.a')).toBe(1);
+    // The navigation lock holds until the late open has been closed again.
+    expect(useLogsStore.getState().phase).toBe('streaming');
     await act(async () => late.resolve());
     expect(stopCalls('/dev/cu.a')).toBe(2);
     expect(stopCalls('COM7')).toBe(1);
+    expect(useLogsStore.getState().phase).toBe('stopped');
   });
 
   it('stops every monitor and drops the logs if the page unmounts while viewing', async () => {

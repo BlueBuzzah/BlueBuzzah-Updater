@@ -20,8 +20,8 @@ interface LogPaneProps {
   follow?: boolean;
   /** Number of the first line shown, for logs that drop their oldest lines */
   firstLineNumber?: number;
-  /** Called after a successful Copy or Save */
-  onExport?: () => void;
+  /** Called after a successful Copy or Save with the number of the last line it included */
+  onExport?: (through: number) => void;
 }
 
 const pad = (n: number, width = 2) => String(n).padStart(width, '0');
@@ -106,22 +106,27 @@ export function LogPane({
   }, [lines, follow, open]);
 
   const text = () => lines.map((line, i) => (timestamps?.[i] === undefined ? line : `${formatLogTime(timestamps[i])} ${line}`)).join('\n');
+  // The line count is read with the text, so lines that arrive while the save dialog is open aren't counted as exported.
+  const through = () => firstLineNumber + lines.length - 1;
   const copy = async () => {
+    const last = through();
     try {
       await navigator.clipboard.writeText(text());
       setStatus('Log copied.');
-      onExport?.();
+      onExport?.(last);
     } catch {
       setStatus("Couldn't copy the log.");
     }
   };
   const saveLog = async () => {
+    const last = through();
+    const content = text();
     try {
       const path = await save({ defaultPath: fileName });
       if (!path) return;
-      await writeTextFile(path, text());
+      await writeTextFile(path, content);
       setStatus('Log saved.');
-      onExport?.();
+      onExport?.(last);
     } catch {
       setStatus("Couldn't save the log.");
     }

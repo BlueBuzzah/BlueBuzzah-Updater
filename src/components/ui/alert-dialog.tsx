@@ -62,12 +62,23 @@ interface ConfirmDialogProps {
   onConfirm: () => void;
   /** Ignore a second confirm within 400ms (Stop, Flash). */
   confirmGuard?: boolean;
+  /** Where focus goes when the dialog closes; needed when it opens without a Trigger */
+  returnFocusRef?: React.RefObject<HTMLElement | null>;
 }
 
-export function ConfirmDialog({ open, onOpenChange, title, children, cancelLabel, confirmLabel, confirmVariant = 'danger', onConfirm, confirmGuard }: ConfirmDialogProps) {
+export function ConfirmDialog({ open, onOpenChange, title, children, cancelLabel, confirmLabel, confirmVariant = 'danger', onConfirm, confirmGuard, returnFocusRef }: ConfirmDialogProps) {
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent>
+      <AlertDialogContent
+        onCloseAutoFocus={
+          returnFocusRef
+            ? (e) => {
+                e.preventDefault();
+                returnFocusRef.current?.focus();
+              }
+            : undefined
+        }
+      >
         <AlertDialogHeader>
           <AlertDialogTitle>{title}</AlertDialogTitle>
           {children && <AlertDialogDescription asChild><div>{children}</div></AlertDialogDescription>}

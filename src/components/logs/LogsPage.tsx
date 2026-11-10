@@ -81,7 +81,7 @@ function DevicePane({ id, streaming, canReconnect, titleRef, onReconnect }: Devi
         collapsible={false}
         label={`${name} log`}
         fileName={logFileName(pane)}
-        onExport={() => markExported(id)}
+        onExport={(through) => markExported(id, through)}
         actions={
           streaming && (
             <div className="flex flex-wrap gap-target-gap">
@@ -112,6 +112,8 @@ export function LogsPage() {
   // Bumped on every start, stop and leave, so a late event or start from an earlier run is ignored.
   const run = useRef(0);
   const reconnecting = useRef(new Set<string>());
+  const starting = useRef(new Set<Promise<boolean>>());
+  const doneButton = useRef<HTMLButtonElement>(null);
   const focusNext = useRef<'panes' | 'choose' | null>(null);
   const firstTitle = useRef<HTMLHeadingElement>(null);
   const chooseTitle = useRef<HTMLHeadingElement>(null);
@@ -148,14 +150,20 @@ export function LogsPage() {
    * Opens a monitor; false if the port couldn't be opened. Ignoring events doesn't stop the
    * backend reader, so a monitor that opens after its run ended (Stop, leave, a new port) is closed again.
    */
-  const startMonitor = async (r: number, key: string, port: string, onFirst?: () => void) => {
-    try {
-      await monitorService.start(port, handler(r, key, port, onFirst));
-    } catch {
-      return false;
-    }
-    if (!current(r, key, port)) monitorService.stop(port).catch(() => {});
-    return true;
+  const startMonitor = (r: number, key: string, port: string, onFirst?: () => void) => {
+    const opening = (async () => {
+      try {
+        await monitorService.start(port, handler(r, key, port, onFirst));
+      } catch {
+        return false;
+      }
+      if (!current(r, key, port)) await monitorService.stop(port).catch(() => {});
+      return true;
+    })();
+    // Stop Viewing waits for opens still in flight, so the navigation lock lifts only once they've closed again.
+    starting.current.add(opening);
+    opening.finally(() => starting.current.delete(opening));
+    return opening;
   };
 
   const start = async () => {
@@ -178,7 +186,7 @@ export function LogsPage() {
     const r = ++run.current;
     setStopping(true);
     const ports = Object.values(useLogsStore.getState().panes).map((p) => p.port);
-    await Promise.allSettled(ports.map((port) => monitorService.stop(port)));
+    await Promise.allSettled([...ports.map((port) => monitorService.stop(port)), ...starting.current]);
     if (r !== run.current) return; // the page was left meanwhile
     setStopping(false);
     useLogsStore.getState().stopViewing();
@@ -277,7 +285,7 @@ export function LogsPage() {
             Stop Viewing
           </Button>
         ) : (
-          <Button size="lg" guardRepeat aria-describedby="logs-leave" onClick={() => (hasUnexported() ? setConfirmClear(true) : done())}>
+          <Button ref={doneButton} size="lg" guardRepeat aria-describedby="logs-leave" onClick={() => (hasUnexported() ? setConfirmClear(true) : done())}>
             Done
           </Button>
         )}
@@ -290,6 +298,7 @@ export function LogsPage() {
         cancelLabel="Keep Logs"
         confirmLabel="Clear Logs"
         confirmGuard
+        returnFocusRef={doneButton}
         onConfirm={done}
       >
         You haven't copied or saved them. Once cleared, they can't be recovered.
