@@ -80,6 +80,7 @@ function DevicePane({ id, streaming, canReconnect, titleRef, onReconnect }: Devi
         timestamps={pane.times}
         firstLineNumber={pane.firstLine}
         follow={pane.follow}
+        onFollowChange={(f) => setFollow(id, f)}
         collapsible={false}
         label={`${name} log`}
         fileName={logFileName(pane)}
@@ -87,9 +88,12 @@ function DevicePane({ id, streaming, canReconnect, titleRef, onReconnect }: Devi
         actions={
           streaming && (
             <div className="flex flex-wrap gap-target-gap">
-              <Button variant="quiet" onClick={() => setFollow(id, !pane.follow)}>
-                {pane.follow ? 'Pause Scrolling' : 'Resume Scrolling'}
-              </Button>
+              {/* Scrolling up pauses auto-scroll, so this shows only while paused. */}
+              {!pane.follow && (
+                <Button variant="quiet" onClick={() => setFollow(id, true)}>
+                  Resume Scrolling
+                </Button>
+              )}
               {pane.status === 'disconnected' && canReconnect && (
                 <Button variant="secondary" onClick={() => onReconnect(id)}>
                   Reconnect

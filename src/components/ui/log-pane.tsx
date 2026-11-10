@@ -18,6 +18,8 @@ interface LogPaneProps {
   timestamps?: number[];
   /** Scroll to the newest line whenever lines change; when off, the line at the top stays put */
   follow?: boolean;
+  /** Called when scrolling changes whether the list is at the newest line: false on scrolling up, true on reaching the bottom */
+  onFollowChange?: (follow: boolean) => void;
   /** Number of the first line shown, for logs that drop their oldest lines */
   firstLineNumber?: number;
   /** Called after a successful Copy or Save with the number of the last line it included */
@@ -73,6 +75,7 @@ export function LogPane({
   label,
   timestamps,
   follow = false,
+  onFollowChange,
   firstLineNumber = 1,
   onExport,
 }: LogPaneProps) {
@@ -91,6 +94,17 @@ export function LogPane({
     const rows = list.children as HTMLCollectionOf<HTMLElement>;
     const row = rows[firstVisibleRow(rows, list.scrollTop)];
     anchor.current = { line: Number(row.dataset.line), offset: row.offsetTop - list.scrollTop };
+  };
+
+  // Scrolling up stops auto-scroll (lines keep arriving); scrolling back to the bottom starts it again.
+  // The follow scroll below lands on the bottom, so it never stops itself.
+  const onScroll = () => {
+    recordAnchor();
+    const list = listRef.current;
+    if (!list || !onFollowChange) return;
+    // ponytail: 2px slack for fractional scroll positions on scaled displays
+    const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight <= 2;
+    if (atBottom !== follow) onFollowChange(atBottom);
   };
 
   // Before paint, so a followed log never shows the old position for a frame. When not
@@ -164,7 +178,7 @@ export function LogPane({
           {/* relative: rows' offsetTop is measured from the list. A scrolling list takes focus so the keyboard can scroll it (WebKit doesn't). */}
           <ol
             ref={listRef}
-            onScroll={recordAnchor}
+            onScroll={onScroll}
             tabIndex={collapsible ? undefined : 0}
             aria-label={collapsible ? undefined : label}
             className={cn(

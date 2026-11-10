@@ -109,6 +109,37 @@ it('does not scroll when follow is off', () => {
   expect(list.scrollTop).toBe(0);
 });
 
+describe('scrolling sets follow', () => {
+  const setup = (follow: boolean) => {
+    const onFollowChange = vi.fn();
+    render(<LogPane lines={lines} collapsible={false} follow={follow} onFollowChange={onFollowChange} />);
+    const list = screen.getByRole('list');
+    Object.defineProperty(list, 'scrollHeight', { value: 400, configurable: true });
+    Object.defineProperty(list, 'clientHeight', { value: 100, configurable: true });
+    const scrollTo = (top: number) => {
+      list.scrollTop = top;
+      fireEvent.scroll(list);
+    };
+    return { onFollowChange, scrollTo };
+  };
+
+  it('scrolling up while following stops auto-scroll', () => {
+    const { onFollowChange, scrollTo } = setup(true);
+    scrollTo(300);
+    expect(onFollowChange).not.toHaveBeenCalled(); // at the bottom: the follow scroll itself
+    scrollTo(250);
+    expect(onFollowChange).toHaveBeenCalledWith(false);
+  });
+
+  it('scrolling back to the bottom while paused starts it again', () => {
+    const { onFollowChange, scrollTo } = setup(false);
+    scrollTo(100);
+    expect(onFollowChange).not.toHaveBeenCalled();
+    scrollTo(299);
+    expect(onFollowChange).toHaveBeenCalledWith(true);
+  });
+});
+
 it('numbers lines from firstLineNumber and sizes the column to the largest number', () => {
   render(<LogPane lines={['a', 'b']} collapsible={false} firstLineNumber={4999} />);
   const items = screen.getAllByRole('listitem');
