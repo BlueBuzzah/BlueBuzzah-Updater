@@ -120,15 +120,22 @@ describe('LogsPage', () => {
     expect(within(first).getByRole('list', { name: 'BlueBuzzah v2 /dev/cu.a log' })).toHaveAttribute('tabindex', '0');
   });
 
-  it('Pause Scrolling stops following while lines keep coming', async () => {
+  it('scrolling up pauses auto-scroll while lines keep coming, and Resume Scrolling shows only while paused', async () => {
     await startViewing();
     const first = pane(/BlueBuzzah v2/);
-    fireEvent.click(within(first).getByRole('button', { name: 'Pause Scrolling' }));
+    expect(within(first).queryByRole('button', { name: /Scrolling/ })).toBeNull();
+    const list = within(first).getByRole('list');
+    Object.defineProperty(list, 'scrollHeight', { value: 400, configurable: true });
+    Object.defineProperty(list, 'clientHeight', { value: 100, configurable: true });
+    list.scrollTop = 100;
+    fireEvent.scroll(list);
     expect(useLogsStore.getState().panes.A1.follow).toBe(false);
     emit('/dev/cu.a', lines('still here'));
     expect(within(first).getByText('still here')).toBeInTheDocument();
     fireEvent.click(within(first).getByRole('button', { name: 'Resume Scrolling' }));
     expect(useLogsStore.getState().panes.A1.follow).toBe(true);
+    expect(list.scrollTop).toBe(400);
+    expect(within(first).queryByRole('button', { name: 'Resume Scrolling' })).toBeNull();
   });
 
   it('a disconnect adds a marker, flips the badge and offers Reconnect, keeping the log', async () => {

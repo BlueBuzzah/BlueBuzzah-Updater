@@ -57,6 +57,15 @@ it('collapsible={false} is always open, with no Show/Hide Log', () => {
   expect(screen.getByRole('button', { name: 'Copy Log' })).toBeInTheDocument();
 });
 
+it('collapsible={false} drops the Copy and Save icons so both fit one row in a narrow pane', () => {
+  const { rerender } = render(<LogPane lines={lines} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Show Log' }));
+  expect(screen.getByRole('button', { name: 'Copy Log' }).querySelector('svg')).not.toBeNull();
+  rerender(<LogPane lines={lines} collapsible={false} />);
+  expect(screen.getByRole('button', { name: 'Copy Log' }).querySelector('svg')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Save Log' }).querySelector('svg')).toBeNull();
+});
+
 it('collapsible={false} keeps each line on one row with its number and time pinned at the left', () => {
   render(<LogPane lines={['a long line']} timestamps={[new Date(2026, 0, 1, 9, 5, 7, 42).getTime()]} collapsible={false} />);
   const row = screen.getByRole('listitem');
@@ -98,6 +107,37 @@ it('does not scroll when follow is off', () => {
   Object.defineProperty(list, 'scrollHeight', { value: 400, configurable: true });
   rerender(<LogPane lines={[...lines, 'INFO  d']} collapsible={false} follow={false} />);
   expect(list.scrollTop).toBe(0);
+});
+
+describe('scrolling sets follow', () => {
+  const setup = (follow: boolean) => {
+    const onFollowChange = vi.fn();
+    render(<LogPane lines={lines} collapsible={false} follow={follow} onFollowChange={onFollowChange} />);
+    const list = screen.getByRole('list');
+    Object.defineProperty(list, 'scrollHeight', { value: 400, configurable: true });
+    Object.defineProperty(list, 'clientHeight', { value: 100, configurable: true });
+    const scrollTo = (top: number) => {
+      list.scrollTop = top;
+      fireEvent.scroll(list);
+    };
+    return { onFollowChange, scrollTo };
+  };
+
+  it('scrolling up while following stops auto-scroll', () => {
+    const { onFollowChange, scrollTo } = setup(true);
+    scrollTo(300);
+    expect(onFollowChange).not.toHaveBeenCalled(); // at the bottom: the follow scroll itself
+    scrollTo(250);
+    expect(onFollowChange).toHaveBeenCalledWith(false);
+  });
+
+  it('scrolling back to the bottom while paused starts it again', () => {
+    const { onFollowChange, scrollTo } = setup(false);
+    scrollTo(100);
+    expect(onFollowChange).not.toHaveBeenCalled();
+    scrollTo(299);
+    expect(onFollowChange).toHaveBeenCalledWith(true);
+  });
 });
 
 it('numbers lines from firstLineNumber and sizes the column to the largest number', () => {
