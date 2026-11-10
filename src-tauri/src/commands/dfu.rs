@@ -828,10 +828,11 @@ pub async fn read_custom_profile() -> Result<CustomProfileRead, String> {
                 continue;
             }
 
-            // Read-only: open without pulsing DTR, so querying a glove does not
-            // reboot it. `SerialTransport::open` resets the device by design
-            // (the DFU flow needs that); this query has no reason to.
-            let mut transport = match SerialTransport::open_for_query(&device.port) {
+            // Read-only: open without resetting the device (`SerialTransport::open`
+            // resets by design, for DFU). RTS goes low first, then DTR high
+            // for v2 (it only answers with DTR set) and low for v3.
+            let dtr = SerialTransport::read_only_dtr(Some(&device.board));
+            let mut transport = match SerialTransport::open_for_monitor(&device.port, dtr) {
                 Ok(transport) => transport,
                 Err(e) => {
                     eprintln!("[read_custom_profile] {} not readable: {}", device.port, e);
