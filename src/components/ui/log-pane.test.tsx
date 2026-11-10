@@ -57,6 +57,15 @@ it('collapsible={false} is always open, with no Show/Hide Log', () => {
   expect(screen.getByRole('button', { name: 'Copy Log' })).toBeInTheDocument();
 });
 
+it('collapsible={false} drops the Copy and Save icons so both fit one row in a narrow pane', () => {
+  const { rerender } = render(<LogPane lines={lines} />);
+  fireEvent.click(screen.getByRole('button', { name: 'Show Log' }));
+  expect(screen.getByRole('button', { name: 'Copy Log' }).querySelector('svg')).not.toBeNull();
+  rerender(<LogPane lines={lines} collapsible={false} />);
+  expect(screen.getByRole('button', { name: 'Copy Log' }).querySelector('svg')).toBeNull();
+  expect(screen.getByRole('button', { name: 'Save Log' }).querySelector('svg')).toBeNull();
+});
+
 it('collapsible={false} keeps each line on one row with its number and time pinned at the left', () => {
   render(<LogPane lines={['a long line']} timestamps={[new Date(2026, 0, 1, 9, 5, 7, 42).getTime()]} collapsible={false} />);
   const row = screen.getByRole('listitem');

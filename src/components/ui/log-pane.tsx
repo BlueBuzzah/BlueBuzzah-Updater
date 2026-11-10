@@ -135,10 +135,11 @@ export function LogPane({
     }
   };
 
+  // No icons in a fixed pane: without them Copy and Save fit on one row in a narrow pane, leaving room for the log.
   const copySave = (
     <div className="flex flex-wrap gap-target-gap">
-      <Button variant="secondary" icon={Copy} onClick={copy}>Copy Log</Button>
-      <Button variant="secondary" icon={Save} onClick={saveLog}>Save Log</Button>
+      <Button variant="secondary" icon={collapsible ? Copy : undefined} onClick={copy}>Copy Log</Button>
+      <Button variant="secondary" icon={collapsible ? Save : undefined} onClick={saveLog}>Save Log</Button>
     </div>
   );
 
