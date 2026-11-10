@@ -116,7 +116,10 @@ fn now_ms() -> u64 {
 fn lines_event(texts: Vec<String>) -> MonitorEvent {
     let t = now_ms();
     MonitorEvent::Lines {
-        lines: texts.into_iter().map(|text| MonitorLine { t, text }).collect(),
+        lines: texts
+            .into_iter()
+            .map(|text| MonitorLine { t, text })
+            .collect(),
     }
 }
 
@@ -221,7 +224,10 @@ struct Registration {
 impl Drop for Registration {
     fn drop(&mut self) {
         let mut map = monitors();
-        if map.get(&self.port).is_some_and(|s| Arc::ptr_eq(s, &self.stop)) {
+        if map
+            .get(&self.port)
+            .is_some_and(|s| Arc::ptr_eq(s, &self.stop))
+        {
             map.remove(&self.port);
         }
     }
@@ -262,11 +268,18 @@ pub async fn start_serial_monitor(
             .into_iter()
             .find(|d| d.port == port)
             .map(|d| d.board);
+        if board.is_none() {
+            // DTR stays low, so a v2 glove opened this way prints nothing.
+            eprintln!(
+                "[monitor] {} not in device list; opening with DTR low",
+                port
+            );
+        }
         SerialTransport::open_for_monitor(&port, monitor_dtr(board.as_deref()))
     })
     .await
-        .map_err(|e| e.to_string())?
-        .map_err(|e| e.to_string())?;
+    .map_err(|e| e.to_string())?
+    .map_err(|e| e.to_string())?;
 
     std::thread::spawn(move || {
         let _registration = registration;
@@ -324,7 +337,10 @@ mod tests {
     #[test]
     fn replaces_invalid_utf8() {
         let mut splitter = LineSplitter::default();
-        assert_eq!(splitter.push(&[b'a', 0xFF, b'b', b'\n']), vec!["a\u{FFFD}b"]);
+        assert_eq!(
+            splitter.push(&[b'a', 0xFF, b'b', b'\n']),
+            vec!["a\u{FFFD}b"]
+        );
     }
 
     #[test]
@@ -370,6 +386,11 @@ mod tests {
                 reason: "The port stopped responding".into()
             }
         );
+        assert!(
+            transport.ops().iter().all(|&op| op == "read"),
+            "{:?}",
+            transport.ops()
+        );
     }
 
     #[test]
@@ -379,7 +400,10 @@ mod tests {
 
         let mut detector = FastEofDetector::default();
         for _ in 0..1000 {
-            assert!(!detector.observe(0, slow), "a timed-out read is just silence");
+            assert!(
+                !detector.observe(0, slow),
+                "a timed-out read is just silence"
+            );
         }
 
         let mut detector = FastEofDetector::default();
@@ -390,7 +414,10 @@ mod tests {
         for _ in 0..FAST_EOF_LIMIT - 1 {
             assert!(!detector.observe(0, fast));
         }
-        assert!(!detector.observe(0, slow), "a slow empty read resets the run");
+        assert!(
+            !detector.observe(0, slow),
+            "a slow empty read resets the run"
+        );
         for _ in 0..FAST_EOF_LIMIT - 1 {
             assert!(!detector.observe(0, fast));
         }
@@ -401,7 +428,10 @@ mod tests {
     fn caps_an_unterminated_line() {
         let mut splitter = LineSplitter::default();
         let full = vec![b'a'; MAX_LINE_BYTES];
-        assert!(splitter.push(&full).is_empty(), "at the cap it stays buffered");
+        assert!(
+            splitter.push(&full).is_empty(),
+            "at the cap it stays buffered"
+        );
 
         let lines = splitter.push(b"b");
         assert_eq!(lines.len(), 1);
@@ -439,7 +469,11 @@ mod tests {
         run_monitor(&mut transport, &stop, &mut |_| true);
 
         assert!(transport.written().is_empty());
-        assert!(transport.ops().iter().all(|&op| op == "read"), "{:?}", transport.ops());
+        assert!(
+            transport.ops().iter().all(|&op| op == "read"),
+            "{:?}",
+            transport.ops()
+        );
     }
 
     #[test]
@@ -543,7 +577,10 @@ mod tests {
         stop_and_wait(port, Duration::from_secs(5));
 
         assert!(stop.load(Ordering::SeqCst));
-        assert!(!monitors().contains_key(port), "returned before the reader exited");
+        assert!(
+            !monitors().contains_key(port),
+            "returned before the reader exited"
+        );
         assert!(started.elapsed() >= Duration::from_millis(100));
         reader.join().unwrap();
     }
