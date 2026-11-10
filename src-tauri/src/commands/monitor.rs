@@ -192,13 +192,6 @@ fn run_monitor(
     }
 }
 
-/// Whether to raise DTR when opening a monitor. v2 (TinyUSB CDC) only sends
-/// while DTR is set; v3 doesn't need it, and an unknown device gets the
-/// lines-low posture.
-fn monitor_dtr(board: Option<&str>) -> bool {
-    board == Some("nrf52")
-}
-
 fn monitors() -> std::sync::MutexGuard<'static, HashMap<String, Arc<AtomicBool>>> {
     MONITORS.lock().unwrap_or_else(|e| e.into_inner())
 }
@@ -275,7 +268,10 @@ pub async fn start_serial_monitor(
                 port
             );
         }
-        SerialTransport::open_for_monitor(&port, monitor_dtr(board.as_deref()))
+        SerialTransport::open_for_monitor(
+            &port,
+            SerialTransport::read_only_dtr(board.as_deref()),
+        )
     })
     .await
     .map_err(|e| e.to_string())?
@@ -452,13 +448,6 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[0], "x");
         assert_eq!(lines[1].len(), MAX_LINE_BYTES + 1);
-    }
-
-    #[test]
-    fn monitor_raises_dtr_only_for_v2() {
-        assert!(monitor_dtr(Some("nrf52")));
-        assert!(!monitor_dtr(Some("esp32s3")));
-        assert!(!monitor_dtr(None));
     }
 
     #[test]

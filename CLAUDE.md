@@ -61,7 +61,7 @@ grep -rnE "text-(xs|sm|base|lg|[0-9]?xl)\b|text-\[|#[0-9a-fA-F]{3,8}\b|rgba?\(|h
 | Rust module (`src-tauri/src/`) | Purpose |
 |--------------------------------|---------|
 | `dfu/protocol.rs` | DFU state machine — `upload_firmware()`, `configure_role_with_deadline()` (wraps `configure_device_role_flexible()` in an overall deadline), `configure_device_with_settings()`, `drain_boot_output()` |
-| `dfu/transport.rs` | Serial transport, 1200-baud touch reset, port-open retry; `open()` (resets board) vs `open_for_query()` (doesn't) and `open_for_monitor(port, dtr)` (Logs: RTS low, then DTR high for v2, low for v3) |
+| `dfu/transport.rs` | Serial transport, 1200-baud touch reset, port-open retry; `open()` (resets board) vs `open_for_monitor(port, read_only_dtr(board))` (doesn't; Logs + Custom profile read: RTS low, then DTR high for v2, low for v3) |
 | `dfu/device.rs` | Device detection; `DeviceIdentifier` tracks devices across re-enumeration (serial number preferred, VID/PID+port-pattern fallback) |
 | `dfu/slip.rs`, `dfu/packet.rs` | SLIP/HCI framing, CRC16 |
 | `dfu/firmware_reader.rs` | Nordic DFU zip parsing (`manifest.json`, `firmware.bin`/`.dat`) |
@@ -108,7 +108,7 @@ grep -rnE "text-(xs|sm|base|lg|[0-9]?xl)\b|text-\[|#[0-9a-fA-F]{3,8}\b|rgba?\(|h
 - **`[SETTING]` ack timeout = success**: `send_setting_command` treats no-ack as success for backward compat with older firmware.
 - **Format detection**: a firmware zip's `manifest.json` has `manifest_version` for v3 or a top-level `manifest` key for Nordic — never feed one reader the other's zip.
 - **Cache keying**: `cache.rs` keys entries `(version, board)` as `version::board`; on disk, `commands/firmware.rs::firmware_filename` keeps legacy `{version}.zip` for nrf52 and `{version}-{board}.zip` for other boards.
-- **Opening a port can reboot the glove**: `SerialTransport::open` pulses DTR, which resets the board (deliberate for DFU). Read-only menu paths must use `open_for_query` (no DTR/RTS), as `read_custom_profile` does. macOS may still assert DTR on open by itself.
+- **Opening a port can reboot the glove**: `SerialTransport::open` pulses DTR, which resets the board (deliberate for DFU). Read-only paths (`read_custom_profile`, the Logs viewer) use `open_for_monitor` with `read_only_dtr(board)`: RTS low first, then DTR high for v2 (TinyUSB CDC sends nothing without DTR) and low for v3. Never pass through DTR low + RTS high, which resets an ESP32-S3; POSIX opens with both lines high, Windows with both low.
 - **Serial menu replies have no request IDs**: `send_menu_command` calls `clear_input()` before every write. Removing it lets stale `INFO` replies from timed-out readiness probes be read as the answer to the next command.
 - **Batch flashing is single-board only**: mixing hardware versions (one v2 + one v3) in the same run is unsupported — enforced by a UI guard in `DeviceSelection` and a defensive guard in `InstallationProgress`. Two devices of the same version flash fine.
 - **Custom profile writes are two-phase and reboot the device**: `PROFILE_CUSTOM` is rejected unless Custom is already loaded, and `PROFILE_LOAD` reboots. Phase 2 therefore reacquires the port via `wait_for_application_flexible` between the two. A partial outcome (profile loaded, parameters unconfirmed) must never be reported as success: `commands/dfu.rs` emits a distinct `partial` progress stage (not `complete`) because the frontend badge keys on stage. `preflight_primary_check` runs before `PROFILE_LOAD` so a SECONDARY or silent glove stops the flow.

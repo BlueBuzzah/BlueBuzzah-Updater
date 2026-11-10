@@ -73,69 +73,29 @@ impl SerialTransport {
         Self::open_with_baud(port_name, DFU_BAUD_RATE)
     }
 
-    /// Open a serial port for a read-only query, without pulsing the device's
-    /// auto-reset line.
-    ///
-    /// `open_with_baud` deliberately toggles DTR because the DFU flow *wants* a
-    /// reset — it is how the bootloader is made ready. DTR drives the auto-reset
-    /// path on these boards, so that toggle reboots the glove on every open,
-    /// which is pure cost for a query that only reads parameters: the caller
-    /// then has to sit through a boot it caused itself.
-    ///
-    /// This variant asserts neither DTR nor RTS. On the classic ESP auto-reset
-    /// circuit those two lines drive GPIO0 and EN, so leaving both low is the
-    /// "don't touch the reset pins" posture.
-    ///
-    /// Caveat worth knowing before trusting it: some platforms (macOS in
-    /// particular) assert DTR themselves when a tty is opened, before any of
-    /// this code runs. Removing the explicit pulse removes *our* reset; whether
-    /// the device still reboots from the OS-level assert has to be confirmed on
-    /// hardware. v2 and v3 may also differ here — the ESP32-S3's native
-    /// USB-JTAG/Serial has the ROM interpret DTR/RTS rather than wiring them to
-    /// a physical reset pin.
-    pub fn open_for_query(port_name: &str) -> DfuResult<Self> {
-        let normalized_name = normalize_port_name(port_name);
-
-        let mut port = open_port_with_retry(
-            &normalized_name,
-            DFU_BAUD_RATE,
-            Some(SERIAL_READ_TIMEOUT),
-            MAX_PORT_OPEN_RETRIES,
-            port_name,
-        )?;
-
-        // Drop both control lines rather than pulsing them.
-        if let Err(e) = port.write_data_terminal_ready(false) {
-            eprintln!("[DFU] Warning: clearing DTR failed during query open: {}", e);
-        }
-        if let Err(e) = port.write_request_to_send(false) {
-            eprintln!("[DFU] Warning: clearing RTS failed during query open: {}", e);
-        }
-
-        // Brief settle, then discard anything the open itself shook loose.
-        std::thread::sleep(Duration::from_millis(100));
-        port.clear(serialport::ClearBuffer::Input).ok();
-
-        Ok(Self { port })
+    /// DTR to pass `open_for_monitor` for a device of `board`: high for v2
+    /// (`nrf52`), low for v3 and for an unknown device.
+    pub fn read_only_dtr(board: Option<&str>) -> bool {
+        board == Some("nrf52")
     }
 
-    /// Open a serial port for the read-only log monitor, without resetting
-    /// the device, and with DTR set to `dtr`.
+    /// Open a serial port for read-only work (the Logs viewer, reading the
+    /// Custom profile) without resetting the device, and with DTR set to `dtr`.
     ///
-    /// Two board facts drive this, and both differ from `open_for_query`:
+    /// Two board facts drive this:
     ///
     /// - **v2 needs DTR high to talk.** Adafruit TinyUSB's CDC `write` only
     ///   sends while the host has DTR set, so with DTR low a v2 glove prints
-    ///   nothing. Raising DTR at 115200 is safe: v2 enters DFU only when DTR
-    ///   drops while the port is at 1200 baud. Pass `dtr = true` for v2.
+    ///   nothing and answers no menu command. Raising DTR at 115200 is safe:
+    ///   v2 enters DFU only when DTR drops while the port is at 1200 baud.
     /// - **v3 must never pass through DTR low, RTS high.** POSIX open leaves
     ///   both lines high. On the ESP32-S3 USB-Serial-JTAG, (DTR=0, RTS=1) is
     ///   the chip-reset state, so clearing DTR first would reset the board.
     ///   RTS is therefore cleared first, giving (1,1) → (1,0) → (dtr,0). v3
-    ///   output doesn't depend on DTR, and (0,0) is its safe idle. Pass
-    ///   `dtr = false` for v3.
+    ///   output doesn't depend on DTR, and (0,0) is its safe idle.
     ///
-    /// Then, like `open_for_query`, it settles briefly and discards input once.
+    /// Pass `read_only_dtr(board)`. Then it settles briefly and discards input
+    /// once.
     pub fn open_for_monitor(port_name: &str, dtr: bool) -> DfuResult<Self> {
         let normalized_name = normalize_port_name(port_name);
 
@@ -172,7 +132,7 @@ impl SerialTransport {
     /// before the driver is fully ready, but benefits all platforms.
     ///
     /// NOTE: this pulses DTR and therefore **resets the device**. That is
-    /// intentional for the DFU flow. Use `open_for_query` for read-only work.
+    /// intentional for the DFU flow. Use `open_for_monitor` for read-only work.
     pub fn open_with_baud(port_name: &str, baud_rate: u32) -> DfuResult<Self> {
         let normalized_name = normalize_port_name(port_name);
 
@@ -701,6 +661,13 @@ fn normalize_port_name(name: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn read_only_dtr_raises_dtr_only_for_v2() {
+        assert!(SerialTransport::read_only_dtr(Some("nrf52")));
+        assert!(!SerialTransport::read_only_dtr(Some("esp32s3")));
+        assert!(!SerialTransport::read_only_dtr(None));
+    }
 
     #[test]
     fn drain_returns_ok_once_queue_empties() {
