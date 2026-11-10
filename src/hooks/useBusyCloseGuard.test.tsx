@@ -45,7 +45,7 @@ describe('useBusyCloseGuard', () => {
   });
 
   it('lets the window close while only viewing logs', () => {
-    useLogsStore.setState({ viewing: true });
+    useLogsStore.setState({ phase: 'streaming' });
     const { result } = renderHook(() => useBusyCloseGuard());
     const preventDefault = vi.fn();
     act(() => handler?.({ preventDefault }));
@@ -54,7 +54,7 @@ describe('useBusyCloseGuard', () => {
   });
 
   it('still blocks closing when a flash runs while viewing', () => {
-    useLogsStore.setState({ viewing: true });
+    useLogsStore.setState({ phase: 'streaming' });
     useWizardStore.setState({ currentStep: 2, updateResult: null });
     renderHook(() => useBusyCloseGuard());
     const preventDefault = vi.fn();

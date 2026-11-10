@@ -16,13 +16,15 @@ describe('useIsBusy', () => {
     expect(renderHook(() => useIsBusy()).result.current).toEqual({ busy: false, kind: null });
   });
 
-  it('returns monitor while devices are being viewed', () => {
-    useLogsStore.setState({ viewing: true });
+  it('returns monitor only while logs stream', () => {
+    useLogsStore.setState({ phase: 'streaming' });
     expect(renderHook(() => useIsBusy()).result.current).toEqual({ busy: true, kind: 'monitor' });
+    useLogsStore.setState({ phase: 'stopped' });
+    expect(renderHook(() => useIsBusy()).result.current).toEqual({ busy: false, kind: null });
   });
 
   it('ranks a flash, then a configure write, above viewing', () => {
-    useLogsStore.setState({ viewing: true });
+    useLogsStore.setState({ phase: 'streaming' });
     useTherapyStore.setState({ step: 2, result: null });
     expect(renderHook(() => useIsBusy()).result.current.kind).toBe('configure');
     useWizardStore.setState({ currentStep: 2, updateResult: null });

@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from 'react';
+import { useId, useRef, useState, type Ref } from 'react';
 import { Radar, TriangleAlert } from 'lucide-react';
 import { Banner } from '@/components/ui/banner';
 import { Button } from '@/components/ui/button';
@@ -56,10 +56,12 @@ interface DeviceSelectionProps {
   selectedDevices: Device[];
   onDevicesChange: (devices: Device[]) => void;
   onRoleChange?: (devicePath: string, role: DeviceRole) => void;
+  /** Lets the page move focus to the Choose Devices title */
+  titleRef?: Ref<HTMLHeadingElement>;
 }
 
-/** The Choose Devices card, shared by the Firmware and Configure pages. */
-export function DeviceSelection({ mode = 'flash', selectedDevices, onDevicesChange, onRoleChange }: DeviceSelectionProps) {
+/** The Choose Devices card, shared by the Firmware, Configure and Logs pages. */
+export function DeviceSelection({ mode = 'flash', selectedDevices, onDevicesChange, onRoleChange, titleRef }: DeviceSelectionProps) {
   const flash = mode === 'flash';
   const [notice, setNotice] = useState<string | null>(null);
   const [autoAssigned, setAutoAssigned] = useState(false);
@@ -122,6 +124,7 @@ export function DeviceSelection({ mode = 'flash', selectedDevices, onDevicesChan
   return (
     <Card
       title="Choose Devices"
+      titleRef={titleRef}
       actions={
         <Button variant="quiet" icon={Radar} onClick={rescan} disabled={loading}>
           Rescan
