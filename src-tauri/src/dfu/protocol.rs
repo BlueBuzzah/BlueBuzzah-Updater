@@ -16,11 +16,12 @@ use serde::{Deserialize, Serialize};
 
 use super::config::{
     calculate_erase_wait_time, get_bootloader_timeout, get_reboot_settle_delay, get_reboot_timeout,
-    ACK_TIMEOUT_MS, CONFIG_RETRY_DELAY_MS, FIRMWARE_TRANSFER_TIMEOUT_SECS,
-    FLASH_PAGE_WRITE_TIME_MS, FRAMES_PER_FLASH_PAGE, MAX_CONFIG_RETRIES, MAX_PACKET_RETRIES,
-    PROFILE_CONFIG_TIMEOUT_MS, PROFILE_GENTLE_COMMAND, PROFILE_HYBRID_COMMAND,
-    PROFILE_NOISY_COMMAND, PROFILE_REGULAR_COMMAND, RETRY_BASE_DELAY_MS, ROLE_CONFIG_DEADLINE_MS,
-    ROLE_CONFIG_TIMEOUT_MS, ROLE_PRIMARY_COMMAND, ROLE_SECONDARY_COMMAND,
+    ACK_TIMEOUT_MS, BOOT_DRAIN_MAX_MS, BOOT_DRAIN_SILENCE_MS, BOOT_READY_MARKER,
+    CONFIG_RETRY_DELAY_MS, FIRMWARE_TRANSFER_TIMEOUT_SECS, FLASH_PAGE_WRITE_TIME_MS,
+    FRAMES_PER_FLASH_PAGE, MAX_CONFIG_RETRIES, MAX_PACKET_RETRIES, PROFILE_CONFIG_TIMEOUT_MS,
+    PROFILE_GENTLE_COMMAND, PROFILE_HYBRID_COMMAND, PROFILE_NOISY_COMMAND, PROFILE_REGULAR_COMMAND,
+    RETRY_BASE_DELAY_MS, ROLE_CONFIG_DEADLINE_MS, ROLE_CONFIG_TIMEOUT_MS, ROLE_PRIMARY_COMMAND,
+    ROLE_SECONDARY_COMMAND,
 };
 use super::device::{
     get_device_by_port, snapshot_ports, wait_for_application_by_serial,
@@ -907,7 +908,8 @@ fn send_role_command<L: Fn(&str), C: Fn() -> bool>(
     }
 
     // Drain boot output using enhanced detection
-    drain_boot_output_until(&mut transport, is_cancelled)?;
+    let found_ready = drain_boot_output_until(&mut transport, is_cancelled)?;
+    log_boot_drain(log, found_ready);
 
     // Clear any remaining input
     transport.clear_input().ok();
@@ -980,27 +982,51 @@ fn send_role_command<L: Fn(&str), C: Fn() -> bool>(
     })
 }
 
-/// Drain boot output with marker-based and silence-based detection.
+/// Drain boot output until the firmware prints `[READY]`, falling back to
+/// `BOOT_DRAIN_SILENCE_MS` of silence (firmware without `[READY]`), capped at
+/// `BOOT_DRAIN_MAX_MS`.
 ///
-/// Returns true if a boot completion marker was detected.
-fn drain_boot_output(transport: &mut SerialTransport) -> DfuResult<bool> {
+/// Returns true if `[READY]` was seen.
+fn drain_boot_output<T: DfuTransport>(transport: &mut T) -> DfuResult<bool> {
     drain_boot_output_until(transport, &|| false)
 }
 
+/// Log how the boot drain ended, so a log shows whether `[READY]` arrived.
+fn log_boot_drain<L: Fn(&str)>(log: &L, found_ready: bool) {
+    if found_ready {
+        log("[READY] seen");
+    } else {
+        log(&format!(
+            "No [READY]; boot drain ended on silence or the {} s cap",
+            BOOT_DRAIN_MAX_MS / 1000
+        ));
+    }
+}
+
 /// `drain_boot_output` that returns `Cancelled` between reads once stopped.
-fn drain_boot_output_until<C: Fn() -> bool>(
-    transport: &mut SerialTransport,
+fn drain_boot_output_until<T: DfuTransport, C: Fn() -> bool>(
+    transport: &mut T,
     is_cancelled: &C,
 ) -> DfuResult<bool> {
+    drain_boot_output_with(
+        transport,
+        is_cancelled,
+        BOOT_DRAIN_SILENCE_MS,
+        BOOT_DRAIN_MAX_MS,
+    )
+}
+
+/// `drain_boot_output_until` with its silence threshold and cap as arguments.
+fn drain_boot_output_with<T: DfuTransport, C: Fn() -> bool>(
+    transport: &mut T,
+    is_cancelled: &C,
+    silence_ms: u64,
+    max_ms: u64,
+) -> DfuResult<bool> {
     let mut buffer = [0u8; 256];
-    let drain_timeout = Duration::from_millis(5000);
+    let drain_timeout = Duration::from_millis(max_ms);
     let drain_start = Instant::now();
     let mut last_data_time = Instant::now();
-    const SILENCE_THRESHOLD_MS: u64 = 500;
-
-    // Known boot completion markers from BlueBuzzah firmware
-    const BOOT_MARKERS: &[&str] = &["[READY]", "[INIT]", "[BOOT]", "BlueBuzzah"];
-    let mut found_marker = false;
     let mut accumulated = String::new();
 
     while drain_start.elapsed() < drain_timeout {
@@ -1011,33 +1037,29 @@ fn drain_boot_output_until<C: Fn() -> bool>(
         if bytes_read > 0 {
             last_data_time = Instant::now();
 
-            // Accumulate for marker detection
-            if let Ok(text) = std::str::from_utf8(&buffer[..bytes_read]) {
-                accumulated.push_str(text);
-                // Check for boot markers
-                for marker in BOOT_MARKERS {
-                    if accumulated.contains(marker) {
-                        found_marker = true;
-                        break;
-                    }
-                }
+            // Lossy, so one bad byte can't discard the chunk holding the marker
+            accumulated.push_str(&String::from_utf8_lossy(&buffer[..bytes_read]));
+            if accumulated.contains(BOOT_READY_MARKER) {
+                // Extra safety wait after the marker
+                std::thread::sleep(Duration::from_millis(200));
+                return Ok(true);
             }
-            // Truncate to prevent unbounded growth
+            // Truncate to prevent unbounded growth, keeping a marker split
+            // across reads; cut on a char boundary
             if accumulated.len() > 1024 {
-                accumulated = accumulated[accumulated.len() - 512..].to_string();
+                let mut cut = accumulated.len() - 512;
+                while !accumulated.is_char_boundary(cut) {
+                    cut += 1;
+                }
+                accumulated.drain(..cut);
             }
-        } else if last_data_time.elapsed() > Duration::from_millis(SILENCE_THRESHOLD_MS) {
-            // No data for 500ms - boot likely complete
+        } else if last_data_time.elapsed() > Duration::from_millis(silence_ms) {
+            // No data for the silence threshold - boot likely complete
             break;
         }
     }
 
-    // Extra safety wait after marker detection
-    if found_marker {
-        std::thread::sleep(Duration::from_millis(200));
-    }
-
-    Ok(found_marker)
+    Ok(false)
 }
 
 /// Configure the device therapy profile via serial command (serial number tracking).
@@ -1121,12 +1143,8 @@ pub fn configure_device_profile_flexible<L: Fn(&str)>(
     log("Draining boot output...");
 
     // Use enhanced boot detection with marker support
-    let found_marker = drain_boot_output(&mut transport)?;
-    if found_marker {
-        log("Boot completion marker detected");
-    } else {
-        log("Boot detected via silence threshold");
-    }
+    let found_ready = drain_boot_output(&mut transport)?;
+    log_boot_drain(&log, found_ready);
 
     // Clear any remaining input
     transport.clear_input().ok();
@@ -1375,12 +1393,8 @@ fn configure_device_with_settings_inner<L: Fn(&str)>(
     }
 
     log("Draining boot output...");
-    let found_marker = drain_boot_output(&mut transport)?;
-    if found_marker {
-        log("Boot completion marker detected");
-    } else {
-        log("Boot detected via silence threshold");
-    }
+    let found_ready = drain_boot_output(&mut transport)?;
+    log_boot_drain(&log, found_ready);
 
     transport.clear_input().ok();
     std::thread::sleep(Duration::from_millis(100));
@@ -1493,7 +1507,8 @@ pub fn configure_custom_profile<L: Fn(&str) + Clone>(
     }
 
     log("Draining boot output...");
-    drain_boot_output(&mut transport)?;
+    let found_ready = drain_boot_output(&mut transport)?;
+    log_boot_drain(&log, found_ready);
     transport.clear_input().ok();
     std::thread::sleep(Duration::from_millis(100));
 
@@ -1555,12 +1570,15 @@ pub fn configure_custom_profile<L: Fn(&str) + Clone>(
         }
     };
 
-    if let Err(e) = drain_boot_output(&mut transport) {
-        return Ok(ProfileConfigOutcome::partial_with_detail(
-            "Profile loaded, but its boot output could not be read to confirm the \
-             parameters. It may still be running its previous custom settings.",
-            e.to_string(),
-        ));
+    match drain_boot_output(&mut transport) {
+        Ok(found_ready) => log_boot_drain(&log, found_ready),
+        Err(e) => {
+            return Ok(ProfileConfigOutcome::partial_with_detail(
+                "Profile loaded, but its boot output could not be read to confirm the \
+                 parameters. It may still be running its previous custom settings.",
+                e.to_string(),
+            ))
+        }
     }
     transport.clear_input().ok();
     std::thread::sleep(Duration::from_millis(100));
@@ -1599,20 +1617,23 @@ mod tests {
     }
 
     /// A stop during the boot-output drain must release the port promptly, not
-    /// after the drain's 5 s budget, or a quick Try Again finds the port busy.
+    /// after the drain's 20 s budget, or a quick Try Again finds the port busy.
+    /// The chatter pauses longer than the old 500 ms silence threshold (v3
+    /// motor diagnostics do), and SET_ROLE must not go out in that pause.
     #[cfg(unix)]
     #[test]
     fn stop_during_boot_drain_returns_promptly() {
-        use std::io::Write;
-        use std::sync::atomic::AtomicUsize;
+        use serialport::SerialPort;
+        use std::io::{Read, Write};
         let (mut master, slave) = serialport::TTYPort::pair().unwrap();
+        let mut reader = master.try_clone().unwrap();
         let transport = SerialTransport::from_port(Box::new(slave));
         let noisy = Arc::new(AtomicBool::new(true));
         let still_noisy = Arc::clone(&noisy);
         std::thread::spawn(move || {
             while still_noisy.load(Ordering::SeqCst) {
                 let _ = master.write_all(b"[BOOT] diagnostics\n");
-                std::thread::sleep(Duration::from_millis(100));
+                std::thread::sleep(Duration::from_millis(1500));
             }
         });
         let id = DeviceIdentifier::Serial {
@@ -1621,18 +1642,26 @@ mod tests {
             pid: 0x8029,
             port_pattern: String::new(),
         };
-        // Not stopped at the first check, stopped from then on.
-        let calls = AtomicUsize::new(0);
-        let stop = || calls.fetch_add(1, Ordering::SeqCst) > 0;
+        // Not stopped until well into the first pause in the chatter.
         let start = Instant::now();
+        let stop = || start.elapsed() > Duration::from_millis(1200);
         let err = send_role_command(transport, ROLE_PRIMARY_COMMAND, &id, &|_: &str| {}, &stop)
             .unwrap_err();
         noisy.store(false, Ordering::SeqCst);
         assert!(matches!(err, DfuError::Cancelled), "got {err:?}");
         assert!(
-            start.elapsed() < Duration::from_millis(1500),
+            start.elapsed() < Duration::from_millis(2000),
             "took {:?}",
             start.elapsed()
+        );
+        reader.set_timeout(Duration::from_millis(200)).unwrap();
+        let mut buf = [0u8; 64];
+        let sent = reader.read(&mut buf).unwrap_or(0);
+        assert_eq!(
+            sent,
+            0,
+            "sent {:?} during a pause in boot output",
+            String::from_utf8_lossy(&buf[..sent])
         );
     }
 
@@ -1659,6 +1688,144 @@ mod tests {
         let mut buf = [0u8; 64];
         let sent = master.read(&mut buf).unwrap_or(0);
         assert_eq!(sent, 0, "SET_ROLE was written after stop");
+    }
+
+    /// Replays boot output on a clock: each chunk arrives at its offset from
+    /// creation. Reads honor `timeout_ms`, so gaps look like real serial silence.
+    struct TimedTransport {
+        start: Instant,
+        chunks: std::collections::VecDeque<(u64, Vec<u8>)>,
+    }
+
+    impl TimedTransport {
+        fn new(chunks: Vec<(u64, &[u8])>) -> Self {
+            Self {
+                start: Instant::now(),
+                chunks: chunks.into_iter().map(|(at, b)| (at, b.to_vec())).collect(),
+            }
+        }
+    }
+
+    impl DfuTransport for TimedTransport {
+        fn write(&mut self, _data: &[u8]) -> DfuResult<()> {
+            Ok(())
+        }
+
+        fn read(&mut self, buffer: &mut [u8], timeout_ms: u64) -> DfuResult<usize> {
+            let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+            let due = match self.chunks.front() {
+                Some((at, _)) => self.start + Duration::from_millis(*at),
+                None => deadline,
+            };
+            if due >= deadline {
+                std::thread::sleep(deadline.saturating_duration_since(Instant::now()));
+                return Ok(0);
+            }
+            std::thread::sleep(due.saturating_duration_since(Instant::now()));
+            let (at, mut bytes) = self.chunks.pop_front().unwrap();
+            let len = bytes.len().min(buffer.len());
+            buffer[..len].copy_from_slice(&bytes[..len]);
+            // Like a real port, leave what didn't fit queued for the next read.
+            if len < bytes.len() {
+                self.chunks.push_front((at, bytes.split_off(len)));
+            }
+            Ok(len)
+        }
+
+        fn flush(&mut self) -> DfuResult<()> {
+            Ok(())
+        }
+
+        fn clear_input(&mut self) -> DfuResult<()> {
+            Ok(())
+        }
+
+        fn keep_alive(&mut self) -> DfuResult<()> {
+            Ok(())
+        }
+
+        fn is_healthy(&mut self) -> bool {
+            true
+        }
+    }
+
+    /// v3 boot chatter comes in bursts with pauses (scaled down here: 150 ms
+    /// pauses, 250 ms silence threshold). `[READY]` ends the drain at once,
+    /// even though the chatter carries on after it.
+    #[test]
+    fn boot_drain_ends_at_ready_despite_chatter() {
+        let mut chunks: Vec<(u64, &[u8])> = (0..5)
+            .map(|i| (i * 150, &b"[DIAG] silk port 3 (F2): MOTOR PRESENT\n"[..]))
+            .collect();
+        chunks.push((750, b"[READY]\n"));
+        chunks.extend((6..26).map(|i| (i * 150, &b"[DIAG] later\n"[..])));
+        let mut transport = TimedTransport::new(chunks);
+        let start = Instant::now();
+        let found = drain_boot_output_with(&mut transport, &|| false, 250, 10_000).unwrap();
+        let took = start.elapsed();
+        assert!(found, "[READY] not detected");
+        assert!(
+            took >= Duration::from_millis(750) && took < Duration::from_millis(1500),
+            "took {took:?}"
+        );
+    }
+
+    /// A stop mid-chatter ends the drain with `Cancelled` within one read, even
+    /// though neither silence nor the cap would end it yet.
+    #[test]
+    fn boot_drain_returns_cancelled_when_stopped_mid_chatter() {
+        let chunks: Vec<(u64, &[u8])> = (0..20)
+            .map(|i| (i * 150, &b"[DIAG] silk port 3 (F2): MOTOR PRESENT\n"[..]))
+            .collect();
+        let mut transport = TimedTransport::new(chunks);
+        let start = Instant::now();
+        let stop = || start.elapsed() > Duration::from_millis(400);
+        let err = drain_boot_output_with(&mut transport, &stop, 250, 10_000).unwrap_err();
+        let took = start.elapsed();
+        assert!(matches!(err, DfuError::Cancelled), "got {err:?}");
+        assert!(
+            took >= Duration::from_millis(400) && took < Duration::from_millis(1000),
+            "took {took:?}"
+        );
+    }
+
+    /// Without `[READY]` (older firmware), silence ends the drain, not the cap.
+    /// The old markers no longer count.
+    #[test]
+    fn boot_drain_without_ready_ends_on_silence() {
+        let mut transport = TimedTransport::new(vec![
+            (0, b"[BOOT] BlueBuzzah v2.2.0\n"),
+            (150, b"[INIT] motors\n"),
+            (300, b"[DIAG] done\n"),
+        ]);
+        let start = Instant::now();
+        let found = drain_boot_output_with(&mut transport, &|| false, 250, 10_000).unwrap();
+        let took = start.elapsed();
+        assert!(!found, "an old boot marker ended the drain");
+        assert!(
+            took >= Duration::from_millis(550) && took < Duration::from_millis(3000),
+            "took {took:?}"
+        );
+    }
+
+    /// `[READY]` split across two reads is still found, and a stray invalid
+    /// byte in the chunk does not throw the chunk away.
+    #[test]
+    fn boot_drain_finds_ready_split_across_reads() {
+        let mut transport = TimedTransport::new(vec![(0, b"boot done [RE"), (50, b"ADY]\n\xff")]);
+        let found = drain_boot_output_with(&mut transport, &|| false, 250, 10_000).unwrap();
+        assert!(found, "split [READY] not detected");
+    }
+
+    /// Trimming the accumulated text must land on a char boundary, or
+    /// multibyte boot output panics the drain.
+    #[test]
+    fn boot_drain_trims_multibyte_output_safely() {
+        let mut text = "\u{e9}".repeat(600).into_bytes();
+        text.push(b'x');
+        let mut transport = TimedTransport::new(vec![(0, &text), (50, b"[READY]\n")]);
+        let found = drain_boot_output_with(&mut transport, &|| false, 250, 10_000).unwrap();
+        assert!(found);
     }
 
     #[test]

@@ -139,11 +139,25 @@ pub const REBOOT_SETTLE_DELAY_MS: u64 = 2000;
 /// Timeout for role configuration command.
 pub const ROLE_CONFIG_TIMEOUT_MS: u64 = 5000;
 
+/// Boot output silence that ends the boot drain when no `[READY]` arrives.
+/// Longer than the firmware's silent 5 s red double-blink after a failed boot
+/// motor check and its 2 s `DIAG_GO_TIMEOUT_MS` motor probe gaps. Firmware
+/// without `[READY]` (every release so far) waits this long once its output stops.
+pub const BOOT_DRAIN_SILENCE_MS: u64 = 6500;
+
+/// Upper bound on the boot drain.
+pub const BOOT_DRAIN_MAX_MS: u64 = 20_000;
+
+/// Line the firmware prints once boot is done and it accepts commands.
+pub const BOOT_READY_MARKER: &str = "[READY]";
+
 /// Max wait for the device to take queued serial output before `flush` gives up.
 pub const SERIAL_FLUSH_TIMEOUT_MS: u64 = 1000;
 
-/// Overall bound on the post-flash role step, retries included. Sized for three
-/// attempts at the Windows worst-case port open (~60 s each); Stop ends it sooner.
+/// Overall bound on the post-flash role step, retries included. Each attempt can
+/// spend the worst-case port open (retries and backoff), the boot drain cap, the
+/// flush and the ack wait, and the last also waits for the reboot;
+/// `role_deadline_covers_worst_case_retries` checks the sum. Stop ends it sooner.
 pub const ROLE_CONFIG_DEADLINE_MS: u64 = 300_000;
 
 // ============================================================================
@@ -453,9 +467,9 @@ mod tests {
     #[test]
     fn role_deadline_covers_worst_case_retries() {
         // Every role attempt can spend the Windows worst-case port open, the boot
-        // drain (5 s), the flush and the ack wait; the last also waits for reboot.
+        // drain cap, the flush and the ack wait; the last also waits for reboot.
         let open = MAX_PORT_OPEN_RETRIES as u64 * (PORT_OPEN_TIMEOUT_MS + PORT_OPEN_MAX_DELAY_MS);
-        let attempt = open + 5000 + SERIAL_FLUSH_TIMEOUT_MS + ROLE_CONFIG_TIMEOUT_MS;
+        let attempt = open + BOOT_DRAIN_MAX_MS + SERIAL_FLUSH_TIMEOUT_MS + ROLE_CONFIG_TIMEOUT_MS;
         let attempts = MAX_CONFIG_RETRIES as u64 + 1;
         let between = MAX_CONFIG_RETRIES as u64 * (CONFIG_RETRY_DELAY_MS + 5000);
         let worst =
@@ -463,6 +477,16 @@ mod tests {
         assert!(
             ROLE_CONFIG_DEADLINE_MS >= worst,
             "deadline {ROLE_CONFIG_DEADLINE_MS} < worst case {worst}"
+        );
+    }
+
+    #[test]
+    fn boot_drain_silence_outlasts_motor_check_blink() {
+        // A failed v3 boot motor check blinks red for 5 s and prints nothing;
+        // a shorter silence ends the drain mid-blink, before boot is done.
+        assert!(
+            BOOT_DRAIN_SILENCE_MS > 5000,
+            "silence {BOOT_DRAIN_SILENCE_MS} ms ends the drain inside the 5 s motor check blink"
         );
     }
 
