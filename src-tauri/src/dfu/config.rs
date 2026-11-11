@@ -139,6 +139,16 @@ pub const REBOOT_SETTLE_DELAY_MS: u64 = 2000;
 /// Timeout for role configuration command.
 pub const ROLE_CONFIG_TIMEOUT_MS: u64 = 5000;
 
+/// Boot output silence that ends the boot drain when no `[READY]` arrives.
+/// Longer than the pauses in v3 boot motor diagnostics.
+pub const BOOT_DRAIN_SILENCE_MS: u64 = 2500;
+
+/// Upper bound on the boot drain.
+pub const BOOT_DRAIN_MAX_MS: u64 = 20_000;
+
+/// Line the firmware prints once boot is done and it accepts commands.
+pub const BOOT_READY_MARKER: &str = "[READY]";
+
 /// Max wait for the device to take queued serial output before `flush` gives up.
 pub const SERIAL_FLUSH_TIMEOUT_MS: u64 = 1000;
 
@@ -453,9 +463,9 @@ mod tests {
     #[test]
     fn role_deadline_covers_worst_case_retries() {
         // Every role attempt can spend the Windows worst-case port open, the boot
-        // drain (5 s), the flush and the ack wait; the last also waits for reboot.
+        // drain cap, the flush and the ack wait; the last also waits for reboot.
         let open = MAX_PORT_OPEN_RETRIES as u64 * (PORT_OPEN_TIMEOUT_MS + PORT_OPEN_MAX_DELAY_MS);
-        let attempt = open + 5000 + SERIAL_FLUSH_TIMEOUT_MS + ROLE_CONFIG_TIMEOUT_MS;
+        let attempt = open + BOOT_DRAIN_MAX_MS + SERIAL_FLUSH_TIMEOUT_MS + ROLE_CONFIG_TIMEOUT_MS;
         let attempts = MAX_CONFIG_RETRIES as u64 + 1;
         let between = MAX_CONFIG_RETRIES as u64 * (CONFIG_RETRY_DELAY_MS + 5000);
         let worst =

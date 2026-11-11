@@ -346,11 +346,12 @@ pub fn build_custom_batch(p: &CustomProfileParams, current_amp_max: u8) -> Strin
 
 /// How long to keep asking a freshly-rebooted glove whether its menu is up.
 ///
-/// `drain_boot_output` stops after 500 ms of silence, which is not a reliable
-/// readiness test on v3: its boot-time motor diagnostics ("[DIAG] silk port 3
-/// (F2): MOTOR PRESENT") emit in bursts with gaps longer than that, so the
-/// drain returns while the device is still booting and the first menu command
-/// is swallowed. The only trustworthy readiness signal is the menu answering.
+/// `drain_boot_output` ends at `[READY]`, but firmware that never prints it
+/// falls back to a silence threshold, which is not a reliable readiness test on
+/// v3: its boot-time motor diagnostics ("[DIAG] silk port 3 (F2): MOTOR
+/// PRESENT") emit in bursts with gaps, so the drain can return while the device
+/// is still booting and the first menu command is swallowed. The only
+/// trustworthy readiness signal is the menu answering.
 pub const MENU_READY_TIMEOUT_MS: u64 = 20_000;
 
 /// Budget for the pre-flight role probe, before anything is changed.
@@ -1075,10 +1076,10 @@ SESSION:90\nAMPMIN:70\nAMPMAX:100\nPATTERN:rndp\nMIRROR:1\nJITTER:23.5\nFINGERS:
         );
     }
 
-    /// v3 boot emits motor diagnostics in bursts with gaps longer than
-    /// drain_boot_output's 500ms silence threshold, so the drain returns while
-    /// the glove is still booting and the first INFO is swallowed. Readiness
-    /// has to be probed, not assumed.
+    /// v3 boot emits motor diagnostics in bursts with gaps, so without
+    /// `[READY]` drain_boot_output's silence fallback can return while the
+    /// glove is still booting and the first INFO is swallowed. Readiness has
+    /// to be probed, not assumed.
     #[test]
     fn menu_ready_poll_survives_boot_chatter_before_the_menu_answers() {
         let mut transport = ScriptedTransport::new(vec![
