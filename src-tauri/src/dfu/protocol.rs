@@ -908,7 +908,8 @@ fn send_role_command<L: Fn(&str), C: Fn() -> bool>(
     }
 
     // Drain boot output using enhanced detection
-    drain_boot_output_until(&mut transport, is_cancelled)?;
+    let found_ready = drain_boot_output_until(&mut transport, is_cancelled)?;
+    log_boot_drain(log, found_ready);
 
     // Clear any remaining input
     transport.clear_input().ok();
@@ -988,6 +989,18 @@ fn send_role_command<L: Fn(&str), C: Fn() -> bool>(
 /// Returns true if `[READY]` was seen.
 fn drain_boot_output<T: DfuTransport>(transport: &mut T) -> DfuResult<bool> {
     drain_boot_output_until(transport, &|| false)
+}
+
+/// Log how the boot drain ended, so a log shows whether `[READY]` arrived.
+fn log_boot_drain<L: Fn(&str)>(log: &L, found_ready: bool) {
+    if found_ready {
+        log("[READY] seen");
+    } else {
+        log(&format!(
+            "No [READY]; boot drain ended on silence or the {} s cap",
+            BOOT_DRAIN_MAX_MS / 1000
+        ));
+    }
 }
 
 /// `drain_boot_output` that returns `Cancelled` between reads once stopped.
@@ -1130,12 +1143,8 @@ pub fn configure_device_profile_flexible<L: Fn(&str)>(
     log("Draining boot output...");
 
     // Use enhanced boot detection with marker support
-    let found_marker = drain_boot_output(&mut transport)?;
-    if found_marker {
-        log("Boot completion marker detected");
-    } else {
-        log("Boot detected via silence threshold");
-    }
+    let found_ready = drain_boot_output(&mut transport)?;
+    log_boot_drain(&log, found_ready);
 
     // Clear any remaining input
     transport.clear_input().ok();
@@ -1384,12 +1393,8 @@ fn configure_device_with_settings_inner<L: Fn(&str)>(
     }
 
     log("Draining boot output...");
-    let found_marker = drain_boot_output(&mut transport)?;
-    if found_marker {
-        log("Boot completion marker detected");
-    } else {
-        log("Boot detected via silence threshold");
-    }
+    let found_ready = drain_boot_output(&mut transport)?;
+    log_boot_drain(&log, found_ready);
 
     transport.clear_input().ok();
     std::thread::sleep(Duration::from_millis(100));
@@ -1502,7 +1507,8 @@ pub fn configure_custom_profile<L: Fn(&str) + Clone>(
     }
 
     log("Draining boot output...");
-    drain_boot_output(&mut transport)?;
+    let found_ready = drain_boot_output(&mut transport)?;
+    log_boot_drain(&log, found_ready);
     transport.clear_input().ok();
     std::thread::sleep(Duration::from_millis(100));
 
@@ -1564,12 +1570,15 @@ pub fn configure_custom_profile<L: Fn(&str) + Clone>(
         }
     };
 
-    if let Err(e) = drain_boot_output(&mut transport) {
-        return Ok(ProfileConfigOutcome::partial_with_detail(
-            "Profile loaded, but its boot output could not be read to confirm the \
-             parameters. It may still be running its previous custom settings.",
-            e.to_string(),
-        ));
+    match drain_boot_output(&mut transport) {
+        Ok(found_ready) => log_boot_drain(&log, found_ready),
+        Err(e) => {
+            return Ok(ProfileConfigOutcome::partial_with_detail(
+                "Profile loaded, but its boot output could not be read to confirm the \
+                 parameters. It may still be running its previous custom settings.",
+                e.to_string(),
+            ))
+        }
     }
     transport.clear_input().ok();
     std::thread::sleep(Duration::from_millis(100));
@@ -1757,6 +1766,25 @@ mod tests {
         assert!(found, "[READY] not detected");
         assert!(
             took >= Duration::from_millis(750) && took < Duration::from_millis(1500),
+            "took {took:?}"
+        );
+    }
+
+    /// A stop mid-chatter ends the drain with `Cancelled` within one read, even
+    /// though neither silence nor the cap would end it yet.
+    #[test]
+    fn boot_drain_returns_cancelled_when_stopped_mid_chatter() {
+        let chunks: Vec<(u64, &[u8])> = (0..20)
+            .map(|i| (i * 150, &b"[DIAG] silk port 3 (F2): MOTOR PRESENT\n"[..]))
+            .collect();
+        let mut transport = TimedTransport::new(chunks);
+        let start = Instant::now();
+        let stop = || start.elapsed() > Duration::from_millis(400);
+        let err = drain_boot_output_with(&mut transport, &stop, 250, 10_000).unwrap_err();
+        let took = start.elapsed();
+        assert!(matches!(err, DfuError::Cancelled), "got {err:?}");
+        assert!(
+            took >= Duration::from_millis(400) && took < Duration::from_millis(1000),
             "took {took:?}"
         );
     }

@@ -88,7 +88,7 @@ grep -rnE "text-(xs|sm|base|lg|[0-9]?xl)\b|text-\[|#[0-9a-fA-F]{3,8}\b|rgba?\(|h
 
 - Serial commands: `SET_ROLE:PRIMARY|SECONDARY`, `SET_PROFILE:REGULAR|NOISY|HYBRID|GENTLE`, advanced-setting commands from `settings.rs::to_pre_profile_commands()`
 - Response markers parsed by `protocol.rs`: `[CONFIG]`, `[ERROR]`, `[SETTING]`, `"Role set to"`, `"Profile set to"` — hardcoded in firmware `main.cpp` serial output; rewording either side breaks the other
-- Boot marker in `drain_boot_output`: `[READY]` ends the drain (`BOOT_READY_MARKER`); without it, 2.5 s of silence ends it (20 s cap)
+- Boot marker in `drain_boot_output`: `[READY]` ends the drain (`BOOT_READY_MARKER`); without it, 6.5 s of silence ends it (20 s cap)
 - Firmware distribution: `FirmwareService.ts` fetches `https://api.github.com/repos/BlueBuzzah/BlueBuzzah-Firmware/releases`; asset name determines board — `NRF_ASSET_PATTERN` (`BlueBuzzah-Firmware-<tag>-<sha>.zip`) is the Nordic DFU package (v2), `V3_ASSET_PATTERN` (`BlueBuzzah-Firmware-v3-<tag>-<sha>.zip`) is the v3 package. 60 req/hr unauthenticated.
 - v3 manifest schema (`esp/manifest.rs`) is produced by BlueBuzzah-Firmware `scripts/package_penta.py`; keep the two in sync on any manifest field change.
 - Menu protocol (Custom therapy profile): the Updater sends `INFO`, `PROFILE_LOAD:4`, `PROFILE_GET`, and `PROFILE_CUSTOM:KEY:VALUE…` over app-mode serial and parses the `[MENU-TX] KEY:VALUE\n…\x04` frame (`dfu/menu.rs`). This works only because those commands are absent from firmware `INTERNAL_MESSAGES` (`include/internal_messages.h` — the single definition site, shared by `src/menu_controller.cpp` and the native test) — adding any of them there silently severs the Updater from the device, which is why `test_menu_controller` guards it.
