@@ -1,7 +1,7 @@
 //! Device detection for supported BlueBuzzah hardware.
 //!
-//! Detects Adafruit Feather nRF52840 (v2) and Seeed XIAO ESP32-S3 /
-//! PentaBuzzer (v3) devices by USB VID/PID.
+//! Detects Adafruit Feather nRF52840 (v2) and ESP32-S3 (v3) devices by USB
+//! VID/PID.
 //! Provides flexible device tracking via serial number or VID/PID+port pattern.
 
 use std::time::{Duration, Instant};
@@ -205,7 +205,7 @@ fn is_same_device_family(pid1: u16, pid2: u16) -> bool {
 /// Find all connected supported devices (nRF52 v2 and ESP32-S3 v3).
 ///
 /// Scans available serial ports and returns those matching Adafruit
-/// nRF52840 or Espressif ESP32-S3 (XIAO / PentaBuzzer) VID/PID combinations.
+/// nRF52840 or Espressif ESP32-S3 (v3) VID/PID combinations.
 ///
 /// On macOS, filters out `tty.*` ports to avoid duplicates (each device
 /// appears as both `cu.*` and `tty.*`). The `cu.*` variant is preferred

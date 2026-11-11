@@ -492,7 +492,7 @@ async fn flash_dfu_firmware_inner(
     result.map_err(|e| format!("{}", e))
 }
 
-/// Flash a v3 (ESP32-S3 / PentaBuzzer) firmware package to a device.
+/// Flash a v3 (ESP32-S3) firmware package to a device.
 ///
 /// # Arguments
 /// * `serial_port` - Serial port of the device

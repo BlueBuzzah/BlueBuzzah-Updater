@@ -11,7 +11,7 @@ Device firmware updater for BlueBuzzah devices. Supports both hardware revisions
 | Hardware | Board | Flash protocol |
 | -------- | ----- | -------------- |
 | BlueBuzzah v2 | Adafruit Feather nRF52840 Express | Nordic Secure DFU over serial |
-| BlueBuzzah v3 (PentaBuzzer) | Seeed XIAO ESP32-S3 | esptool protocol via espflash |
+| BlueBuzzah v3 | ESP32-S3-WROOM-1U-N8R8 | esptool protocol via espflash |
 
 The correct firmware package and flash protocol are selected automatically based on the detected hardware.
 

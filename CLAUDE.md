@@ -1,6 +1,6 @@
 # BlueBuzzah Updater
 
-Tauri 2.0 desktop app that flashes BlueBuzzah firmware over serial to two hardware targets — Adafruit Feather nRF52840 gloves (Nordic Secure DFU) and PentaBuzzer / Seeed XIAO ESP32-S3 boards (esptool protocol via espflash) — then configures device role and therapy profile post-flash.
+Tauri 2.0 desktop app that flashes BlueBuzzah firmware over serial to two hardware targets — Adafruit Feather nRF52840 gloves (Nordic Secure DFU) and v3 boards built on the ESP32-S3-WROOM-1U-N8R8 module (esptool protocol via espflash) — then configures device role and therapy profile post-flash.
 
 **Frontend**: React 18 + TypeScript + Vite | Zustand, design-system `bb-` components (Radix for dialogs), Tailwind (layout), Lucide
 **Backend**: Rust + Tauri 2.0 | Nordic DFU protocol (nRF52840) and espflash (ESP32-S3) over serial
@@ -68,7 +68,7 @@ grep -rnE "text-(xs|sm|base|lg|[0-9]?xl)\b|text-\[|#[0-9a-fA-F]{3,8}\b|rgba?\(|h
 | `dfu/menu.rs` | App-mode menu protocol — `[MENU-TX]` frame parsing, `PROFILE_GET`/`PROFILE_CUSTOM` batching (`build_custom_batch`) |
 | `dfu/config.rs` | VID/PIDs, opcodes, all timing/retry constants |
 | `dfu/error.rs` | `DfuError` taxonomy — `is_retriable()`, `is_operation_retriable()`, stable `error_code()` (DFU-0xx) |
-| `esp/manifest.rs` | v3 (ESP32-S3/PentaBuzzer) firmware zip parsing — validates `manifest_version` 1, board `pentabuzzer_esp32s3`, chip `esp32s3`, per-part SHA256; parses manifest flash offsets |
+| `esp/manifest.rs` | v3 (ESP32-S3) firmware zip parsing — validates `manifest_version` 1, board `pentabuzzer_esp32s3`, chip `esp32s3`, per-part SHA256; parses manifest flash offsets |
 | `esp/flasher.rs` | espflash 4.5-based multi-part flash over the ESP32-S3 USB-JTAG/Serial bootloader; reuses `DfuStage` progress and `configure_role_with_deadline` role config; exposes Tauri command `flash_v3_firmware` |
 | `commands/` | Tauri command boundary (`dfu.rs`, `firmware.rs`, `settings.rs`, `monitor.rs`: read-only serial monitor, opens with `SerialTransport::open_for_monitor(port, dtr)`: RTS low first, then DTR high for v2 (TinyUSB CDC only sends while DTR is set) and low for v3 (avoids the DTR=0/RTS=1 reset state); the read loop never writes, flushes, clears input or toggles lines); stringifies errors for frontend |
 | `cache.rs` | Per-version firmware cache with SHA256 verification |
@@ -82,7 +82,7 @@ grep -rnE "text-(xs|sm|base|lg|[0-9]?xl)\b|text-\[|#[0-9a-fA-F]{3,8}\b|rgba?\(|h
 
 - VID `0x239A` (Adafruit); app PIDs `0x8029`/`0x802A`; bootloader PIDs `0x0029`/`0x002A`
 - DFU protocol at 115200 baud; bootloader entry via 1200-baud touch
-- VID `0x303A` (Espressif) / PID `0x1001` (ESP32-S3 USB-JTAG/Serial) identifies PentaBuzzer v3 boards; the same PID is used in both app and download mode, so `in_bootloader` is always `false` for v3 devices. Both boards use the `Nrf52Device` struct (v3 has `board == "esp32s3"`); `display_label()` yields "BlueBuzzah v3 (port)", "BlueBuzzah v2 (port)", or "nRF52840 Bootloader (port)".
+- VID `0x303A` (Espressif) / PID `0x1001` (ESP32-S3 USB-JTAG/Serial) identifies v3 boards; the same PID is used in both app and download mode, so `in_bootloader` is always `false` for v3 devices. Both boards use the `Nrf52Device` struct (v3 has `board == "esp32s3"`); `display_label()` yields "BlueBuzzah v3 (port)", "BlueBuzzah v2 (port)", or "nRF52840 Bootloader (port)".
 
 ## Cross-Repo Contract (must match BlueBuzzah-Firmware)
 

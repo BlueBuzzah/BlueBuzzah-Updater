@@ -1,6 +1,6 @@
 //! v3 firmware zip reader.
 //!
-//! Reads the v3 (ESP32-S3 / PentaBuzzer) firmware package: a zip archive
+//! Reads the v3 (ESP32-S3) firmware package: a zip archive
 //! produced by BlueBuzzah-Firmware `scripts/package_penta.py`: prebuilt
 //! flash images plus a flat `manifest.json` with `manifest_version`, `board`,
 //! `chip`, `flash{mode,freq,size}`, `application_version`, and
