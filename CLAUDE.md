@@ -5,6 +5,10 @@ Tauri 2.0 desktop app that flashes BlueBuzzah firmware over serial to two hardwa
 **Frontend**: React 18 + TypeScript + Vite | Zustand, design-system `bb-` components (Radix for dialogs), Tailwind (layout), Lucide
 **Backend**: Rust + Tauri 2.0 | Nordic DFU protocol (nRF52840) and espflash (ESP32-S3) over serial
 
+## Not a medical device
+
+BlueBuzzah is a volunteer-driven, open-source DIY project, not a medical or therapeutic device. Nothing written here (UI copy, docs, README, release notes, comments people read) may say or imply that it is a medical device, or that it is cleared, approved or authorized by the FDA or any other regulator. Regulatory status appears only in the verbatim legal disclaimer. Code identifiers, firmware commands, protocol fields, serial markers and file names are not copy and stay as they are. Full rule: "Not a medical device" in the workspace `CLAUDE.md` (`../../CLAUDE.md`).
+
 ## Design System — required for every UI/UX change
 
 Any change a person can see, hear or touch follows the **BlueBuzzah design system**. That includes layout, color, type, spacing, components, icons, logos and app icons, motion, accessibility, and copy (voice, error messages, the disclaimer). The design system lives in the BlueBuzzah workspace repo as the `bluebuzzah-design-system` skill, at `../../.claude/skills/bluebuzzah-design-system/` from this repo's root.
