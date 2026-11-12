@@ -637,9 +637,14 @@ fn left_in_bootloader(written: &Nrf52Device, devices: &[Nrf52Device]) -> bool {
 /// Warning shown when the device was flashed but its role step didn't finish.
 const ROLE_NOT_SET_WARNING: &str = "The role wasn't set. Update this device again to set it.";
 
-/// Warning shown when the device wasn't detected again after a reboot.
+/// Warning shown when the device wasn't detected again after the update's reboot.
 const DEVICE_NOT_BACK_WARNING: &str =
     "The device didn't come back after the update. Unplug it, plug it back in, then update it again.";
+
+/// Warning shown when the role was acknowledged but the device wasn't detected
+/// again after the restart that follows.
+const ROLE_SET_DEVICE_NOT_FOUND_WARNING: &str =
+    "The role is set, but the device wasn't found after it restarted. Unplug it and plug it back in.";
 
 /// End an update whose firmware write succeeded. Only a stop fails it: any
 /// other error after the write becomes a warning, and the update completes.
@@ -1025,7 +1030,7 @@ fn send_role_command<L: Fn(&str), W: Fn(&str), C: Fn() -> bool>(
     std::thread::sleep(Duration::from_millis(get_reboot_settle_delay()));
     if let Err(e) = wait_for_application_flexible(identifier, get_reboot_timeout()) {
         log(&format!("Device not detected after the role restart: {}", e));
-        warn(DEVICE_NOT_BACK_WARNING);
+        warn(ROLE_SET_DEVICE_NOT_FOUND_WARNING);
     }
 
     Ok(())
@@ -1058,7 +1063,7 @@ fn send_role_and_await_ack<T: DfuTransport, L: Fn(&str), W: Fn(&str), C: Fn() ->
     let before = warnings.len();
     extend_unique(
         &mut warnings,
-        wait_for_serial_ready(transport, log, is_cancelled)?,
+        wait_for_serial_ready(transport, log, is_cancelled, drain.tail)?,
     );
     for w in &warnings[before..] {
         warn(w);
@@ -1160,10 +1165,19 @@ impl BootLines {
         self.warnings
     }
 
-    /// Return the warnings found, dropping an unterminated trailing line. For
-    /// an exit on a marker, when the rest of that line hasn't been read.
-    fn finish_complete(self) -> Vec<String> {
-        self.warnings
+    /// Return the warnings found and the unterminated trailing line, not yet
+    /// processed. For an exit on a marker, when the rest of that line hasn't
+    /// been read: carry it on, or drop it if the input is cleared next.
+    fn split_tail(self) -> (Vec<String>, String) {
+        (self.warnings, self.partial)
+    }
+
+    /// Start from a partial line an earlier reader left unfinished.
+    fn with_tail(tail: String) -> Self {
+        Self {
+            partial: tail,
+            warnings: Vec::new(),
+        }
     }
 
     fn collect(&mut self, line: &str) {
@@ -1188,6 +1202,8 @@ fn extend_unique(warnings: &mut Vec<String>, more: Vec<String>) {
 struct BootDrain {
     found_ready: bool,
     warnings: Vec<String>,
+    /// The unterminated line after `[READY]`, for the next reader to finish.
+    tail: String,
 }
 
 /// Drain boot output until the firmware prints `[READY]`, falling back to
@@ -1251,9 +1267,11 @@ fn drain_boot_output_with<T: DfuTransport, C: Fn() -> bool>(
             if accumulated.contains(BOOT_READY_MARKER) {
                 // Extra safety wait after the marker
                 std::thread::sleep(Duration::from_millis(200));
+                let (warnings, tail) = lines.split_tail();
                 return Ok(BootDrain {
                     found_ready: true,
-                    warnings: lines.finish_complete(),
+                    warnings,
+                    tail,
                 });
             }
             // Truncate to prevent unbounded growth, keeping a marker split
@@ -1274,6 +1292,7 @@ fn drain_boot_output_with<T: DfuTransport, C: Fn() -> bool>(
     Ok(BootDrain {
         found_ready: false,
         warnings: lines.finish(),
+        tail: String::new(),
     })
 }
 
@@ -1281,16 +1300,20 @@ fn drain_boot_output_with<T: DfuTransport, C: Fn() -> bool>(
 /// so the next command isn't sent while it is still booting. Gives up after
 /// `SERIAL_READY_TIMEOUT_MS` and lets the caller send anyway.
 ///
-/// Returns the hardware-fault lines read while waiting.
+/// `tail` is the boot drain's unfinished last line, so a fault line split
+/// across the two reads is still collected whole. Returns the hardware-fault
+/// lines read while waiting.
 fn wait_for_serial_ready<T: DfuTransport, L: Fn(&str), C: Fn() -> bool>(
     transport: &mut T,
     log: &L,
     is_cancelled: &C,
+    tail: String,
 ) -> DfuResult<Vec<String>> {
     wait_for_serial_ready_with(
         transport,
         log,
         is_cancelled,
+        tail,
         SERIAL_READY_TIMEOUT_MS,
         MENU_READY_PROBE_MS,
     )
@@ -1301,6 +1324,7 @@ fn wait_for_serial_ready_with<T: DfuTransport, L: Fn(&str), C: Fn() -> bool>(
     transport: &mut T,
     log: &L,
     is_cancelled: &C,
+    tail: String,
     timeout_ms: u64,
     probe_ms: u64,
 ) -> DfuResult<Vec<String>> {
@@ -1308,7 +1332,7 @@ fn wait_for_serial_ready_with<T: DfuTransport, L: Fn(&str), C: Fn() -> bool>(
     let probe = Duration::from_millis(probe_ms);
     let start = Instant::now();
     let mut last_probe: Option<Instant> = None;
-    let mut lines = BootLines::default();
+    let mut lines = BootLines::with_tail(tail);
     let mut buffer = [0u8; 256];
 
     while start.elapsed() < timeout {
@@ -1324,7 +1348,9 @@ fn wait_for_serial_ready_with<T: DfuTransport, L: Fn(&str), C: Fn() -> bool>(
         if bytes_read > 0 {
             let chunk = String::from_utf8_lossy(&buffer[..bytes_read]);
             if lines.push(&chunk).iter().any(|l| l.contains("[CONFIG]")) {
-                return Ok(lines.finish_complete());
+                // The caller clears input next, so the unread rest of the
+                // last line is gone: drop its start too.
+                return Ok(lines.split_tail().0);
             }
         }
     }
@@ -1507,16 +1533,20 @@ const SETTING_CONFIG_TIMEOUT_MS: u64 = 2000;
 ///   `[MENU-TX] CMD:THERAPY_LED_OFF\nTHERAPY_LED_OFF:true\n\x04` (`[SETTING] ...` is
 ///   still accepted), or no reply at all (older firmware, or a SECONDARY glove,
 ///   which ignores menu commands)
-/// - Error: this command's frame carrying `ERROR:...`, or a bare `[ERROR] ...` line
+/// - Error: this command's frame carrying `ERROR:...` only. A bare `[ERROR]`
+///   line (say, the PRIMARY reporting a SECONDARY fault) is added to
+///   `warnings`, not read as the answer.
 ///
 /// # Arguments
 /// * `transport` - Open serial transport
 /// * `command` - Command string to send (should include newline)
 /// * `log` - Callback for debug log messages
+/// * `warnings` - Fault lines read while waiting are added here, even on failure
 fn send_setting_command<T: DfuTransport, L: Fn(&str)>(
     transport: &mut T,
     command: &str,
     log: &L,
+    warnings: &mut Vec<String>,
 ) -> DfuResult<()> {
     // Parse command to create human-readable log message
     let trimmed = command.trim();
@@ -1540,55 +1570,68 @@ fn send_setting_command<T: DfuTransport, L: Fn(&str)>(
     let start = Instant::now();
     let mut response = Vec::new();
     let mut buffer = [0u8; 256];
+    let mut lines = BootLines::default();
+    let mut answered = false;
 
-    while start.elapsed() < timeout {
-        let remaining = timeout.saturating_sub(start.elapsed());
-        let bytes_read = transport.read(&mut buffer, remaining.as_millis() as u64)?;
-
-        if bytes_read > 0 {
-            response.extend_from_slice(&buffer[..bytes_read]);
-            let response_str = String::from_utf8_lossy(&response);
-
-            // The menu answers with a frame naming the command (`CMD:<name>`)
-            // that echoes the setting's key, or carries ERROR. Frames for other
-            // commands are ignored; one without `CMD` (older firmware) counts
-            // only if it carries the setting's key.
-            for frame in parse_menu_frames(&response_str) {
-                let ours = match frame.get("CMD") {
-                    Some(cmd) => cmd == setting_name,
-                    None => frame.get(setting_name).is_some(),
-                };
-                if !ours {
-                    continue;
-                }
-                if let Some(message) = frame.error() {
-                    return Err(DfuError::SettingConfigFailed {
-                        reason: format!("Device rejected {}: {}", trimmed, message),
-                    });
-                }
-                log(&format!("Setting acknowledged: {}", response_str.trim()));
-                return Ok(());
-            }
-
-            // Check for success acknowledgment
-            if response_str.contains("[SETTING]") {
-                log(&format!("Setting acknowledged: {}", response_str.trim()));
-                return Ok(());
-            }
-
-            // Check for error
-            if response_str.contains("[ERROR]") {
-                return Err(DfuError::SettingConfigFailed {
-                    reason: response_str.to_string(),
-                });
-            }
+    let result = loop {
+        if start.elapsed() >= timeout {
+            // Timeout - treat as success for backwards compatibility with older
+            // firmware that doesn't respond to setting commands
+            log("Setting command timeout - device may not support this setting (continuing)");
+            break Ok(());
         }
-    }
+        let remaining = timeout.saturating_sub(start.elapsed());
+        let bytes_read = match transport.read(&mut buffer, remaining.as_millis() as u64) {
+            Ok(n) => n,
+            Err(e) => break Err(e),
+        };
+        if bytes_read == 0 {
+            continue;
+        }
+        response.extend_from_slice(&buffer[..bytes_read]);
+        lines.push(&String::from_utf8_lossy(&buffer[..bytes_read]));
+        let response_str = String::from_utf8_lossy(&response);
 
-    // Timeout - treat as success for backwards compatibility with older firmware
-    // that doesn't respond to setting commands
-    log("Setting command timeout - device may not support this setting (continuing)");
-    Ok(())
+        // The menu answers with a frame naming the command (`CMD:<name>`)
+        // that echoes the setting's key, or carries ERROR. Frames for other
+        // commands are ignored. Older firmware sends no `CMD`: such a frame
+        // counts if it carries the setting's key or an ERROR.
+        let ours = parse_menu_frames(&response_str).into_iter().find(|frame| {
+            match frame.get("CMD") {
+                Some(cmd) => cmd == setting_name,
+                None => frame.get(setting_name).is_some() || frame.error().is_some(),
+            }
+        });
+        if let Some(frame) = ours {
+            answered = true;
+            break match frame.error() {
+                Some(message) => Err(DfuError::SettingConfigFailed {
+                    reason: format!("Device rejected {}: {}", trimmed, message),
+                }),
+                None => {
+                    log(&format!("Setting acknowledged: {}", response_str.trim()));
+                    Ok(())
+                }
+            };
+        }
+
+        // Check for success acknowledgment
+        if response_str.contains("[SETTING]") {
+            answered = true;
+            log(&format!("Setting acknowledged: {}", response_str.trim()));
+            break Ok(());
+        }
+    };
+
+    // Fault lines that arrived while waiting are warnings, whatever the
+    // answer. After an answer the rest of an unfinished line is unread: drop it.
+    let found = if answered {
+        lines.split_tail().0
+    } else {
+        lines.finish()
+    };
+    extend_unique(warnings, found);
+    result
 }
 
 /// Configure device with advanced settings and therapy profile.
@@ -1619,6 +1662,31 @@ pub fn configure_device_with_settings<L: Fn(&str) + Clone>(
     identifier: &DeviceIdentifier,
     log: L,
 ) -> DfuResult<Vec<String>> {
+    retry_configure(port_name, identifier, &log, |port, warnings| {
+        configure_device_with_settings_inner(
+            port,
+            profile,
+            pre_profile_commands,
+            identifier,
+            log.clone(),
+            warnings,
+        )
+    })
+}
+
+/// Run `attempt` on the device's current port, retrying timing failures.
+/// `warnings` collects fault lines across attempts; if every attempt fails
+/// they're logged before the error is returned.
+fn retry_configure<L, A>(
+    port_name: &str,
+    identifier: &DeviceIdentifier,
+    log: &L,
+    mut attempt_on: A,
+) -> DfuResult<Vec<String>>
+where
+    L: Fn(&str),
+    A: FnMut(&str, &mut Vec<String>) -> DfuResult<()>,
+{
     let mut last_error: Option<DfuError> = None;
     let mut current_port = port_name.to_string();
     let mut warnings = Vec::new();
@@ -1638,28 +1706,21 @@ pub fn configure_device_with_settings<L: Fn(&str) + Clone>(
             }
         }
 
-        match configure_device_with_settings_inner(
-            &current_port,
-            profile,
-            pre_profile_commands,
-            identifier,
-            log.clone(),
-            &mut warnings,
-        ) {
+        match attempt_on(&current_port, &mut warnings) {
             Ok(()) => return Ok(warnings),
             Err(e) if e.is_retriable() && attempt < MAX_CONFIG_RETRIES => {
                 log(&format!("Profile configuration failed: {}, will retry", e));
                 last_error = Some(e);
             }
             Err(e) => {
-                log_device_warnings(&log, &warnings);
+                log_device_warnings(log, &warnings);
                 return Err(e);
             }
         }
     }
 
     // All retries exhausted
-    log_device_warnings(&log, &warnings);
+    log_device_warnings(log, &warnings);
     Err(last_error.unwrap_or(DfuError::ProfileConfigFailed {
         reason: "Max retries exceeded".to_string(),
     }))
@@ -1708,13 +1769,41 @@ fn configure_device_with_settings_inner<L: Fn(&str)>(
         });
     }
 
+    send_settings_and_profile(
+        &mut transport,
+        profile,
+        profile_command,
+        pre_profile_commands,
+        &log,
+        warnings,
+    )?;
+    drop(transport);
+
+    log("Waiting for device to reboot...");
+    std::thread::sleep(Duration::from_millis(get_reboot_settle_delay()));
+    wait_for_application_flexible(identifier, get_reboot_timeout())?;
+    log("Device reappeared after reboot");
+    Ok(())
+}
+
+/// Drain boot output, wait for the device to answer, send the setting
+/// commands, then the profile command, and wait for its acknowledgment. The
+/// device reboots after it. Adds the fault lines it reads to `warnings`.
+fn send_settings_and_profile<T: DfuTransport, L: Fn(&str)>(
+    transport: &mut T,
+    profile: &str,
+    profile_command: &str,
+    pre_profile_commands: &[String],
+    log: &L,
+    warnings: &mut Vec<String>,
+) -> DfuResult<()> {
     log("Draining boot output...");
-    let drain = drain_boot_output(&mut transport)?;
-    log_boot_drain(&log, drain.found_ready);
+    let drain = drain_boot_output(transport)?;
+    log_boot_drain(log, drain.found_ready);
     extend_unique(warnings, drain.warnings);
     extend_unique(
         warnings,
-        wait_for_serial_ready(&mut transport, &log, &|| false)?,
+        wait_for_serial_ready(transport, log, &|| false, drain.tail)?,
     );
 
     transport.clear_input().ok();
@@ -1727,7 +1816,7 @@ fn configure_device_with_settings_inner<L: Fn(&str)>(
             pre_profile_commands.len()
         ));
         for command in pre_profile_commands {
-            send_setting_command(&mut transport, command, &log)?;
+            send_setting_command(transport, command, log, warnings)?;
             // Small delay between commands
             std::thread::sleep(Duration::from_millis(50));
         }
@@ -1754,13 +1843,6 @@ fn configure_device_with_settings_inner<L: Fn(&str)>(
 
             if response_str.contains("[CONFIG]") && response_str.contains("Profile set to") {
                 log("Profile configuration acknowledged");
-                drop(transport);
-
-                log("Waiting for device to reboot...");
-                std::thread::sleep(Duration::from_millis(get_reboot_settle_delay()));
-                wait_for_application_flexible(identifier, get_reboot_timeout())?;
-                log("Device reappeared after reboot");
-
                 return Ok(());
             }
 
@@ -1865,7 +1947,7 @@ fn configure_custom_profile_steps<L: Fn(&str) + Clone>(
     extend_unique(warnings, drain.warnings);
     extend_unique(
         warnings,
-        wait_for_serial_ready(&mut transport, &log, &|| false)?,
+        wait_for_serial_ready(&mut transport, &log, &|| false, drain.tail)?,
     );
     transport.clear_input().ok();
     std::thread::sleep(Duration::from_millis(100));
@@ -1876,7 +1958,7 @@ fn configure_custom_profile_steps<L: Fn(&str) + Clone>(
             pre_profile_commands.len()
         ));
         for command in pre_profile_commands {
-            send_setting_command(&mut transport, command, &log)?;
+            send_setting_command(&mut transport, command, &log, warnings)?;
             std::thread::sleep(Duration::from_millis(50));
         }
     }
@@ -2391,7 +2473,7 @@ mod tests {
             "[CONFIG] Current role: SECONDARY\n",
         ]);
         let warnings =
-            wait_for_serial_ready_with(&mut transport, &|_: &str| {}, &|| false, 5_000, 1_500)
+            wait_for_serial_ready_with(&mut transport, &|_: &str| {}, &|| false, String::new(), 5_000, 1_500)
                 .unwrap();
         assert!(warnings.is_empty());
         assert_eq!(transport.written(), ["GET_ROLE\n"]);
@@ -2402,7 +2484,7 @@ mod tests {
         let line = format!("{}\n", MOTOR_ERROR);
         let mut transport = ScriptedTransport::new(vec![&line, "[CONFIG] Current role: PRIMARY\n"]);
         let warnings =
-            wait_for_serial_ready_with(&mut transport, &|_: &str| {}, &|| false, 5_000, 1_500)
+            wait_for_serial_ready_with(&mut transport, &|_: &str| {}, &|| false, String::new(), 5_000, 1_500)
                 .unwrap();
         assert_eq!(warnings, vec![MOTOR_ERROR.to_string()]);
     }
@@ -2415,17 +2497,42 @@ mod tests {
             "[CONFIG] Current role: PRIMARY\r\n[ERROR] SECONDARY rep",
         ]);
         let warnings =
-            wait_for_serial_ready_with(&mut transport, &|_: &str| {}, &|| false, 5_000, 1_500)
+            wait_for_serial_ready_with(&mut transport, &|_: &str| {}, &|| false, String::new(), 5_000, 1_500)
                 .unwrap();
         assert!(warnings.is_empty(), "{warnings:?}");
     }
 
     #[test]
-    fn boot_drain_drops_unterminated_tail_after_ready() {
+    fn boot_drain_hands_on_unterminated_tail_after_ready() {
         let mut transport = TimedTransport::new(vec![(0, b"[READY]\n[ERROR] SECONDARY rep")]);
         let drain = drain_boot_output_with(&mut transport, &|| false, 250, 10_000).unwrap();
         assert!(drain.found_ready);
         assert!(drain.warnings.is_empty(), "{:?}", drain.warnings);
+        assert_eq!(drain.tail, "[ERROR] SECONDARY rep");
+    }
+
+    /// A fault line split across the end of the boot drain and the readiness
+    /// probe is collected whole, not dropped or cut short.
+    #[test]
+    fn role_ack_collects_fault_line_split_after_ready() {
+        let mut transport = ScriptedTransport::new(vec![
+            "[READY]\n[ERROR] SECONDARY rep",
+            "orts a hardware fault - sessions refused\n",
+            "[CONFIG] Current role: PRIMARY\n",
+            "[CONFIG] Role set to PRIMARY - restarting...\n",
+        ]);
+        let warned = std::cell::RefCell::new(Vec::<String>::new());
+        let warnings = send_role_and_await_ack(
+            &mut transport,
+            ROLE_PRIMARY_COMMAND,
+            &|_: &str| {},
+            &|w: &str| warned.borrow_mut().push(w.into()),
+            &|| false,
+        )
+        .unwrap();
+        let line = "[ERROR] SECONDARY reports a hardware fault - sessions refused".to_string();
+        assert_eq!(warnings, vec![line.clone()]);
+        assert_eq!(*warned.borrow(), vec![line]);
     }
 
     #[test]
@@ -2436,6 +2543,7 @@ mod tests {
             &mut transport,
             &|m: &str| logged.borrow_mut().push(m.into()),
             &|| false,
+            String::new(),
             200,
             50,
         )
@@ -2448,7 +2556,7 @@ mod tests {
     #[test]
     fn serial_ready_stops_without_writing_once_cancelled() {
         let mut transport = ScriptedTransport::new(vec![]);
-        let err = wait_for_serial_ready_with(&mut transport, &|_: &str| {}, &|| true, 5_000, 50)
+        let err = wait_for_serial_ready_with(&mut transport, &|_: &str| {}, &|| true, String::new(), 5_000, 50)
             .unwrap_err();
         assert!(matches!(err, DfuError::Cancelled), "got {err:?}");
         assert!(transport.written().is_empty());
@@ -2567,9 +2675,13 @@ mod tests {
             "[MENU-TX] CMD:THERAPY_LED_OFF\nTHERAPY_LED_OFF:true\n\u{4}",
         ]);
         let logged = std::cell::RefCell::new(Vec::<String>::new());
-        send_setting_command(&mut transport, "THERAPY_LED_OFF:true\n", &|m: &str| {
-            logged.borrow_mut().push(m.into())
-        })
+        let mut warnings = Vec::new();
+        send_setting_command(
+            &mut transport,
+            "THERAPY_LED_OFF:true\n",
+            &|m: &str| logged.borrow_mut().push(m.into()),
+            &mut warnings,
+        )
         .unwrap();
         assert!(
             logged.borrow().iter().any(|m| m.starts_with("Setting acknowledged")),
@@ -2588,9 +2700,13 @@ mod tests {
             "[MENU-TX] CMD:THERAPY_LED_OFF\nTHERAPY_LED_OFF:true\n\u{4}",
         ]);
         let logged = std::cell::RefCell::new(Vec::<String>::new());
-        send_setting_command(&mut transport, "THERAPY_LED_OFF:true\n", &|m: &str| {
-            logged.borrow_mut().push(m.into())
-        })
+        let mut warnings = Vec::new();
+        send_setting_command(
+            &mut transport,
+            "THERAPY_LED_OFF:true\n",
+            &|m: &str| logged.borrow_mut().push(m.into()),
+            &mut warnings,
+        )
         .unwrap();
         assert!(logged
             .borrow()
@@ -2602,8 +2718,13 @@ mod tests {
     fn setting_rejected_by_menu_error_frame() {
         let mut transport =
             ScriptedTransport::new(vec!["[MENU-TX] CMD:THERAPY_LED_OFF\nERROR:Invalid value\n\u{4}"]);
-        let err = send_setting_command(&mut transport, "THERAPY_LED_OFF:maybe\n", &|_: &str| {})
-            .unwrap_err();
+        let err = send_setting_command(
+            &mut transport,
+            "THERAPY_LED_OFF:maybe\n",
+            &|_: &str| {},
+            &mut Vec::new(),
+        )
+        .unwrap_err();
         assert!(
             matches!(err, DfuError::SettingConfigFailed { .. }),
             "got {err:?}"
@@ -2613,7 +2734,95 @@ mod tests {
     #[test]
     fn setting_without_reply_still_succeeds() {
         let mut transport = ScriptedTransport::new(vec![]);
-        send_setting_command(&mut transport, "DEBUG:false\n", &|_: &str| {}).unwrap();
+        send_setting_command(&mut transport, "DEBUG:false\n", &|_: &str| {}, &mut Vec::new())
+            .unwrap();
+    }
+
+    /// Older firmware sends no `CMD`, so its ERROR frame can only be ours.
+    #[test]
+    fn setting_rejected_by_error_frame_without_cmd() {
+        let mut transport = ScriptedTransport::new(vec!["[MENU-TX] ERROR:Invalid value\n\u{4}"]);
+        let err = send_setting_command(
+            &mut transport,
+            "THERAPY_LED_OFF:maybe\n",
+            &|_: &str| {},
+            &mut Vec::new(),
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, DfuError::SettingConfigFailed { .. }),
+            "got {err:?}"
+        );
+    }
+
+    const SECONDARY_FAULT: &str = "[ERROR] SECONDARY reports a hardware fault - sessions refused";
+
+    /// A bare `[ERROR]` line during the wait is a warning, not the answer: the
+    /// setting's own ack still counts, and the line is kept.
+    #[test]
+    fn setting_keeps_bare_error_line_as_warning() {
+        let line = format!("{}\r\n", SECONDARY_FAULT);
+        let mut transport = ScriptedTransport::new(vec![
+            &line,
+            "[MENU-TX] CMD:THERAPY_LED_OFF\nTHERAPY_LED_OFF:true\n\u{4}",
+        ]);
+        let mut warnings = Vec::new();
+        send_setting_command(
+            &mut transport,
+            "THERAPY_LED_OFF:true\n",
+            &|_: &str| {},
+            &mut warnings,
+        )
+        .unwrap();
+        assert_eq!(warnings, vec![SECONDARY_FAULT.to_string()]);
+    }
+
+    /// With no answer at all, the bare `[ERROR]` line is still only a warning.
+    #[test]
+    fn setting_bare_error_line_then_silence_succeeds_with_warning() {
+        let line = format!("{}\n", SECONDARY_FAULT);
+        let mut transport = ScriptedTransport::new(vec![&line]);
+        let mut warnings = Vec::new();
+        send_setting_command(&mut transport, "DEBUG:false\n", &|_: &str| {}, &mut warnings)
+            .unwrap();
+        assert_eq!(warnings, vec![SECONDARY_FAULT.to_string()]);
+    }
+
+    /// A Configure that fails still logs the fault lines drained before it.
+    #[test]
+    fn configure_failure_logs_drained_fault_lines() {
+        let line = format!("{}\n", MOTOR_ERROR);
+        let mut transport = ScriptedTransport::new(vec![
+            &line,
+            "[READY]\n",
+            "[CONFIG] Current role: PRIMARY\n",
+            "[ERROR] Invalid profile\n",
+        ]);
+        let id = DeviceIdentifier::Serial {
+            serial: "X".into(),
+            vid: 0x239A,
+            pid: 0x8029,
+            port_pattern: String::new(),
+        };
+        let logged = std::cell::RefCell::new(Vec::<String>::new());
+        let log = |m: &str| logged.borrow_mut().push(m.into());
+        let err = retry_configure("/dev/cu.test", &id, &log, |_, warnings| {
+            send_settings_and_profile(
+                &mut transport,
+                "REGULAR",
+                PROFILE_REGULAR_COMMAND,
+                &[],
+                &log,
+                warnings,
+            )
+        })
+        .unwrap_err();
+        assert!(
+            matches!(err, DfuError::ProfileConfigFailed { .. }),
+            "got {err:?}"
+        );
+        let expected = format!("Device reported: {}", MOTOR_ERROR);
+        assert!(logged.borrow().contains(&expected), "{:?}", logged.borrow());
     }
 
     fn stage_names(stages: &[DfuStage]) -> Vec<&'static str> {
