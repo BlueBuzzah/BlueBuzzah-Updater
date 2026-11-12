@@ -41,7 +41,7 @@ describe('TherapyService.configureProfile', () => {
   beforeEach(() => mockInvoke.mockReset());
 
   it('returns the backend outcome', async () => {
-    const outcome = { status: 'partial', message: 'could not be confirmed' };
+    const outcome = { status: 'partial', message: 'could not be confirmed', warnings: [] };
     mockInvoke.mockResolvedValue(outcome);
 
     const result = await therapyService.configureProfile(
@@ -53,7 +53,7 @@ describe('TherapyService.configureProfile', () => {
   });
 
   it('sends the defaults for Custom when no Custom profile is saved', async () => {
-    mockInvoke.mockResolvedValue({ status: 'success' });
+    mockInvoke.mockResolvedValue({ status: 'success', message: 'ok', warnings: [] });
     const { customProfile: _, ...settings } = useSettingsStore.getState().settings;
     useSettingsStore.setState({ settings });
 

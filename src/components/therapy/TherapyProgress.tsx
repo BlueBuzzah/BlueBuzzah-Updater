@@ -110,6 +110,7 @@ export function TherapyProgress({
           default:
             addLog('INFO', `Successfully configured ${device.label}`);
         }
+        outcome.warnings.forEach((warning) => addLog('WARN', `${device.label}: ${warning}`));
 
         results.push({ device, success: true, outcome });
         setConfiguredCount((c) => c + 1);

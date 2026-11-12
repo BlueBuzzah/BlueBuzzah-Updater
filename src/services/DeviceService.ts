@@ -18,13 +18,13 @@ export interface IDeviceRepository {
     firmware: FirmwareBundle,
     onProgress?: (progress: UpdateProgress) => void,
     onLog?: (message: string) => void
-  ): Promise<void>;
+  ): Promise<string[]>;
   validateDevice(device: Device): Promise<ValidationResult>;
   validateDevices(devices: Device[]): Promise<Map<string, ValidationResult>>;
   cancelFlash(): Promise<void>;
 }
 
-// Map DFU stages to UpdateStage enum (returns null for log events)
+// Map DFU stages to UpdateStage enum (returns null for log and warning events)
 function mapDfuStageToUpdateStage(dfuStage: string): UpdateStage | null {
   switch (dfuStage) {
     case 'reading':
@@ -49,7 +49,8 @@ function mapDfuStageToUpdateStage(dfuStage: string): UpdateStage | null {
     case 'cancelled':
       return 'cancelled';
     case 'log':
-      return null; // Log events don't change the stage
+    case 'warning':
+      return null; // Log and warning events don't change the stage
     default:
       return 'copying';
   }
@@ -116,16 +117,21 @@ export class DeviceService implements IDeviceRepository {
     }
   }
 
+  /**
+   * Flash one device. Resolves with the warnings it reported after a successful
+   * flash (boot faults, role not set); empty when there were none.
+   */
   async deployFirmware(
     device: Device,
     firmware: FirmwareBundle,
     onProgress?: (progress: UpdateProgress) => void,
     onLog?: (message: string) => void
-  ): Promise<void> {
+  ): Promise<string[]> {
     // Create throttled progress callback (100ms interval, 1% minimum change)
     const throttledProgress = onProgress
       ? createProgressThrottle(onProgress, 100, 1)
       : null;
+    const warnings: string[] = [];
 
     try {
       // Validate device role
@@ -149,8 +155,9 @@ export class DeviceService implements IDeviceRepository {
       progressChannel.onmessage = (dfuProgress) => {
         const mappedStage = mapDfuStageToUpdateStage(dfuProgress.stage);
 
-        // Log events go to log callback only, not to progress display
+        // Log and warning events go to log callback only, not to progress display
         if (mappedStage === null) {
+          if (dfuProgress.stage === 'warning') warnings.push(dfuProgress.message);
           onLog?.(dfuProgress.message);
           return;
         }
@@ -194,6 +201,7 @@ export class DeviceService implements IDeviceRepository {
           message: 'Update complete',
         });
       }
+      return warnings;
     } catch (error) {
       console.error('Failed to deploy firmware:', error);
       const errorMessage =
@@ -273,10 +281,11 @@ export class DeviceService implements IDeviceRepository {
 
     for (const device of devices) {
       try {
-        await this.deployFirmware(device, firmware, onProgress);
+        const warnings = await this.deployFirmware(device, firmware, onProgress);
         results.push({
           device,
           success: true,
+          warnings,
         });
       } catch (error) {
         results.push({

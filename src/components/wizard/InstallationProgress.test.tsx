@@ -64,10 +64,42 @@ describe('InstallationProgress', () => {
     const v3 = createMockDevice({ path: 'COM7', board: 'esp32s3', role: 'PRIMARY' });
     vi.mocked(deviceService.validateDevices).mockResolvedValue(valid([v3.path]));
     vi.mocked(firmwareService.downloadFirmware).mockResolvedValue(createMockBundle());
-    vi.mocked(deviceService.deployFirmware).mockResolvedValue(undefined as never);
+    vi.mocked(deviceService.deployFirmware).mockResolvedValue([]);
     const { onComplete } = renderIt([v3]);
     await waitFor(() => expect(onComplete).toHaveBeenCalledWith(expect.objectContaining({ success: true })));
     expect(firmwareService.downloadFirmware).toHaveBeenCalledWith(release, 'esp32s3');
+  });
+
+  it('reports a flash with warnings as a success that carries them, logged as WARN', async () => {
+    const warning = '[WARN] Motor check: 2/5 motors responded - check JST connections';
+    vi.mocked(deviceService.validateDevices).mockResolvedValue(valid([primary.path]));
+    vi.mocked(firmwareService.downloadFirmware).mockResolvedValue(createMockBundle());
+    vi.mocked(deviceService.deployFirmware).mockResolvedValue([warning]);
+    const { onComplete } = renderIt();
+    await waitFor(() => expect(onComplete).toHaveBeenCalled());
+    expect(onComplete).toHaveBeenCalledWith(
+      expect.objectContaining({ success: true, deviceUpdates: [{ device: primary, success: true, warnings: [warning] }] })
+    );
+    const lines = store.addLog.mock.calls.map(([l]) => l as string);
+    expect(lines.some((l) => l.startsWith('WARN') && l.endsWith(`${primary.label}: ${warning}`))).toBe(true);
+  });
+
+  it('keeps a finished device’s warnings when the run is stopped', async () => {
+    const warning = '[ERROR] DRV2605 finger 2 initialization failed';
+    vi.mocked(deviceService.validateDevices).mockResolvedValue(valid([primary.path, secondary.path]));
+    vi.mocked(firmwareService.downloadFirmware).mockResolvedValue(createMockBundle());
+    vi.mocked(deviceService.deployFirmware).mockResolvedValueOnce([warning]).mockImplementationOnce(() => new Promise(() => {}));
+    const { onComplete } = renderIt([primary, secondary]);
+    await waitFor(() => expect(deviceService.deployFirmware).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Stop Flash' }));
+    });
+    await waitFor(() => expect(onComplete).toHaveBeenCalled());
+    const { deviceUpdates } = onComplete.mock.calls[0][0];
+    expect(deviceUpdates[0]).toEqual({ device: primary, success: true, warnings: [warning] });
+    expect(deviceUpdates[1]).toEqual(expect.objectContaining({ success: false }));
+    expect(screen.getByText('Warning', { selector: '.bb-badge span' })).toBeInTheDocument();
   });
 
   it('refuses a mixed v2/v3 batch before downloading', async () => {
@@ -94,7 +126,7 @@ describe('InstallationProgress', () => {
     vi.mocked(deviceService.validateDevices).mockResolvedValue(valid([primary.path, secondary.path]));
     vi.mocked(firmwareService.downloadFirmware).mockResolvedValue(createMockBundle());
     vi.mocked(deviceService.deployFirmware)
-      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce([])
       .mockRejectedValueOnce(new Error('Failed to configure device role: timeout'));
     renderIt([primary, secondary]);
     await screen.findByText("1 of 2 devices didn't update");
@@ -154,6 +186,7 @@ describe('InstallationProgress', () => {
     vi.mocked(firmwareService.downloadFirmware).mockResolvedValue(createMockBundle());
     vi.mocked(deviceService.deployFirmware).mockImplementation(async (_d, _f, onProgress) => {
       onProgress!({ devicePath: primary.path, stage: 'configuring', progress: 90, message: '', newDevicePath: '/dev/cu.z', newDeviceLabel: 'Z' } as UpdateProgress);
+      return [];
     });
     const { onComplete } = renderIt([primary]);
     await waitFor(() => expect(onComplete).toHaveBeenCalled());
