@@ -14,8 +14,9 @@ use espflash::target::{Chip, ProgressCallbacks};
 
 use super::read_v3_zip;
 use crate::dfu::{
-    configure_role_with_deadline, find_supported_devices, get_reboot_settle_delay,
-    get_reboot_timeout, wait_for_application_flexible, DeviceIdentifier, DfuError, DfuStage,
+    configure_role_with_deadline, find_supported_devices, finish_after_write,
+    get_reboot_settle_delay, get_reboot_timeout, wait_for_application_flexible, DeviceIdentifier,
+    DfuError, DfuStage,
 };
 
 /// `ProgressCallbacks` adapter that folds per-segment progress into an overall
@@ -203,40 +204,44 @@ pub fn flash_v3<F: Fn(DfuStage), C: Fn() -> bool>(
     drop(flasher);
     reset_result?;
 
+    // The firmware is written: from here on only a stop fails the update.
     on_progress(DfuStage::WaitingForReboot);
     std::thread::sleep(Duration::from_millis(get_reboot_settle_delay()));
 
-    if is_cancelled() {
-        on_progress(DfuStage::Cancelled);
-        return Err("Cancelled".to_string());
-    }
-
-    let device = wait_for_application_flexible(&identifier, get_reboot_timeout())
-        .map_err(|e| format!("Device did not come back up after flashing: {}", e))?;
-
-    on_progress(DfuStage::ConfiguringRole);
-    match configure_role_with_deadline(
-        &device.port,
-        device_role,
-        &identifier,
-        |m| {
-            on_progress(DfuStage::Log {
-                message: m.to_string(),
-            })
-        },
-        &is_cancelled,
-    ) {
-        Ok(()) => {}
-        Err(DfuError::Cancelled) => {
-            on_progress(DfuStage::Cancelled);
-            return Err("Cancelled".to_string());
+    let post_write = (|| {
+        if is_cancelled() {
+            return Err(DfuError::Cancelled);
         }
-        // Already reads "Failed to configure device role: ..." (RoleConfigFailed).
-        Err(e) => return Err(e.to_string()),
-    }
 
-    on_progress(DfuStage::Complete);
-    Ok(())
+        let device =
+            wait_for_application_flexible(&identifier, get_reboot_timeout()).map_err(|e| {
+                on_progress(DfuStage::Log {
+                    message: format!("Device did not come back up after flashing: {}", e),
+                });
+                e
+            })?;
+
+        on_progress(DfuStage::ConfiguringRole);
+        configure_role_with_deadline(
+            &device.port,
+            device_role,
+            &identifier,
+            |m| {
+                on_progress(DfuStage::Log {
+                    message: m.to_string(),
+                })
+            },
+            |w| {
+                on_progress(DfuStage::Warning {
+                    message: w.to_string(),
+                })
+            },
+            &is_cancelled,
+        )
+    })();
+
+    // The helper's only error is a stop.
+    finish_after_write(post_write, &on_progress).map_err(|_| "Cancelled".to_string())
 }
 
 /// Open a serial connection to an ESP32-S3 device ready for `Flasher::connect`.

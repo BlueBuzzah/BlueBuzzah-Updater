@@ -192,6 +192,7 @@ impl From<DfuStage> for DfuProgressEvent {
             DfuStage::ConfiguringRole => ("configuring", None, None),
             DfuStage::Complete => ("complete", None, None),
             DfuStage::Log { .. } => ("log", None, None),
+            DfuStage::Warning { .. } => ("warning", None, None),
             DfuStage::Cancelled => ("cancelled", None, None),
         };
 
@@ -763,7 +764,10 @@ pub async fn set_device_profile(
                     &identifier,
                     log,
                 )
-                .map(|()| ProfileConfigOutcome::success(format!("Profile set to {}", profile)))
+                .map(|warnings| ProfileConfigOutcome {
+                    warnings,
+                    ..ProfileConfigOutcome::success(format!("Profile set to {}", profile))
+                })
             };
 
             match &config_result {
