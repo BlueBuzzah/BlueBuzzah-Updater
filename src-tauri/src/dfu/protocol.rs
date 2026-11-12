@@ -24,8 +24,8 @@ use super::config::{
     ROLE_SECONDARY_COMMAND, SERIAL_READY_TIMEOUT_MS,
 };
 use super::device::{
-    get_device_by_port, snapshot_ports, wait_for_application_by_serial,
-    wait_for_application_flexible, wait_for_bootloader_flexible, DeviceIdentifier,
+    find_nrf52_devices, get_device_by_port, snapshot_ports, wait_for_application_by_serial,
+    wait_for_application_flexible, wait_for_bootloader_flexible, DeviceIdentifier, Nrf52Device,
 };
 use super::error::{DfuError, DfuResult};
 use super::firmware_reader::read_firmware_zip;
@@ -561,7 +561,7 @@ where
     });
 
     // Step 9: Wait for device to reboot into application mode. From here on
-    // the firmware is written: nothing below can fail the update.
+    // only a stop or a device left in bootloader mode can fail the update.
     on_progress(DfuStage::WaitingForReboot);
     std::thread::sleep(Duration::from_millis(get_reboot_settle_delay()));
     on_progress(DfuStage::Log {
@@ -573,55 +573,83 @@ where
             get_reboot_timeout()
         ),
     });
-    let post_write = (|| {
-        let app_device = wait_for_application_flexible(&device_identifier, get_reboot_timeout())?;
-        on_progress(DfuStage::Log {
-            message: format!(
-                "Device found on port {} | snapshot: {}",
-                app_device.port,
-                snapshot_ports()
-            ),
-        });
+    let post_write = match wait_for_application_flexible(&device_identifier, get_reboot_timeout()) {
+        // The stop-data ack is link-level only: a device still in bootloader
+        // mode rejected the image, so the flash fails (and retries).
+        Err(e) if left_in_bootloader(&device_identifier, &find_nrf52_devices()) => {
+            on_progress(DfuStage::Log {
+                message: format!(
+                    "Device is still in bootloader mode: the firmware wasn't accepted | snapshot: {}",
+                    snapshot_ports()
+                ),
+            });
+            return Err(e);
+        }
+        Err(e) => Err(e),
+        Ok(app_device) => {
+            on_progress(DfuStage::Log {
+                message: format!(
+                    "Device found on port {} | snapshot: {}",
+                    app_device.port,
+                    snapshot_ports()
+                ),
+            });
 
-        // Step 10: Configure device role (instrumented)
-        on_progress(DfuStage::ConfiguringRole);
-        let role_started = std::time::Instant::now();
-        let role_result = configure_role_with_deadline(
-            &app_device.port,
-            device_role,
-            &device_identifier,
-            |m| {
-                on_progress(DfuStage::Log {
-                    message: m.to_string(),
-                })
-            },
-            |w| {
-                on_progress(DfuStage::Warning {
-                    message: w.to_string(),
-                })
-            },
-            &is_cancelled,
-        );
-        on_progress(DfuStage::Log {
-            message: format!(
-                "Role config finished in {}ms (ok={}) | snapshot: {}",
-                role_started.elapsed().as_millis(),
-                role_result.is_ok(),
-                snapshot_ports()
-            ),
-        });
-        role_result
-    })();
+            // Step 10: Configure device role (instrumented)
+            on_progress(DfuStage::ConfiguringRole);
+            let role_started = std::time::Instant::now();
+            let role_result = configure_role_with_deadline(
+                &app_device.port,
+                device_role,
+                &device_identifier,
+                |m| {
+                    on_progress(DfuStage::Log {
+                        message: m.to_string(),
+                    })
+                },
+                |w| {
+                    on_progress(DfuStage::Warning {
+                        message: w.to_string(),
+                    })
+                },
+                &is_cancelled,
+            );
+            on_progress(DfuStage::Log {
+                message: format!(
+                    "Role config finished in {}ms (ok={}) | snapshot: {}",
+                    role_started.elapsed().as_millis(),
+                    role_result.is_ok(),
+                    snapshot_ports()
+                ),
+            });
+            role_result
+        }
+    };
 
     finish_after_write(post_write, &on_progress)
+}
+
+/// Whether the device `identifier` tracks is enumerated in bootloader mode,
+/// matched the way `wait_for_bootloader_flexible` matches it.
+fn left_in_bootloader(identifier: &DeviceIdentifier, devices: &[Nrf52Device]) -> bool {
+    let fallback = identifier.to_vid_pid_fallback();
+    devices.iter().any(|d| {
+        d.in_bootloader
+            && (identifier.matches(d) || fallback.as_ref().is_some_and(|fb| fb.matches(d)))
+    })
 }
 
 /// Warning shown when the device was flashed but its role step didn't finish.
 const ROLE_NOT_SET_WARNING: &str = "The role wasn't set. Update this device again to set it.";
 
+/// Warning shown when the device wasn't detected again after a reboot.
+const DEVICE_NOT_BACK_WARNING: &str =
+    "The device didn't come back after the update. Unplug it, plug it back in, then update it again.";
+
 /// End an update whose firmware write succeeded. Only a stop fails it: any
-/// other error after the write (the device not coming back, the role step)
-/// becomes a warning, and the update completes.
+/// other error after the write becomes a warning, and the update completes.
+/// The role step only fails with `RoleConfigFailed`; any other error is the
+/// reboot wait, so the device didn't come back.
 pub(crate) fn finish_after_write<F: Fn(DfuStage)>(
     post_write: DfuResult<()>,
     on_progress: &F,
@@ -636,8 +664,12 @@ pub(crate) fn finish_after_write<F: Fn(DfuStage)>(
             on_progress(DfuStage::Log {
                 message: format!("After the firmware write: {}", e),
             });
+            let warning = match e {
+                DfuError::RoleConfigFailed { .. } => ROLE_NOT_SET_WARNING,
+                _ => DEVICE_NOT_BACK_WARNING,
+            };
             on_progress(DfuStage::Warning {
-                message: ROLE_NOT_SET_WARNING.to_string(),
+                message: warning.to_string(),
             });
         }
     }
@@ -993,9 +1025,13 @@ fn send_role_command<L: Fn(&str), W: Fn(&str), C: Fn() -> bool>(
     drop(transport);
     log("Role acknowledged, waiting for device to restart");
 
-    // Wait for device to reboot and reappear
+    // Wait for device to reboot and reappear. The role is set either way, so
+    // a device that isn't detected again is a warning, not a role failure.
     std::thread::sleep(Duration::from_millis(get_reboot_settle_delay()));
-    wait_for_application_flexible(identifier, get_reboot_timeout())?;
+    if let Err(e) = wait_for_application_flexible(identifier, get_reboot_timeout()) {
+        log(&format!("Device not detected after the role restart: {}", e));
+        warn(DEVICE_NOT_BACK_WARNING);
+    }
 
     Ok(())
 }
@@ -2415,6 +2451,16 @@ mod tests {
             .collect()
     }
 
+    fn warning_messages(stages: &[DfuStage]) -> Vec<String> {
+        stages
+            .iter()
+            .filter_map(|s| match s {
+                DfuStage::Warning { message } => Some(message.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
     #[test]
     fn role_failure_after_write_completes_with_warning() {
         let stages = std::cell::RefCell::new(Vec::new());
@@ -2429,6 +2475,78 @@ mod tests {
             stage_names(&stages.borrow()),
             ["log", "warning", "complete"]
         );
+        assert_eq!(warning_messages(&stages.borrow()), [ROLE_NOT_SET_WARNING]);
+    }
+
+    #[test]
+    fn reboot_wait_failure_after_write_warns_device_did_not_come_back() {
+        let stages = std::cell::RefCell::new(Vec::new());
+        let result = finish_after_write(
+            Err(DfuError::BootloaderTimeout { timeout_ms: 30_000 }),
+            &|s| stages.borrow_mut().push(s),
+        );
+        assert!(result.is_ok());
+        assert_eq!(
+            stage_names(&stages.borrow()),
+            ["log", "warning", "complete"]
+        );
+        assert_eq!(warning_messages(&stages.borrow()), [DEVICE_NOT_BACK_WARNING]);
+    }
+
+    fn nrf_device(port: &str, pid: u16, serial: Option<&str>, in_bootloader: bool) -> Nrf52Device {
+        Nrf52Device {
+            port: port.to_string(),
+            vid: 0x239A,
+            pid,
+            serial_number: serial.map(String::from),
+            in_bootloader,
+            product_name: None,
+            manufacturer: None,
+            board: "nrf52".to_string(),
+        }
+    }
+
+    fn tracked() -> DeviceIdentifier {
+        DeviceIdentifier::from_device(&nrf_device(
+            "/dev/cu.usbmodem14201",
+            0x8029,
+            Some("ABC"),
+            false,
+        ))
+    }
+
+    /// A rejected v2 image leaves the glove in bootloader mode: that must fail
+    /// the flash, while an app-mode or missing device is only a warning.
+    #[test]
+    fn left_in_bootloader_only_for_the_tracked_device_in_bootloader_mode() {
+        let id = tracked();
+        assert!(left_in_bootloader(
+            &id,
+            &[nrf_device("/dev/cu.usbmodem14203", 0x0029, Some("ABC"), true)]
+        ));
+        // The bootloader may enumerate with a different serial number.
+        assert!(left_in_bootloader(
+            &id,
+            &[nrf_device("/dev/cu.usbmodem14203", 0x0029, Some("BOOT"), true)]
+        ));
+        assert!(!left_in_bootloader(
+            &id,
+            &[nrf_device("/dev/cu.usbmodem14203", 0x8029, Some("ABC"), false)]
+        ));
+        assert!(!left_in_bootloader(&id, &[]));
+        // Another board family in bootloader mode is not this device.
+        assert!(!left_in_bootloader(
+            &id,
+            &[nrf_device("/dev/cu.usbmodem99901", 0x002A, Some("XYZ"), true)]
+        ));
+    }
+
+    /// The hard error a rejected image returns must still re-flash.
+    #[test]
+    fn left_in_bootloader_error_is_operation_retriable() {
+        let e = DfuError::BootloaderTimeout { timeout_ms: 30_000 };
+        assert!(e.is_operation_retriable());
+        assert!(e.to_string().to_lowercase().contains("bootloader"));
     }
 
     #[test]
