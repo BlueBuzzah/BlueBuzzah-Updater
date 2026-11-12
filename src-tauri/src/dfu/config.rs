@@ -154,11 +154,16 @@ pub const BOOT_READY_MARKER: &str = "[READY]";
 /// Max wait for the device to take queued serial output before `flush` gives up.
 pub const SERIAL_FLUSH_TIMEOUT_MS: u64 = 1000;
 
+/// How long to keep sending `GET_ROLE` after the boot drain before giving up and
+/// sending the command anyway. The firmware answers it with a `[CONFIG]` line
+/// once it reads serial commands, in either role and when unconfigured.
+pub const SERIAL_READY_TIMEOUT_MS: u64 = 20_000;
+
 /// Overall bound on the post-flash role step, retries included. Each attempt can
 /// spend the worst-case port open (retries and backoff), the boot drain cap, the
-/// flush and the ack wait, and the last also waits for the reboot;
-/// `role_deadline_covers_worst_case_retries` checks the sum. Stop ends it sooner.
-pub const ROLE_CONFIG_DEADLINE_MS: u64 = 300_000;
+/// readiness wait, the flush and the ack wait, and the last also waits for the
+/// reboot; `role_deadline_covers_worst_case_retries` checks the sum. Stop ends it sooner.
+pub const ROLE_CONFIG_DEADLINE_MS: u64 = 360_000;
 
 // ============================================================================
 // Retry Configuration
@@ -467,9 +472,14 @@ mod tests {
     #[test]
     fn role_deadline_covers_worst_case_retries() {
         // Every role attempt can spend the Windows worst-case port open, the boot
-        // drain cap, the flush and the ack wait; the last also waits for reboot.
+        // drain cap, the readiness wait, the flush and the ack wait; the last
+        // also waits for reboot.
         let open = MAX_PORT_OPEN_RETRIES as u64 * (PORT_OPEN_TIMEOUT_MS + PORT_OPEN_MAX_DELAY_MS);
-        let attempt = open + BOOT_DRAIN_MAX_MS + SERIAL_FLUSH_TIMEOUT_MS + ROLE_CONFIG_TIMEOUT_MS;
+        let attempt = open
+            + BOOT_DRAIN_MAX_MS
+            + SERIAL_READY_TIMEOUT_MS
+            + SERIAL_FLUSH_TIMEOUT_MS
+            + ROLE_CONFIG_TIMEOUT_MS;
         let attempts = MAX_CONFIG_RETRIES as u64 + 1;
         let between = MAX_CONFIG_RETRIES as u64 * (CONFIG_RETRY_DELAY_MS + 5000);
         let worst =
