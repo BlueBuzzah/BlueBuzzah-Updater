@@ -97,7 +97,7 @@ export function TherapySuccess({ profile, devices, result, onClose }: TherapySuc
       const who = !both ? 'The device' : warnedCount > 1 ? 'Both devices' : 'One device';
       return (
         <Banner tone="warning" announce title={title}>
-          {`${who} reported a problem. The details are below.`}
+          {`${who} ${warnedCount > 1 ? 'need' : 'needs'} attention. Check the details below.`}
         </Banner>
       );
     }

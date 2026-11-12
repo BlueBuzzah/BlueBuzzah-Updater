@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { Channel, invoke } from '@tauri-apps/api/core';
+import { Channel, invoke, type InvokeArgs } from '@tauri-apps/api/core';
 import type { DfuProgress } from '@/types';
 import { DeviceService } from './DeviceService';
 import {
@@ -9,6 +9,11 @@ import {
 import { mockConsole } from '@/test/setup';
 
 // Note: Tauri API is mocked in test/setup.ts
+
+// A successful flash: the backend ends the channel with `complete`.
+async function flashCompletes(_cmd: string, args?: InvokeArgs) {
+  (args as { progress: Channel<DfuProgress> }).progress.onmessage({ stage: 'complete', percent: 100, message: 'done' });
+}
 
 describe('DeviceService', () => {
   let service: DeviceService;
@@ -226,7 +231,7 @@ describe('DeviceService', () => {
       const device = createMockDevice({ role: 'PRIMARY', path: '/dev/cu.usbmodem1234' });
       const firmware = createMockBundle({ localPath: '/tmp/firmware.zip' });
 
-      vi.mocked(invoke).mockResolvedValueOnce(undefined);
+      vi.mocked(invoke).mockImplementationOnce(flashCompletes);
 
       await service.deployFirmware(device, firmware);
 
@@ -249,7 +254,7 @@ describe('DeviceService', () => {
         board: 'esp32s3',
       });
 
-      vi.mocked(invoke).mockResolvedValueOnce(undefined);
+      vi.mocked(invoke).mockImplementationOnce(flashCompletes);
 
       await service.deployFirmware(device, firmware);
 
@@ -272,7 +277,7 @@ describe('DeviceService', () => {
         board: 'nrf52',
       });
 
-      vi.mocked(invoke).mockResolvedValueOnce(undefined);
+      vi.mocked(invoke).mockImplementationOnce(flashCompletes);
 
       await service.deployFirmware(device, firmware);
 
@@ -284,7 +289,7 @@ describe('DeviceService', () => {
       });
     });
 
-    it('resolves the warnings the device reported and still logs them', async () => {
+    it('resolves the warnings the device reported without logging them', async () => {
       const device = createMockDevice({ role: 'PRIMARY' });
       const firmware = createMockBundle();
       const progressCallback = vi.fn();
@@ -302,13 +307,42 @@ describe('DeviceService', () => {
       const warnings = await service.deployFirmware(device, firmware, progressCallback, onLog);
 
       expect(warnings).toEqual([warning, "The role wasn't set. Update this device again to set it."]);
-      expect(onLog).toHaveBeenCalledWith(warning);
+      // The caller logs warnings once, as WARN.
+      expect(onLog).toHaveBeenCalledWith('booting');
+      expect(onLog).not.toHaveBeenCalledWith(warning);
       expect(progressCallback).not.toHaveBeenCalledWith(expect.objectContaining({ message: warning }));
     });
 
+    it('keeps warnings delivered after the flash command resolves', async () => {
+      const warning = '[ERROR] DRV2605 finger 2 initialization failed';
+      vi.mocked(invoke).mockImplementationOnce(async (_cmd, args) => {
+        const channel = (args as { progress: Channel<DfuProgress> }).progress;
+        setTimeout(() => {
+          channel.onmessage({ stage: 'warning', percent: -1, message: warning });
+          channel.onmessage({ stage: 'complete', percent: 100, message: 'done' });
+        }, 0);
+      });
+
+      await expect(service.deployFirmware(createMockDevice({ role: 'PRIMARY' }), createMockBundle())).resolves.toEqual([
+        warning,
+      ]);
+    });
+
     it('resolves no warnings when the device reported none', async () => {
-      vi.mocked(invoke).mockResolvedValueOnce(undefined);
+      vi.mocked(invoke).mockImplementationOnce(flashCompletes);
       await expect(service.deployFirmware(createMockDevice({ role: 'PRIMARY' }), createMockBundle())).resolves.toEqual([]);
+    });
+
+    it('still resolves when the last stage never arrives', async () => {
+      vi.useFakeTimers();
+      try {
+        vi.mocked(invoke).mockResolvedValueOnce(undefined);
+        const deployed = service.deployFirmware(createMockDevice({ role: 'PRIMARY' }), createMockBundle());
+        await vi.advanceTimersByTimeAsync(2000);
+        await expect(deployed).resolves.toEqual([]);
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it('reports complete stage on success', async () => {
@@ -316,7 +350,7 @@ describe('DeviceService', () => {
       const firmware = createMockBundle();
       const progressCallback = vi.fn();
 
-      vi.mocked(invoke).mockResolvedValueOnce(undefined);
+      vi.mocked(invoke).mockImplementationOnce(flashCompletes);
 
       await service.deployFirmware(device, firmware, progressCallback);
 
@@ -340,8 +374,8 @@ describe('DeviceService', () => {
 
       // Mock successful deployment for both devices
       vi.mocked(invoke)
-        .mockResolvedValueOnce(undefined) // Device 1
-        .mockResolvedValueOnce(undefined); // Device 2
+        .mockImplementationOnce(flashCompletes) // Device 1
+        .mockImplementationOnce(flashCompletes); // Device 2
 
       const result = await service.performBatchUpdate(devices, firmware);
 
@@ -361,7 +395,7 @@ describe('DeviceService', () => {
 
       // First device succeeds, second fails
       vi.mocked(invoke)
-        .mockResolvedValueOnce(undefined) // Device 1 - success
+        .mockImplementationOnce(flashCompletes) // Device 1 - success
         .mockRejectedValueOnce(new Error('Device disconnected')); // Device 2 - fails
 
       const result = await service.performBatchUpdate(devices, firmware);
@@ -378,7 +412,7 @@ describe('DeviceService', () => {
       const firmware = createMockBundle();
       const progressCallback = vi.fn();
 
-      vi.mocked(invoke).mockResolvedValueOnce(undefined);
+      vi.mocked(invoke).mockImplementationOnce(flashCompletes);
 
       await service.performBatchUpdate(devices, firmware, progressCallback);
 

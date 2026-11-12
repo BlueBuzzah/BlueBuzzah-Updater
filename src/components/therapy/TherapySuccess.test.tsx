@@ -64,7 +64,7 @@ describe('TherapySuccess', () => {
     const banner = screen.getByRole('status');
     expect(banner).toHaveClass('bb-banner--warning');
     expect(banner).toHaveTextContent('Regular is set on both devices');
-    expect(banner).toHaveTextContent('One device reported a problem. The details are below.');
+    expect(banner).toHaveTextContent('One device needs attention. Check the details below.');
     expect(screen.getByText('Details')).toBeInTheDocument();
     expect(screen.getByText('Glove a: [WARN] Motor check: 2/5 motors responded - check JST connections')).toBeInTheDocument();
     expect(screen.getByText('Warning', { selector: '.bb-badge span' })).toBeInTheDocument();

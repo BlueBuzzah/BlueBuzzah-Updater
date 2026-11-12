@@ -69,7 +69,7 @@ export function FlashOutcome({ version, devices, results, error, logText }: Flas
             }
           >
             {warned.length > 0
-              ? `${warnedWho} reported a problem after the update. The details are below.`
+              ? `${warnedWho} ${warned.length > 1 ? 'need' : 'needs'} attention. Check the details below.`
               : both
                 ? 'You can unplug both devices. Turn them on and they find each other on their own.'
                 : "You can unplug the device. It's ready to use."}

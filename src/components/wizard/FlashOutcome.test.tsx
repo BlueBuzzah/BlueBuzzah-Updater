@@ -36,7 +36,7 @@ describe('FlashOutcome', () => {
     const banner = screen.getByRole('status');
     expect(banner).toHaveClass('bb-banner--warning');
     expect(banner).toHaveTextContent('Firmware 2.1.0 is on both devices');
-    expect(banner).toHaveTextContent('The secondary device reported a problem after the update. The details are below.');
+    expect(banner).toHaveTextContent('The secondary device needs attention. Check the details below.');
     expect(banner).not.toHaveTextContent('find each other');
     expect(screen.getByText('Details')).toBeInTheDocument();
     expect(screen.getByText(`Secondary (/dev/cu.b): ${warning}`)).toBeInTheDocument();
@@ -50,7 +50,7 @@ describe('FlashOutcome', () => {
       { device: primary, success: true, warnings: ['[ERROR] DRV2605 finger 2 initialization failed'] },
       { device: secondary, success: true, warnings: ["The role wasn't set. Update this device again to set it."] },
     ]);
-    expect(screen.getByRole('status')).toHaveTextContent('Both devices reported a problem after the update.');
+    expect(screen.getByRole('status')).toHaveTextContent('Both devices need attention. Check the details below.');
     expect(screen.getByText('Primary (/dev/cu.a): [ERROR] DRV2605 finger 2 initialization failed')).toBeInTheDocument();
     expect(screen.getByText("Secondary (/dev/cu.b): The role wasn't set. Update this device again to set it.")).toBeInTheDocument();
     expect(screen.getAllByText('Warning', { selector: '.bb-badge span' })).toHaveLength(2);
