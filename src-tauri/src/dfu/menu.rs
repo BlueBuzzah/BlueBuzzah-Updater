@@ -72,6 +72,21 @@ pub fn parse_menu_response(raw: &str) -> Option<MenuResponse> {
     Some(MenuResponse { pairs })
 }
 
+/// Parse every complete menu frame in raw serial output, in order.
+pub(crate) fn parse_menu_frames(raw: &str) -> Vec<MenuResponse> {
+    let mut frames = Vec::new();
+    let mut rest = raw;
+    while let Some(start) = rest.find(MENU_TX_PREFIX) {
+        let Some(len) = rest[start..].find(EOT) else {
+            break;
+        };
+        let end = start + len + EOT.len_utf8();
+        frames.extend(parse_menu_response(&rest[start..end]));
+        rest = &rest[end..];
+    }
+    frames
+}
+
 /// Send one menu command and read its framed response.
 ///
 /// The command is written with a trailing newline. Reads accumulate until an

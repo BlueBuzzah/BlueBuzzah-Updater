@@ -30,7 +30,7 @@ use super::device::{
 use super::error::{DfuError, DfuResult};
 use super::firmware_reader::read_firmware_zip;
 use super::menu::{
-    parse_menu_response, preflight_primary_check, send_menu_command, write_custom_params,
+    parse_menu_frames, preflight_primary_check, send_menu_command, write_custom_params,
     ProfileConfigOutcome, MENU_READY_PROBE_MS,
 };
 use super::packet::{
@@ -1155,10 +1155,17 @@ impl BootLines {
         lines
     }
 
-    /// Process the trailing partial line and return the warnings found.
+    /// Process the trailing partial line and return the warnings found. For
+    /// an exit on silence or timeout, when no more of that line is coming.
     fn finish(mut self) -> Vec<String> {
         let tail = std::mem::take(&mut self.partial);
         self.collect(tail.trim());
+        self.warnings
+    }
+
+    /// Return the warnings found, dropping an unterminated trailing line. For
+    /// an exit on a marker, when the rest of that line hasn't been read.
+    fn finish_complete(self) -> Vec<String> {
         self.warnings
     }
 
@@ -1249,7 +1256,7 @@ fn drain_boot_output_with<T: DfuTransport, C: Fn() -> bool>(
                 std::thread::sleep(Duration::from_millis(200));
                 return Ok(BootDrain {
                     found_ready: true,
-                    warnings: lines.finish(),
+                    warnings: lines.finish_complete(),
                 });
             }
             // Truncate to prevent unbounded growth, keeping a marker split
@@ -1320,7 +1327,7 @@ fn wait_for_serial_ready_with<T: DfuTransport, L: Fn(&str), C: Fn() -> bool>(
         if bytes_read > 0 {
             let chunk = String::from_utf8_lossy(&buffer[..bytes_read]);
             if lines.push(&chunk).iter().any(|l| l.contains("[CONFIG]")) {
-                return Ok(lines.finish());
+                return Ok(lines.finish_complete());
             }
         }
     }
@@ -1499,10 +1506,11 @@ const SETTING_CONFIG_TIMEOUT_MS: u64 = 2000;
 /// They configure device behavior that takes effect on the next therapy session.
 ///
 /// Expected responses:
-/// - Success: the menu frame echoing the setting, `[MENU-TX] THERAPY_LED_OFF:true\n\x04`
-///   (`[SETTING] ...` is still accepted), or no reply at all (older firmware, or
-///   a SECONDARY glove, which ignores menu commands)
-/// - Error: a frame carrying `ERROR:...`, or a bare `[ERROR] ...` line
+/// - Success: this command's menu frame echoing the setting,
+///   `[MENU-TX] CMD:THERAPY_LED_OFF\nTHERAPY_LED_OFF:true\n\x04` (`[SETTING] ...` is
+///   still accepted), or no reply at all (older firmware, or a SECONDARY glove,
+///   which ignores menu commands)
+/// - Error: this command's frame carrying `ERROR:...`, or a bare `[ERROR] ...` line
 ///
 /// # Arguments
 /// * `transport` - Open serial transport
@@ -1525,6 +1533,8 @@ fn send_setting_command<T: DfuTransport, L: Fn(&str)>(
 
     log(&format!("Setting {} = {}", friendly_name, setting_value));
 
+    // Replies carry no request ID: drop stale input so it isn't read as ours.
+    transport.clear_input().ok();
     transport.write(command.as_bytes())?;
     transport.flush()?;
 
@@ -1542,17 +1552,25 @@ fn send_setting_command<T: DfuTransport, L: Fn(&str)>(
             response.extend_from_slice(&buffer[..bytes_read]);
             let response_str = String::from_utf8_lossy(&response);
 
-            // The menu answers with a frame echoing the setting's key, or ERROR
-            if let Some(frame) = parse_menu_response(&response_str) {
+            // The menu answers with a frame naming the command (`CMD:<name>`)
+            // that echoes the setting's key, or carries ERROR. Frames for other
+            // commands are ignored; one without `CMD` (older firmware) counts
+            // only if it carries the setting's key.
+            for frame in parse_menu_frames(&response_str) {
+                let ours = match frame.get("CMD") {
+                    Some(cmd) => cmd == setting_name,
+                    None => frame.get(setting_name).is_some(),
+                };
+                if !ours {
+                    continue;
+                }
                 if let Some(message) = frame.error() {
                     return Err(DfuError::SettingConfigFailed {
                         reason: format!("Device rejected {}: {}", trimmed, message),
                     });
                 }
-                if frame.get(setting_name).is_some() {
-                    log(&format!("Setting acknowledged: {}", response_str.trim()));
-                    return Ok(());
-                }
+                log(&format!("Setting acknowledged: {}", response_str.trim()));
+                return Ok(());
             }
 
             // Check for success acknowledgment
@@ -2342,6 +2360,27 @@ mod tests {
         assert_eq!(warnings, vec![MOTOR_ERROR.to_string()]);
     }
 
+    /// `[CONFIG]` ends the wait before the rest of a later line arrives: that
+    /// partial line is dropped, not read as a whole fault line.
+    #[test]
+    fn serial_ready_drops_unterminated_tail_after_config() {
+        let mut transport = ScriptedTransport::new(vec![
+            "[CONFIG] Current role: PRIMARY\r\n[ERROR] SECONDARY rep",
+        ]);
+        let warnings =
+            wait_for_serial_ready_with(&mut transport, &|_: &str| {}, &|| false, 5_000, 1_500)
+                .unwrap();
+        assert!(warnings.is_empty(), "{warnings:?}");
+    }
+
+    #[test]
+    fn boot_drain_drops_unterminated_tail_after_ready() {
+        let mut transport = TimedTransport::new(vec![(0, b"[READY]\n[ERROR] SECONDARY rep")]);
+        let drain = drain_boot_output_with(&mut transport, &|| false, 250, 10_000).unwrap();
+        assert!(drain.found_ready);
+        assert!(drain.warnings.is_empty(), "{:?}", drain.warnings);
+    }
+
     #[test]
     fn serial_ready_falls_through_on_silence() {
         let mut transport = ScriptedTransport::new(vec![]);
@@ -2417,13 +2456,45 @@ mod tests {
 
     #[test]
     fn setting_acked_by_menu_frame() {
-        let mut transport = ScriptedTransport::new(vec!["[MENU-TX] THERAPY_LED_OFF:true\n\u{4}"]);
-        send_setting_command(&mut transport, "THERAPY_LED_OFF:true\n", &|_: &str| {}).unwrap();
+        let mut transport = ScriptedTransport::new(vec![
+            "[MENU-TX] CMD:THERAPY_LED_OFF\nTHERAPY_LED_OFF:true\n\u{4}",
+        ]);
+        let logged = std::cell::RefCell::new(Vec::<String>::new());
+        send_setting_command(&mut transport, "THERAPY_LED_OFF:true\n", &|m: &str| {
+            logged.borrow_mut().push(m.into())
+        })
+        .unwrap();
+        assert!(
+            logged.borrow().iter().any(|m| m.starts_with("Setting acknowledged")),
+            "{:?}",
+            logged.borrow()
+        );
+        assert_eq!(transport.ops()[..2], ["clear", "write"]);
+    }
+
+    /// Replies have no request IDs: another command's ERROR frame (a stale
+    /// probe reply) must not fail this setting, and its own ack still counts.
+    #[test]
+    fn setting_ignores_error_frame_for_another_command() {
+        let mut transport = ScriptedTransport::new(vec![
+            "[MENU-TX] CMD:INFO\nERROR:Busy\n\u{4}",
+            "[MENU-TX] CMD:THERAPY_LED_OFF\nTHERAPY_LED_OFF:true\n\u{4}",
+        ]);
+        let logged = std::cell::RefCell::new(Vec::<String>::new());
+        send_setting_command(&mut transport, "THERAPY_LED_OFF:true\n", &|m: &str| {
+            logged.borrow_mut().push(m.into())
+        })
+        .unwrap();
+        assert!(logged
+            .borrow()
+            .iter()
+            .any(|m| m.starts_with("Setting acknowledged")));
     }
 
     #[test]
     fn setting_rejected_by_menu_error_frame() {
-        let mut transport = ScriptedTransport::new(vec!["[MENU-TX] ERROR:Invalid value\u{4}"]);
+        let mut transport =
+            ScriptedTransport::new(vec!["[MENU-TX] CMD:THERAPY_LED_OFF\nERROR:Invalid value\n\u{4}"]);
         let err = send_setting_command(&mut transport, "THERAPY_LED_OFF:maybe\n", &|_: &str| {})
             .unwrap_err();
         assert!(
