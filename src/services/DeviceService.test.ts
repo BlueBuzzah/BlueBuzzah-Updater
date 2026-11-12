@@ -313,6 +313,21 @@ describe('DeviceService', () => {
       expect(progressCallback).not.toHaveBeenCalledWith(expect.objectContaining({ message: warning }));
     });
 
+    it('logs the warnings when the flash then fails', async () => {
+      const warning = '[ERROR] DRV2605 finger 2 initialization failed';
+      const onLog = vi.fn();
+      vi.mocked(invoke).mockImplementationOnce(async (_cmd, args) => {
+        const channel = (args as { progress: Channel<DfuProgress> }).progress;
+        channel.onmessage({ stage: 'warning', percent: -1, message: warning });
+        throw 'Operation cancelled by user';
+      });
+
+      await expect(
+        service.deployFirmware(createMockDevice({ role: 'PRIMARY' }), createMockBundle(), undefined, onLog)
+      ).rejects.toBe('Operation cancelled by user');
+      expect(onLog).toHaveBeenCalledWith(warning);
+    });
+
     it('keeps warnings delivered after the flash command resolves', async () => {
       const warning = '[ERROR] DRV2605 finger 2 initialization failed';
       vi.mocked(invoke).mockImplementationOnce(async (_cmd, args) => {

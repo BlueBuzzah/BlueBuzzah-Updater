@@ -204,6 +204,20 @@ describe('TherapyProgress outcome reporting', () => {
     expect(onComplete.mock.calls[0][0].success).toBe(true);
   });
 
+  it('logs fault lines reported before a failure as WARN', async () => {
+    const fault = 'Device reported: [ERROR] DRV2605 finger 2 initialization failed';
+    mockConfigure.mockImplementation(async (_d, _p, onProgress) => {
+      onProgress!({ devicePath: '/dev/cu.a', stage: 'sending', progress: 50, message: fault });
+      throw 'Failed to configure the profile: [ERROR] Invalid profile';
+    });
+    const onComplete = vi.fn();
+    render(<TherapyProgress profile="REGULAR" devices={[device('/dev/cu.a', 'Glove A')]} onComplete={onComplete} onProgressUpdate={vi.fn()} />);
+
+    await waitFor(() => expect(onComplete).toHaveBeenCalled());
+    const logs = useTherapyStore.getState().logs;
+    expect(logs.some((l) => l.startsWith('WARN') && l.endsWith(`Glove A: ${fault}`))).toBe(true);
+  });
+
   it('does not report overall success when any device is partial', async () => {
     mockConfigure
       .mockResolvedValueOnce({ status: 'success', message: 'ok', warnings: [] })

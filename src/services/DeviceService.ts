@@ -225,6 +225,9 @@ export class DeviceService implements IDeviceRepository {
       }
       return warnings;
     } catch (error) {
+      // The caller only logs warnings from a finished flash: log them here so
+      // a failed or stopped run keeps the fault lines.
+      warnings.forEach((warning) => onLog?.(warning));
       console.error('Failed to deploy firmware:', error);
       const errorMessage =
         typeof error === 'string'
