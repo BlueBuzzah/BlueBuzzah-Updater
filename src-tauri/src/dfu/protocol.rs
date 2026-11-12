@@ -30,7 +30,8 @@ use super::device::{
 use super::error::{DfuError, DfuResult};
 use super::firmware_reader::read_firmware_zip;
 use super::menu::{
-    preflight_primary_check, send_menu_command, write_custom_params, ProfileConfigOutcome,
+    parse_menu_response, preflight_primary_check, send_menu_command, write_custom_params,
+    ProfileConfigOutcome,
 };
 use super::packet::{
     build_firmware_data_packet, build_init_packet, build_start_dfu_packet, build_stop_data_packet,
@@ -1232,15 +1233,17 @@ const SETTING_CONFIG_TIMEOUT_MS: u64 = 2000;
 /// They configure device behavior that takes effect on the next therapy session.
 ///
 /// Expected responses:
-/// - Success: "[SETTING] ..." or device may not respond (backwards compatibility)
-/// - Error: "[ERROR] ..."
+/// - Success: the menu frame echoing the setting, `[MENU-TX] THERAPY_LED_OFF:true\n\x04`
+///   (`[SETTING] ...` is still accepted), or no reply at all (older firmware, or
+///   a SECONDARY glove, which ignores menu commands)
+/// - Error: a frame carrying `ERROR:...`, or a bare `[ERROR] ...` line
 ///
 /// # Arguments
 /// * `transport` - Open serial transport
 /// * `command` - Command string to send (should include newline)
 /// * `log` - Callback for debug log messages
-fn send_setting_command<L: Fn(&str)>(
-    transport: &mut SerialTransport,
+fn send_setting_command<T: DfuTransport, L: Fn(&str)>(
+    transport: &mut T,
     command: &str,
     log: &L,
 ) -> DfuResult<()> {
@@ -1272,6 +1275,19 @@ fn send_setting_command<L: Fn(&str)>(
         if bytes_read > 0 {
             response.extend_from_slice(&buffer[..bytes_read]);
             let response_str = String::from_utf8_lossy(&response);
+
+            // The menu answers with a frame echoing the setting's key, or ERROR
+            if let Some(frame) = parse_menu_response(&response_str) {
+                if let Some(message) = frame.error() {
+                    return Err(DfuError::SettingConfigFailed {
+                        reason: format!("Device rejected {}: {}", trimmed, message),
+                    });
+                }
+                if frame.get(setting_name).is_some() {
+                    log(&format!("Setting acknowledged: {}", response_str.trim()));
+                    return Ok(());
+                }
+            }
 
             // Check for success acknowledgment
             if response_str.contains("[SETTING]") {
@@ -1590,6 +1606,7 @@ pub fn configure_custom_profile<L: Fn(&str) + Clone>(
 
 #[cfg(test)]
 mod tests {
+    use super::super::menu::ScriptedTransport;
     use super::*;
 
     /// Opening the port pulses DTR (resets the glove), so a stopped attempt must
@@ -1911,6 +1928,29 @@ mod tests {
             .to_string()
             .to_lowercase()
             .contains("failed to configure device role"));
+    }
+
+    #[test]
+    fn setting_acked_by_menu_frame() {
+        let mut transport = ScriptedTransport::new(vec!["[MENU-TX] THERAPY_LED_OFF:true\n\u{4}"]);
+        send_setting_command(&mut transport, "THERAPY_LED_OFF:true\n", &|_: &str| {}).unwrap();
+    }
+
+    #[test]
+    fn setting_rejected_by_menu_error_frame() {
+        let mut transport = ScriptedTransport::new(vec!["[MENU-TX] ERROR:Invalid value\u{4}"]);
+        let err = send_setting_command(&mut transport, "THERAPY_LED_OFF:maybe\n", &|_: &str| {})
+            .unwrap_err();
+        assert!(
+            matches!(err, DfuError::SettingConfigFailed { .. }),
+            "got {err:?}"
+        );
+    }
+
+    #[test]
+    fn setting_without_reply_still_succeeds() {
+        let mut transport = ScriptedTransport::new(vec![]);
+        send_setting_command(&mut transport, "DEBUG:false\n", &|_: &str| {}).unwrap();
     }
 
     #[test]
