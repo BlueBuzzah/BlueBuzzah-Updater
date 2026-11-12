@@ -82,6 +82,8 @@ export function InstallationProgress({ release, devices, onComplete, onProgressU
   const completedDevices = useRef<Set<string>>(new Set());
   const devicePathMap = useRef<Map<string, { path: string; label: string }>>(new Map());
   const deviceResults = useRef<DeviceUpdateResult[]>([]);
+  // Warnings from finished devices, by original and current path (a stop rebuilds the results).
+  const deviceWarnings = useRef<Map<string, string[]>>(new Map());
 
   useEffect(() => {
     // Prevent double-execution in React StrictMode (development only)
@@ -140,7 +142,9 @@ export function InstallationProgress({ release, devices, onComplete, onProgressU
     fail(
       'Installation cancelled',
       updatedDevices.map((d) =>
-        completedDevices.current.has(d.path) ? { device: d, success: true } : { device: d, success: false, error: 'Installation cancelled' }
+        completedDevices.current.has(d.path)
+          ? { device: d, success: true, warnings: deviceWarnings.current.get(d.path) ?? [] }
+          : { device: d, success: false, error: 'Installation cancelled' }
       )
     );
   };
@@ -208,7 +212,7 @@ export function InstallationProgress({ release, devices, onComplete, onProgressU
         let currentLabel = device.label;
         addLog('INFO', `Starting update for ${currentLabel} (${device.role})...`);
         try {
-          await deviceService.deployFirmware(
+          const warnings = await deviceService.deployFirmware(
             device,
             firmware,
             (progress) => {
@@ -237,8 +241,11 @@ export function InstallationProgress({ release, devices, onComplete, onProgressU
           );
           completedDevices.current.add(device.path);
           if (currentPath !== device.path) completedDevices.current.add(currentPath);
+          deviceWarnings.current.set(device.path, warnings);
+          deviceWarnings.current.set(currentPath, warnings);
           addLog('INFO', `Successfully updated ${currentLabel}`);
-          deviceResults.current.push({ device, success: true });
+          warnings.forEach((warning) => addLog('WARN', `${currentLabel}: ${warning}`));
+          deviceResults.current.push({ device, success: true, warnings });
         } catch (deviceErr) {
           const message =
             typeof deviceErr === 'string'

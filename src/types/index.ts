@@ -102,6 +102,8 @@ export interface DeviceUpdateResult {
   device: Device;
   success: boolean;
   error?: string;
+  /** Problems the device reported after a successful flash (boot faults, role not set) */
+  warnings?: string[];
 }
 
 export interface ValidationResult {
@@ -203,6 +205,8 @@ export interface ProfileConfigOutcome {
    * timeouts embed the entire boot stream, which is unreadable inline.
    */
   detail?: string | null;
+  /** Problems the device reported along the way (boot faults); may be empty */
+  warnings: string[];
 }
 
 export type TherapyConfigStage =

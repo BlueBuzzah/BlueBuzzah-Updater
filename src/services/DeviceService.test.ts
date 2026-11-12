@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core';
+import type { DfuProgress } from '@/types';
 import { DeviceService } from './DeviceService';
 import {
   createMockDevice,
@@ -281,6 +282,33 @@ describe('DeviceService', () => {
         deviceRole: 'SECONDARY',
         progress: expect.any(Object),
       });
+    });
+
+    it('resolves the warnings the device reported and still logs them', async () => {
+      const device = createMockDevice({ role: 'PRIMARY' });
+      const firmware = createMockBundle();
+      const progressCallback = vi.fn();
+      const onLog = vi.fn();
+      const warning = '[WARN] Motor check: 2/5 motors responded - check JST connections';
+
+      vi.mocked(invoke).mockImplementationOnce(async (_cmd, args) => {
+        const channel = (args as { progress: Channel<DfuProgress> }).progress;
+        channel.onmessage({ stage: 'log', percent: 90, message: 'booting' });
+        channel.onmessage({ stage: 'warning', percent: 95, message: warning });
+        channel.onmessage({ stage: 'warning', percent: 95, message: "The role wasn't set. Update this device again to set it." });
+        channel.onmessage({ stage: 'complete', percent: 100, message: 'done' });
+      });
+
+      const warnings = await service.deployFirmware(device, firmware, progressCallback, onLog);
+
+      expect(warnings).toEqual([warning, "The role wasn't set. Update this device again to set it."]);
+      expect(onLog).toHaveBeenCalledWith(warning);
+      expect(progressCallback).not.toHaveBeenCalledWith(expect.objectContaining({ message: warning }));
+    });
+
+    it('resolves no warnings when the device reported none', async () => {
+      vi.mocked(invoke).mockResolvedValueOnce(undefined);
+      await expect(service.deployFirmware(createMockDevice({ role: 'PRIMARY' }), createMockBundle())).resolves.toEqual([]);
     });
 
     it('reports complete stage on success', async () => {
