@@ -72,6 +72,21 @@ pub fn parse_menu_response(raw: &str) -> Option<MenuResponse> {
     Some(MenuResponse { pairs })
 }
 
+/// Parse every complete menu frame in raw serial output, in order.
+pub(crate) fn parse_menu_frames(raw: &str) -> Vec<MenuResponse> {
+    let mut frames = Vec::new();
+    let mut rest = raw;
+    while let Some(start) = rest.find(MENU_TX_PREFIX) {
+        let Some(len) = rest[start..].find(EOT) else {
+            break;
+        };
+        let end = start + len + EOT.len_utf8();
+        frames.extend(parse_menu_response(&rest[start..end]));
+        rest = &rest[end..];
+    }
+    frames
+}
+
 /// Send one menu command and read its framed response.
 ///
 /// The command is written with a trailing newline. Reads accumulate until an
@@ -280,6 +295,10 @@ pub struct ProfileConfigOutcome {
     /// underlying error. Belongs in the log, never on a card: firmware
     /// timeouts embed the entire boot stream, which is unreadable inline.
     pub detail: Option<String>,
+    /// Hardware-fault lines the device printed (boot `[ERROR]`s, a failed motor
+    /// check). The outcome stands; these are shown as warnings beside it.
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 
 impl ProfileConfigOutcome {
@@ -288,6 +307,7 @@ impl ProfileConfigOutcome {
             status: "success".to_string(),
             message: message.into(),
             detail: None,
+            warnings: vec![],
         }
     }
 
@@ -296,6 +316,7 @@ impl ProfileConfigOutcome {
             status: "success_secondary".to_string(),
             message: message.into(),
             detail: None,
+            warnings: vec![],
         }
     }
 
@@ -306,6 +327,7 @@ impl ProfileConfigOutcome {
             status: "partial".to_string(),
             message: message.into(),
             detail: Some(detail.into()),
+            warnings: vec![],
         }
     }
 }
@@ -365,7 +387,7 @@ pub const PREFLIGHT_ROLE_TIMEOUT_MS: u64 = 6000;
 
 /// One probe's share of that budget. Short enough to retry promptly, long
 /// enough for a real reply to arrive once the menu is finally listening.
-const MENU_READY_PROBE_MS: u64 = 1500;
+pub(crate) const MENU_READY_PROBE_MS: u64 = 1500;
 
 /// Poll `INFO` until the firmware menu answers, or the budget runs out.
 ///
@@ -637,7 +659,7 @@ pub fn write_custom_params<T: DfuTransport>(
 /// `with_error_at_end` makes them fail like an unplugged port, or
 /// `with_instant_eof` makes them return 0 at once like a hung-up port.
 #[cfg(test)]
-pub struct ScriptedTransport {
+pub(crate) struct ScriptedTransport {
     replies: std::collections::VecDeque<String>,
     written: Vec<String>,
     /// Ordered record of transport operations ("clear", "write", "read",

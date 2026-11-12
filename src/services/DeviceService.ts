@@ -18,13 +18,17 @@ export interface IDeviceRepository {
     firmware: FirmwareBundle,
     onProgress?: (progress: UpdateProgress) => void,
     onLog?: (message: string) => void
-  ): Promise<void>;
+  ): Promise<string[]>;
   validateDevice(device: Device): Promise<ValidationResult>;
   validateDevices(devices: Device[]): Promise<Map<string, ValidationResult>>;
   cancelFlash(): Promise<void>;
 }
 
-// Map DFU stages to UpdateStage enum (returns null for log events)
+// How long to wait after the flash command resolves for the channel to deliver
+// the backend's last stage. Channel events can land after the command's result.
+const CHANNEL_SETTLE_MS = 2000;
+
+// Map DFU stages to UpdateStage enum (returns null for log and warning events)
 function mapDfuStageToUpdateStage(dfuStage: string): UpdateStage | null {
   switch (dfuStage) {
     case 'reading':
@@ -49,7 +53,8 @@ function mapDfuStageToUpdateStage(dfuStage: string): UpdateStage | null {
     case 'cancelled':
       return 'cancelled';
     case 'log':
-      return null; // Log events don't change the stage
+    case 'warning':
+      return null; // Log and warning events don't change the stage
     default:
       return 'copying';
   }
@@ -116,16 +121,21 @@ export class DeviceService implements IDeviceRepository {
     }
   }
 
+  /**
+   * Flash one device. Resolves with the warnings it reported after a successful
+   * flash (boot faults, role not set); empty when there were none.
+   */
   async deployFirmware(
     device: Device,
     firmware: FirmwareBundle,
     onProgress?: (progress: UpdateProgress) => void,
     onLog?: (message: string) => void
-  ): Promise<void> {
+  ): Promise<string[]> {
     // Create throttled progress callback (100ms interval, 1% minimum change)
     const throttledProgress = onProgress
       ? createProgressThrottle(onProgress, 100, 1)
       : null;
+    const warnings: string[] = [];
 
     try {
       // Validate device role
@@ -145,15 +155,23 @@ export class DeviceService implements IDeviceRepository {
 
       // Create a channel to receive DFU progress updates
       const progressChannel = new Channel<DfuProgress>();
+      // Resolves once the backend's last stage (complete or cancelled) arrives.
+      let channelSettled = () => {};
+      const settled = new Promise<void>((resolve) => {
+        channelSettled = resolve;
+      });
 
       progressChannel.onmessage = (dfuProgress) => {
         const mappedStage = mapDfuStageToUpdateStage(dfuProgress.stage);
 
-        // Log events go to log callback only, not to progress display
+        // Log events go to the log callback; warnings are collected and logged
+        // by the caller. Neither changes the progress display.
         if (mappedStage === null) {
-          onLog?.(dfuProgress.message);
+          if (dfuProgress.stage === 'warning') warnings.push(dfuProgress.message);
+          else onLog?.(dfuProgress.message);
           return;
         }
+        if (mappedStage === 'complete' || mappedStage === 'cancelled') channelSettled();
 
         // Non-log events: emit throttled progress with stable display message
         const displayMessage = getStageDisplayMessage(mappedStage, dfuProgress);
@@ -182,6 +200,17 @@ export class DeviceService implements IDeviceRepository {
         progress: progressChannel,
       });
 
+      // Don't return before late warnings arrive; a missing last stage only
+      // costs the short fallback.
+      let fallback: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        settled,
+        new Promise<void>((resolve) => {
+          fallback = setTimeout(resolve, CHANNEL_SETTLE_MS);
+        }),
+      ]);
+      clearTimeout(fallback);
+
       // Flush any pending throttled updates before final complete
       throttledProgress?.flush();
 
@@ -194,7 +223,11 @@ export class DeviceService implements IDeviceRepository {
           message: 'Update complete',
         });
       }
+      return warnings;
     } catch (error) {
+      // The caller only logs warnings from a finished flash: log them here so
+      // a failed or stopped run keeps the fault lines.
+      warnings.forEach((warning) => onLog?.(warning));
       console.error('Failed to deploy firmware:', error);
       const errorMessage =
         typeof error === 'string'
@@ -273,10 +306,11 @@ export class DeviceService implements IDeviceRepository {
 
     for (const device of devices) {
       try {
-        await this.deployFirmware(device, firmware, onProgress);
+        const warnings = await this.deployFirmware(device, firmware, onProgress);
         results.push({
           device,
           success: true,
+          warnings,
         });
       } catch (error) {
         results.push({

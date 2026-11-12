@@ -14,7 +14,7 @@ function config(
   return {
     device,
     success,
-    outcome: status ? { status, message: `${status} message` } : undefined,
+    outcome: status ? { status, message: `${status} message`, warnings: [] } : undefined,
     error: success ? undefined : 'Device not found',
   };
 }
@@ -55,6 +55,29 @@ describe('TherapySuccess', () => {
     renderWith([config('a', true, 'partial'), config('b', true, 'success')], false);
     expect(screen.getByRole('status')).toHaveTextContent('The pattern changed, but your custom settings may not have saved');
     expect(screen.getByText('Partly done', { selector: '.bb-badge span' })).toBeInTheDocument();
+  });
+
+  it('warns when a device reported a problem and lists it by device', () => {
+    const warned = config('a', true, 'success');
+    warned.outcome!.warnings = ['[WARN] Motor check: 2/5 motors responded - check JST connections'];
+    renderWith([warned, config('b', true, 'success')], true, 'REGULAR');
+    const banner = screen.getByRole('status');
+    expect(banner).toHaveClass('bb-banner--warning');
+    expect(banner).toHaveTextContent('Regular is set on both devices');
+    expect(banner).toHaveTextContent('One device needs attention. Check the details below.');
+    expect(screen.getByText('Details')).toBeInTheDocument();
+    expect(screen.getByText('Glove a: [WARN] Motor check: 2/5 motors responded - check JST connections')).toBeInTheDocument();
+    expect(screen.getByText('Warning', { selector: '.bb-badge span' })).toBeInTheDocument();
+    expect(screen.getByText('Done', { selector: '.bb-badge span' })).toBeInTheDocument();
+  });
+
+  it('lets a partial result win over warnings', () => {
+    const partial = config('a', true, 'partial');
+    partial.outcome!.warnings = ['[ERROR] DRV2605 finger 2 initialization failed'];
+    renderWith([partial], false);
+    expect(screen.getByRole('status')).toHaveTextContent('The pattern changed, but your custom settings may not have saved');
+    expect(screen.getByText('Partly done', { selector: '.bb-badge span' })).toBeInTheDocument();
+    expect(screen.queryByText('Warning', { selector: '.bb-badge span' })).not.toBeInTheDocument();
   });
 
   it('reports failures as a danger banner with Copy Details', () => {

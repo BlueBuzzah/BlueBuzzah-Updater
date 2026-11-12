@@ -106,6 +106,7 @@ describe('TherapyProgress outcome reporting', () => {
       message: 'Profile loaded, but the device never came back to confirm the parameters.',
       detail:
         'Timeout waiting for menu response to INFO. Received: [DIAG] silk port 3 (F2): MOTOR PRESENT (STATUS=0xE4)',
+      warnings: [],
     });
     const onComplete = vi.fn();
 
@@ -142,6 +143,7 @@ describe('TherapyProgress outcome reporting', () => {
       return {
         status: 'partial' as const,
         message: 'Profile loaded, but the parameters could not be confirmed.',
+        warnings: [],
       };
     });
     const onComplete = vi.fn();
@@ -162,7 +164,7 @@ describe('TherapyProgress outcome reporting', () => {
   });
 
   it('carries the backend outcome into the per-device result', async () => {
-    const outcome = { status: 'partial' as const, message: 'not confirmed' };
+    const outcome = { status: 'partial' as const, message: 'not confirmed', warnings: [] };
     mockConfigure.mockResolvedValue(outcome);
     const onComplete = vi.fn();
 
@@ -181,10 +183,45 @@ describe('TherapyProgress outcome reporting', () => {
     expect(result.deviceConfigs[0].success).toBe(true);
   });
 
+  it('logs each device warning and keeps it in the result', async () => {
+    const warning = '[ERROR] DRV2605 finger 2 initialization failed';
+    mockConfigure.mockResolvedValue({ status: 'success', message: 'ok', warnings: [warning] });
+    const onComplete = vi.fn();
+
+    render(
+      <TherapyProgress
+        profile="REGULAR"
+        devices={[device('/dev/cu.a', 'Glove A')]}
+        onComplete={onComplete}
+        onProgressUpdate={vi.fn()}
+      />
+    );
+
+    await waitFor(() => expect(onComplete).toHaveBeenCalled());
+    const logs = useTherapyStore.getState().logs;
+    expect(logs.some((l) => l.startsWith('WARN') && l.endsWith(`Glove A: ${warning}`))).toBe(true);
+    expect(onComplete.mock.calls[0][0].deviceConfigs[0].outcome.warnings).toEqual([warning]);
+    expect(onComplete.mock.calls[0][0].success).toBe(true);
+  });
+
+  it('logs fault lines reported before a failure as WARN', async () => {
+    const fault = 'Device reported: [ERROR] DRV2605 finger 2 initialization failed';
+    mockConfigure.mockImplementation(async (_d, _p, onProgress) => {
+      onProgress!({ devicePath: '/dev/cu.a', stage: 'sending', progress: 50, message: fault });
+      throw 'Failed to configure the profile: [ERROR] Invalid profile';
+    });
+    const onComplete = vi.fn();
+    render(<TherapyProgress profile="REGULAR" devices={[device('/dev/cu.a', 'Glove A')]} onComplete={onComplete} onProgressUpdate={vi.fn()} />);
+
+    await waitFor(() => expect(onComplete).toHaveBeenCalled());
+    const logs = useTherapyStore.getState().logs;
+    expect(logs.some((l) => l.startsWith('WARN') && l.endsWith(`Glove A: ${fault}`))).toBe(true);
+  });
+
   it('does not report overall success when any device is partial', async () => {
     mockConfigure
-      .mockResolvedValueOnce({ status: 'success', message: 'ok' })
-      .mockResolvedValueOnce({ status: 'partial', message: 'not confirmed' });
+      .mockResolvedValueOnce({ status: 'success', message: 'ok', warnings: [] })
+      .mockResolvedValueOnce({ status: 'partial', message: 'not confirmed', warnings: [] });
     const onComplete = vi.fn();
 
     render(
@@ -204,6 +241,7 @@ describe('TherapyProgress outcome reporting', () => {
     mockConfigure.mockResolvedValue({
       status: 'success_secondary',
       message: 'parameters apply to the primary device',
+      warnings: [],
     });
     const onComplete = vi.fn();
 
@@ -226,6 +264,7 @@ describe('TherapyProgress outcome reporting', () => {
     mockConfigure.mockResolvedValue({
       status: 'success_secondary',
       message: 'This device did not answer as the primary.',
+      warnings: [],
     });
 
     render(
@@ -248,6 +287,7 @@ describe('TherapyProgress outcome reporting', () => {
     mockConfigure.mockResolvedValue({
       status: 'success_secondary',
       message: 'parameters apply to the primary device',
+      warnings: [],
     });
     const onComplete = vi.fn();
 

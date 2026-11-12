@@ -192,6 +192,7 @@ impl From<DfuStage> for DfuProgressEvent {
             DfuStage::ConfiguringRole => ("configuring", None, None),
             DfuStage::Complete => ("complete", None, None),
             DfuStage::Log { .. } => ("log", None, None),
+            DfuStage::Warning { .. } => ("warning", None, None),
             DfuStage::Cancelled => ("cancelled", None, None),
         };
 
@@ -763,7 +764,10 @@ pub async fn set_device_profile(
                     &identifier,
                     log,
                 )
-                .map(|()| ProfileConfigOutcome::success(format!("Profile set to {}", profile)))
+                .map(|warnings| ProfileConfigOutcome {
+                    warnings,
+                    ..ProfileConfigOutcome::success(format!("Profile set to {}", profile))
+                })
             };
 
             match &config_result {
@@ -964,6 +968,14 @@ mod tests {
     }
 
     #[test]
+    fn rejected_firmware_is_operation_retriable() {
+        // A rejected image must re-flash, and must not read as a missing device.
+        let msg = crate::dfu::DfuError::FirmwareRejected.to_string();
+        assert!(is_operation_retriable(&msg), "{msg}");
+        assert!(!msg.to_lowercase().contains("not found"), "{msg}");
+    }
+
+    #[test]
     fn genuine_bootloader_timeout_still_retriable() {
         // Regression guard: real flash-phase failures must still retry.
         assert!(is_operation_retriable(
@@ -983,6 +995,16 @@ mod tests {
         assert_eq!(event.sent, Some(50000));
         assert_eq!(event.total, Some(100000));
         assert!(event.percent > 0.0);
+    }
+
+    #[test]
+    fn test_dfu_progress_event_from_warning() {
+        let event = DfuProgressEvent::from(DfuStage::Warning {
+            message: "w".to_string(),
+        });
+
+        assert_eq!(event.stage, "warning");
+        assert_eq!(event.message, "w");
     }
 
     #[test]

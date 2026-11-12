@@ -87,7 +87,9 @@ export function TherapyProgress({
             // logs with its own status marker — logging it here too printed
             // every outcome twice.
             if (progress.stage !== 'complete' && progress.stage !== 'partial') {
-              addLog('INFO', `${device.label}: ${progress.message}`);
+              // Fault lines the backend logs when a setup fails.
+              const level = progress.message.startsWith('Device reported: ') ? 'WARN' : 'INFO';
+              addLog(level, `${device.label}: ${progress.message}`);
             }
           }
         );
@@ -110,6 +112,7 @@ export function TherapyProgress({
           default:
             addLog('INFO', `Successfully configured ${device.label}`);
         }
+        outcome.warnings.forEach((warning) => addLog('WARN', `${device.label}: ${warning}`));
 
         results.push({ device, success: true, outcome });
         setConfiguredCount((c) => c + 1);
