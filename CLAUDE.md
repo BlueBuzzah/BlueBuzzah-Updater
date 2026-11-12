@@ -64,7 +64,7 @@ grep -rnE "text-(xs|sm|base|lg|[0-9]?xl)\b|text-\[|#[0-9a-fA-F]{3,8}\b|rgba?\(|h
 
 | Rust module (`src-tauri/src/`) | Purpose |
 |--------------------------------|---------|
-| `dfu/protocol.rs` | DFU state machine — `upload_firmware()`, `configure_role_with_deadline()` (wraps `configure_device_role_flexible()` in an overall deadline), `configure_device_with_settings()`, `drain_boot_output()` |
+| `dfu/protocol.rs` | DFU state machine — `upload_firmware()`, `finish_after_write()` (post-write errors → warning + complete), `configure_role_with_deadline()` (wraps `configure_device_role_flexible()` in an overall deadline), `configure_device_with_settings()`, `drain_boot_output()`, `wait_for_serial_ready()` (GET_ROLE readiness probe) |
 | `dfu/transport.rs` | Serial transport, 1200-baud touch reset, port-open retry; `open()` (resets board) vs `open_for_monitor(port, read_only_dtr(board))` (doesn't; Logs + Custom profile read: RTS low, then DTR high for v2, low for v3) |
 | `dfu/device.rs` | Device detection; `DeviceIdentifier` tracks devices across re-enumeration (serial number preferred, VID/PID+port-pattern fallback) |
 | `dfu/slip.rs`, `dfu/packet.rs` | SLIP/HCI framing, CRC16 |
@@ -78,7 +78,7 @@ grep -rnE "text-(xs|sm|base|lg|[0-9]?xl)\b|text-\[|#[0-9a-fA-F]{3,8}\b|rgba?\(|h
 | `cache.rs` | Per-version firmware cache with SHA256 verification |
 | `settings.rs` | `AdvancedSettings` persistence + pre-profile serial command generation |
 
-**Flash flow** (`upload_firmware`): read DFU zip → touch reset (1200 baud, DTR toggle) → `wait_for_bootloader_flexible` (2 consecutive detections) → HCI DFU: start → erase wait (`wait_with_drain`) → init packet → chunked firmware with flash-page pacing → validate → reboot → `wait_for_application_flexible` → send `SET_ROLE:...` over app-mode serial.
+**Flash flow** (`upload_firmware`): read DFU zip → touch reset (1200 baud, DTR toggle) → `wait_for_bootloader_flexible` (2 consecutive detections) → HCI DFU: start → erase wait (`wait_with_drain`) → init packet → chunked firmware with flash-page pacing → validate → reboot → `wait_for_application_flexible` → boot drain + `GET_ROLE` readiness → send `SET_ROLE:...` over app-mode serial. Everything after the write ends in `finish_after_write` (warning + complete), except a device left in bootloader mode (image rejected), which fails the flash.
 
 **Concurrency**: `DFU_IN_PROGRESS`/`DFU_CANCELLED` atomics + RAII `DfuGuard` in `commands/dfu.rs`. A dropped frontend `Channel` sets `DFU_CANCELLED` (reverse cancellation path).
 
@@ -91,7 +91,7 @@ grep -rnE "text-(xs|sm|base|lg|[0-9]?xl)\b|text-\[|#[0-9a-fA-F]{3,8}\b|rgba?\(|h
 ## Cross-Repo Contract (must match BlueBuzzah-Firmware)
 
 - Serial commands: `SET_ROLE:PRIMARY|SECONDARY`, `SET_PROFILE:REGULAR|NOISY|HYBRID|GENTLE`, advanced-setting commands from `settings.rs::to_pre_profile_commands()`
-- Response markers parsed by `protocol.rs`: `[CONFIG]`, `[ERROR]`, `"Role set to"`, `"Profile set to"`, and the setting echo `[MENU-TX] <KEY>:<value>\n\x04` (`[SETTING]` still accepted) — hardcoded in firmware `main.cpp`/`menu_controller.cpp` serial output; rewording either side breaks the other
+- Response markers parsed by `protocol.rs`: `[CONFIG]`, `[ERROR]`, `"Role set to"`, `"Profile set to"`, and the setting echo `[MENU-TX] CMD:<KEY>\n<KEY>:<value>\n\x04` (only a frame whose `CMD` is the setting counts; `[SETTING]` still accepted) — hardcoded in firmware `main.cpp`/`menu_controller.cpp` serial output; rewording either side breaks the other
 - Boot marker in `drain_boot_output`: `[READY]` ends the drain (`BOOT_READY_MARKER`); without it, 6.5 s of silence ends it (20 s cap)
 - Readiness probe: after the drain, `wait_for_serial_ready` sends `GET_ROLE` until a `[CONFIG]` line answers (`Current role: …`, or `Only SET_ROLE command accepted.` when unconfigured), then sends anyway after `SERIAL_READY_TIMEOUT_MS`
 - Hardware faults: boot `[ERROR]` lines and `[WARN] Motor check:` (not `Motor check skipped:`) read during the drain and readiness probe are warnings (flash stage `warning`, `ProfileConfigOutcome.warnings`), not failures
@@ -112,7 +112,7 @@ grep -rnE "text-(xs|sm|base|lg|[0-9]?xl)\b|text-\[|#[0-9a-fA-F]{3,8}\b|rgba?\(|h
 - **Flush is bounded**: `SerialTransport::flush` polls the output queue for at most `SERIAL_FLUSH_TIMEOUT_MS` and discards stuck output. Never call the raw `port.flush()`: it's `tcdrain`, which blocks forever on macOS once a device stops reading USB serial (the 2026-10-28 role-config hang).
 - **Boot noise**: firmware boot logs can contain `[ERROR]` lines (hardware faults); always `drain_boot_output` and `wait_for_serial_ready` before sending a command, or a late boot line is misread as the command's reply.
 - **Setting ack timeout = success**: `send_setting_command` treats no reply as success (older firmware, SECONDARY gloves); only an `ERROR` frame or bare `[ERROR]` fails it.
-- **Nothing after the firmware write fails a flash**: `upload_firmware` and `flash_v3` pass the reboot wait and role step to `finish_after_write`, which turns any error but a stop into a `warning` stage plus `complete`. Only failures up to and including the write (and v3's post-write reset) fail a flash.
+- **Nothing after the firmware write fails a flash**: `upload_firmware` and `flash_v3` pass the reboot wait and role step to `finish_after_write`, which turns any error but a stop into a `warning` stage plus `complete`. Only failures up to and including the write (and v3's post-write reset) fail a flash, plus a v2 device found in bootloader mode after the reboot wait: the stop-data ack is link-level, so that is a rejected image.
 - **Format detection**: a firmware zip's `manifest.json` has `manifest_version` for v3 or a top-level `manifest` key for Nordic — never feed one reader the other's zip.
 - **Cache keying**: `cache.rs` keys entries `(version, board)` as `version::board`; on disk, `commands/firmware.rs::firmware_filename` keeps legacy `{version}.zip` for nrf52 and `{version}-{board}.zip` for other boards.
 - **Opening a port can reboot the glove**: `SerialTransport::open` pulses DTR, which resets the board (deliberate for DFU). Read-only paths (`read_custom_profile`, the Logs viewer) use `open_for_monitor` with `read_only_dtr(board)`: RTS low first, then DTR high for v2 (TinyUSB CDC sends nothing without DTR) and low for v3. Never pass through DTR low + RTS high, which resets an ESP32-S3; POSIX opens with both lines high, Windows with both low.
