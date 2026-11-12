@@ -968,6 +968,14 @@ mod tests {
     }
 
     #[test]
+    fn rejected_firmware_is_operation_retriable() {
+        // A rejected image must re-flash, and must not read as a missing device.
+        let msg = crate::dfu::DfuError::FirmwareRejected.to_string();
+        assert!(is_operation_retriable(&msg), "{msg}");
+        assert!(!msg.to_lowercase().contains("not found"), "{msg}");
+    }
+
+    #[test]
     fn genuine_bootloader_timeout_still_retriable() {
         // Regression guard: real flash-phase failures must still retry.
         assert!(is_operation_retriable(

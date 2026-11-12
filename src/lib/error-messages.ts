@@ -135,6 +135,8 @@ function matchGuidance(lower: string): ErrorGuidance | null {
 
   // Specific firmware format errors first (before generic "not found")
   if (has('missing file', 'manifest.json', 'firmware.bin', 'firmware.dat')) return ERROR_GUIDANCE.INVALID_FIRMWARE_FORMAT;
+  // A rejected image leaves the device in bootloader mode: not an entry failure.
+  if (has('stayed in bootloader')) return ERROR_GUIDANCE.DFU_VALIDATION_FAILED;
   if (has('role') && has('config')) return ERROR_GUIDANCE.ROLE_CONFIG_FAILED;
   if (has('not found', 'does not exist')) return ERROR_GUIDANCE.DEVICE_NOT_FOUND;
   if (has('permission denied', 'access denied')) return ERROR_GUIDANCE.PERMISSION_DENIED;

@@ -73,6 +73,13 @@ describe('getErrorGuidance', () => {
       expect(getErrorGuidance('Transfer failed')).toBe(ERROR_GUIDANCE.DFU_TRANSFER_FAILED);
     });
   });
+  describe('DFU_VALIDATION_FAILED pattern', () => {
+    it('matches a device that stayed in bootloader mode after the write', () => {
+      expect(getErrorGuidance("Device stayed in bootloader mode: the firmware wasn't accepted")).toBe(
+        ERROR_GUIDANCE.DFU_VALIDATION_FAILED
+      );
+    });
+  });
   describe('INVALID_FIRMWARE_FORMAT pattern', () => {
     it('matches "missing file" errors', () => {
       expect(getErrorGuidance('Missing file in firmware.zip: manifest.json')).toBe(ERROR_GUIDANCE.INVALID_FIRMWARE_FORMAT);

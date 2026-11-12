@@ -444,15 +444,13 @@ where
     // Step 3: Enter Serial DFU mode
     on_progress(DfuStage::EnteringBootloader);
 
-    let bootloader_port = if already_in_bootloader {
+    let bootloader_device = if already_in_bootloader {
         // Device is already in bootloader - reset it to clear any stale state
         // from previous failed DFU attempts
         SerialTransport::reset_bootloader(port_name)?;
 
         on_progress(DfuStage::WaitingForBootloader);
-        let bootloader_device =
-            wait_for_bootloader_flexible(&device_identifier, get_bootloader_timeout())?;
-        bootloader_device.port
+        wait_for_bootloader_flexible(&device_identifier, get_bootloader_timeout())?
     } else {
         // Device is in application mode - use 1200 baud touch to enter bootloader
         // On Windows, add a brief delay between the port enumeration scan
@@ -464,10 +462,9 @@ where
         SerialTransport::touch_reset(port_name)?;
 
         on_progress(DfuStage::WaitingForBootloader);
-        let bootloader_device =
-            wait_for_bootloader_flexible(&device_identifier, get_bootloader_timeout())?;
-        bootloader_device.port
+        wait_for_bootloader_flexible(&device_identifier, get_bootloader_timeout())?
     };
+    let bootloader_port = bootloader_device.port.clone();
 
     // Check for cancellation before connecting to bootloader
     if is_cancelled() {
@@ -576,14 +573,11 @@ where
     let post_write = match wait_for_application_flexible(&device_identifier, get_reboot_timeout()) {
         // The stop-data ack is link-level only: a device still in bootloader
         // mode rejected the image, so the flash fails (and retries).
-        Err(e) if left_in_bootloader(&device_identifier, &find_nrf52_devices()) => {
+        Err(e) if left_in_bootloader(&bootloader_device, &find_nrf52_devices()) => {
             on_progress(DfuStage::Log {
-                message: format!(
-                    "Device is still in bootloader mode: the firmware wasn't accepted | snapshot: {}",
-                    snapshot_ports()
-                ),
+                message: format!("{} | snapshot: {}", e, snapshot_ports()),
             });
-            return Err(e);
+            return Err(DfuError::FirmwareRejected);
         }
         Err(e) => Err(e),
         Ok(app_device) => {
@@ -629,13 +623,14 @@ where
     finish_after_write(post_write, &on_progress)
 }
 
-/// Whether the device `identifier` tracks is enumerated in bootloader mode,
-/// matched the way `wait_for_bootloader_flexible` matches it.
-fn left_in_bootloader(identifier: &DeviceIdentifier, devices: &[Nrf52Device]) -> bool {
-    let fallback = identifier.to_vid_pid_fallback();
+/// Whether the bootloader this flash wrote to (`written`) is still enumerated
+/// in bootloader mode, on its port or by its serial number. Another glove in
+/// bootloader mode doesn't count.
+fn left_in_bootloader(written: &Nrf52Device, devices: &[Nrf52Device]) -> bool {
     devices.iter().any(|d| {
         d.in_bootloader
-            && (identifier.matches(d) || fallback.as_ref().is_some_and(|fb| fb.matches(d)))
+            && (d.port == written.port
+                || (written.serial_number.is_some() && d.serial_number == written.serial_number))
     })
 }
 
@@ -2689,47 +2684,43 @@ mod tests {
         }
     }
 
-    fn tracked() -> DeviceIdentifier {
-        DeviceIdentifier::from_device(&nrf_device(
-            "/dev/cu.usbmodem14201",
-            0x8029,
-            Some("ABC"),
-            false,
-        ))
-    }
-
     /// A rejected v2 image leaves the glove in bootloader mode: that must fail
     /// the flash, while an app-mode or missing device is only a warning.
     #[test]
-    fn left_in_bootloader_only_for_the_tracked_device_in_bootloader_mode() {
-        let id = tracked();
+    fn left_in_bootloader_only_for_the_bootloader_written_to() {
+        let written = nrf_device("/dev/cu.usbmodem14203", 0x0029, Some("BOOT1"), true);
+        assert!(left_in_bootloader(&written, &[written.clone()]));
+        // The same bootloader, renumbered onto another port.
         assert!(left_in_bootloader(
-            &id,
-            &[nrf_device("/dev/cu.usbmodem14203", 0x0029, Some("ABC"), true)]
+            &written,
+            &[nrf_device("/dev/cu.usbmodem14205", 0x0029, Some("BOOT1"), true)]
         ));
-        // The bootloader may enumerate with a different serial number.
-        assert!(left_in_bootloader(
-            &id,
-            &[nrf_device("/dev/cu.usbmodem14203", 0x0029, Some("BOOT"), true)]
-        ));
+        // Back in app mode on the same port: the image was accepted.
         assert!(!left_in_bootloader(
-            &id,
-            &[nrf_device("/dev/cu.usbmodem14203", 0x8029, Some("ABC"), false)]
+            &written,
+            &[nrf_device("/dev/cu.usbmodem14203", 0x8029, Some("APP1"), false)]
         ));
-        assert!(!left_in_bootloader(&id, &[]));
-        // Another board family in bootloader mode is not this device.
-        assert!(!left_in_bootloader(
-            &id,
-            &[nrf_device("/dev/cu.usbmodem99901", 0x002A, Some("XYZ"), true)]
-        ));
+        assert!(!left_in_bootloader(&written, &[]));
     }
 
-    /// The hard error a rejected image returns must still re-flash.
+    /// Another glove of the same family sitting in bootloader mode must not
+    /// fail a good flash.
     #[test]
-    fn left_in_bootloader_error_is_operation_retriable() {
-        let e = DfuError::BootloaderTimeout { timeout_ms: 30_000 };
-        assert!(e.is_operation_retriable());
-        assert!(e.to_string().to_lowercase().contains("bootloader"));
+    fn left_in_bootloader_ignores_another_same_family_bootloader() {
+        let written = nrf_device("/dev/cu.usbmodem14203", 0x0029, Some("BOOT1"), true);
+        assert!(!left_in_bootloader(
+            &written,
+            &[
+                nrf_device("/dev/cu.usbmodem14203", 0x8029, Some("APP1"), false),
+                nrf_device("/dev/cu.usbmodem14301", 0x0029, Some("BOOT2"), true),
+            ]
+        ));
+        // Without serial numbers only the port identifies it.
+        let unnamed = nrf_device("/dev/cu.usbmodem14203", 0x0029, None, true);
+        assert!(!left_in_bootloader(
+            &unnamed,
+            &[nrf_device("/dev/cu.usbmodem14301", 0x0029, None, true)]
+        ));
     }
 
     #[test]

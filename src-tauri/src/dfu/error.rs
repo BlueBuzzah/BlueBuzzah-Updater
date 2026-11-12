@@ -52,6 +52,11 @@ pub enum DfuError {
     #[error("Bootloader not found within {timeout_ms}ms")]
     BootloaderTimeout { timeout_ms: u64 },
 
+    /// The device was still in bootloader mode after the write: the bootloader
+    /// didn't accept the image. The whole flash is retried.
+    #[error("Device stayed in bootloader mode: the firmware wasn't accepted")]
+    FirmwareRejected,
+
     /// Maximum retry attempts exceeded.
     #[error("Max retries exceeded for {operation}")]
     MaxRetriesExceeded { operation: String },
@@ -192,6 +197,7 @@ impl DfuError {
     pub fn is_operation_retriable(&self) -> bool {
         self.is_retriable()
             || matches!(self, DfuError::BootloaderTimeout { .. })
+            || matches!(self, DfuError::FirmwareRejected)
             || matches!(self, DfuError::DeviceDisconnected { .. })
             || matches!(self, DfuError::NoDeviceFound)
     }
@@ -210,6 +216,7 @@ impl DfuError {
             DfuError::BootloaderTimeout { .. } => "DFU-022",
             DfuError::MaxRetriesExceeded { .. } => "DFU-023",
             DfuError::DfuResponse { .. } => "DFU-030",
+            DfuError::FirmwareRejected => "DFU-031",
             DfuError::MissingFile { .. } => "DFU-040",
             DfuError::InvalidManifest { .. } => "DFU-041",
             DfuError::NoDeviceFound => "DFU-050",
@@ -270,5 +277,6 @@ mod tests {
     fn test_error_codes() {
         assert_eq!(DfuError::Timeout.error_code(), "DFU-021");
         assert_eq!(DfuError::NoDeviceFound.error_code(), "DFU-050");
+        assert_eq!(DfuError::FirmwareRejected.error_code(), "DFU-031");
     }
 }
