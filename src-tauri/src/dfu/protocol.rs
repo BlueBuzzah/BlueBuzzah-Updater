@@ -1060,11 +1060,13 @@ fn send_role_and_await_ack<T: DfuTransport, L: Fn(&str), W: Fn(&str), C: Fn() ->
     }
     let mut warnings = drain.warnings;
 
-    for w in wait_for_serial_ready(transport, log, is_cancelled)? {
-        if !warnings.contains(&w) {
-            warn(&w);
-            warnings.push(w);
-        }
+    let before = warnings.len();
+    extend_unique(
+        &mut warnings,
+        wait_for_serial_ready(transport, log, is_cancelled)?,
+    );
+    for w in &warnings[before..] {
+        warn(w);
     }
 
     // Clear any remaining input
@@ -1624,6 +1626,7 @@ pub fn configure_device_with_settings<L: Fn(&str) + Clone>(
 ) -> DfuResult<Vec<String>> {
     let mut last_error: Option<DfuError> = None;
     let mut current_port = port_name.to_string();
+    let mut warnings = Vec::new();
 
     for attempt in 0..=MAX_CONFIG_RETRIES {
         // On retry, wait for device to stabilize and update port
@@ -1646,30 +1649,45 @@ pub fn configure_device_with_settings<L: Fn(&str) + Clone>(
             pre_profile_commands,
             identifier,
             log.clone(),
+            &mut warnings,
         ) {
-            Ok(warnings) => return Ok(warnings),
+            Ok(()) => return Ok(warnings),
             Err(e) if e.is_retriable() && attempt < MAX_CONFIG_RETRIES => {
                 log(&format!("Profile configuration failed: {}, will retry", e));
                 last_error = Some(e);
             }
-            Err(e) => return Err(e),
+            Err(e) => {
+                log_device_warnings(&log, &warnings);
+                return Err(e);
+            }
         }
     }
 
     // All retries exhausted
+    log_device_warnings(&log, &warnings);
     Err(last_error.unwrap_or(DfuError::ProfileConfigFailed {
         reason: "Max retries exceeded".to_string(),
     }))
 }
 
+/// Log hardware-fault lines read before a Configure failure, so the failure
+/// doesn't hide them.
+fn log_device_warnings<L: Fn(&str)>(log: &L, warnings: &[String]) {
+    for w in warnings {
+        log(&format!("Device reported: {}", w));
+    }
+}
+
 /// Inner implementation of settings/profile configuration without retry logic.
+/// Adds the fault lines it reads to `warnings`, so a failure keeps them.
 fn configure_device_with_settings_inner<L: Fn(&str)>(
     port_name: &str,
     profile: &str,
     pre_profile_commands: &[String],
     identifier: &DeviceIdentifier,
     log: L,
-) -> DfuResult<Vec<String>> {
+    warnings: &mut Vec<String>,
+) -> DfuResult<()> {
     let profile_command = match profile.to_uppercase().as_str() {
         "REGULAR" => PROFILE_REGULAR_COMMAND,
         "NOISY" => PROFILE_NOISY_COMMAND,
@@ -1698,9 +1716,9 @@ fn configure_device_with_settings_inner<L: Fn(&str)>(
     log("Draining boot output...");
     let drain = drain_boot_output(&mut transport)?;
     log_boot_drain(&log, drain.found_ready);
-    let mut warnings = drain.warnings;
+    extend_unique(warnings, drain.warnings);
     extend_unique(
-        &mut warnings,
+        warnings,
         wait_for_serial_ready(&mut transport, &log, &|| false)?,
     );
 
@@ -1748,7 +1766,7 @@ fn configure_device_with_settings_inner<L: Fn(&str)>(
                 wait_for_application_flexible(identifier, get_reboot_timeout())?;
                 log("Device reappeared after reboot");
 
-                return Ok(warnings);
+                return Ok(());
             }
 
             if response_str.contains("[ERROR]") {
@@ -1809,20 +1827,27 @@ pub fn configure_custom_profile<L: Fn(&str) + Clone>(
     log: L,
 ) -> DfuResult<ProfileConfigOutcome> {
     let mut warnings = Vec::new();
-    let mut outcome = configure_custom_profile_inner(
+    match configure_custom_profile_steps(
         port_name,
         params,
         pre_profile_commands,
         identifier,
-        log,
+        log.clone(),
         &mut warnings,
-    )?;
-    outcome.warnings = warnings;
-    Ok(outcome)
+    ) {
+        Ok(mut outcome) => {
+            outcome.warnings = warnings;
+            Ok(outcome)
+        }
+        Err(e) => {
+            log_device_warnings(&log, &warnings);
+            Err(e)
+        }
+    }
 }
 
 /// `configure_custom_profile`'s steps, adding fault lines to `warnings` as read.
-fn configure_custom_profile_inner<L: Fn(&str) + Clone>(
+fn configure_custom_profile_steps<L: Fn(&str) + Clone>(
     port_name: &str,
     params: &CustomProfileParams,
     pre_profile_commands: &[String],
@@ -2249,6 +2274,31 @@ mod tests {
         assert!(start.elapsed() < Duration::from_millis(400));
     }
 
+    /// A warning still queued when the stop lands is forwarded, not lost.
+    #[test]
+    fn cancel_forwards_a_warning_sent_before_it() {
+        let (warned_tx, warned_rx) = mpsc::channel::<()>();
+        let warned = std::cell::RefCell::new(Vec::<String>::new());
+        let err = run_with_deadline(
+            move |log, warn, _stop| {
+                log("start");
+                warn("[ERROR] boot fault");
+                let _ = warned_tx.send(());
+                std::thread::sleep(Duration::from_secs(30));
+                Ok(())
+            },
+            |_| {},
+            |w| warned.borrow_mut().push(w.into()),
+            // The first check (after "start" is read) waits for the warning, so
+            // it is still queued when the stop is seen.
+            || warned_rx.recv_timeout(Duration::from_secs(5)).is_ok(),
+            Duration::from_secs(60),
+        )
+        .unwrap_err();
+        assert!(matches!(err, DfuError::Cancelled), "got {err:?}");
+        assert_eq!(*warned.borrow(), vec!["[ERROR] boot fault".to_string()]);
+    }
+
     #[test]
     fn role_config_cancelled_before_touching_port() {
         let id = DeviceIdentifier::Serial {
@@ -2285,6 +2335,8 @@ mod tests {
             .contains("failed to configure device role"));
     }
 
+    // Older firmware's motor-check failure line; current firmware prints
+    // `[WARN] Motor check:` instead.
     const MOTOR_ERROR: &str =
         "[ERROR] Missing/failed motor(s): 2/5 detected (minimum 4) - check JST connections";
 
@@ -2430,7 +2482,66 @@ mod tests {
         .unwrap();
         assert_eq!(warnings, vec![MOTOR_ERROR.to_string()]);
         assert_eq!(*warned.borrow(), vec![MOTOR_ERROR.to_string()]);
-        assert_eq!(transport.written().last().unwrap(), ROLE_PRIMARY_COMMAND);
+        assert_role_sent_after_clear(&transport);
+    }
+
+    /// GET_ROLE once, then SET_ROLE right after the input is cleared.
+    fn assert_role_sent_after_clear(transport: &ScriptedTransport) {
+        assert_eq!(transport.written(), ["GET_ROLE\n", ROLE_PRIMARY_COMMAND]);
+        let ops = transport.ops();
+        let last_write = ops.iter().rposition(|op| *op == "write").unwrap();
+        assert_eq!(ops[last_write - 1], "clear", "{ops:?}");
+    }
+
+    /// The real path: the fault line is printed before `[READY]`, so the boot
+    /// drain finds it.
+    #[test]
+    fn role_ack_succeeds_with_boot_fault_before_ready() {
+        let line = format!("{}\n", MOTOR_ERROR);
+        let mut transport = ScriptedTransport::new(vec![
+            "[BOOT] v3\n",
+            &line,
+            "[READY]\n",
+            "[CONFIG] Current role: PRIMARY\n",
+            "[CONFIG] Role set to PRIMARY - restarting...\n",
+        ]);
+        let warned = std::cell::RefCell::new(Vec::<String>::new());
+        let warnings = send_role_and_await_ack(
+            &mut transport,
+            ROLE_PRIMARY_COMMAND,
+            &|_: &str| {},
+            &|w: &str| warned.borrow_mut().push(w.into()),
+            &|| false,
+        )
+        .unwrap();
+        assert_eq!(warnings, vec![MOTOR_ERROR.to_string()]);
+        assert_eq!(*warned.borrow(), vec![MOTOR_ERROR.to_string()]);
+        assert_role_sent_after_clear(&transport);
+    }
+
+    /// A line read by both the drain and the readiness probe is warned once.
+    #[test]
+    fn role_ack_warns_once_for_a_line_seen_twice() {
+        let line = format!("{}\n", MOTOR_ERROR);
+        let mut transport = ScriptedTransport::new(vec![
+            &line,
+            "[READY]\n",
+            &line,
+            "[CONFIG] Current role: PRIMARY\n",
+            "[CONFIG] Role set to PRIMARY - restarting...\n",
+        ]);
+        let warned = std::cell::RefCell::new(Vec::<String>::new());
+        let warnings = send_role_and_await_ack(
+            &mut transport,
+            ROLE_PRIMARY_COMMAND,
+            &|_: &str| {},
+            &|w: &str| warned.borrow_mut().push(w.into()),
+            &|| false,
+        )
+        .unwrap();
+        assert_eq!(warnings, vec![MOTOR_ERROR.to_string()]);
+        assert_eq!(*warned.borrow(), vec![MOTOR_ERROR.to_string()]);
+        assert_role_sent_after_clear(&transport);
     }
 
     #[test]
@@ -2448,10 +2559,11 @@ mod tests {
             &|| false,
         )
         .unwrap_err();
-        assert!(
-            matches!(err, DfuError::RoleConfigFailed { .. }),
-            "got {err:?}"
-        );
+        let DfuError::RoleConfigFailed { reason } = err else {
+            panic!("got {err:?}");
+        };
+        assert!(reason.contains("Invalid role"), "{reason}");
+        assert!(!reason.contains("Timeout"), "{reason}");
     }
 
     #[test]

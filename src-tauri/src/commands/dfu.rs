@@ -990,6 +990,16 @@ mod tests {
     }
 
     #[test]
+    fn test_dfu_progress_event_from_warning() {
+        let event = DfuProgressEvent::from(DfuStage::Warning {
+            message: "w".to_string(),
+        });
+
+        assert_eq!(event.stage, "warning");
+        assert_eq!(event.message, "w");
+    }
+
+    #[test]
     fn test_dfu_guard_resets_on_drop() {
         // Ensure clean state
         DFU_IN_PROGRESS.store(false, Ordering::SeqCst);
